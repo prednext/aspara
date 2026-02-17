@@ -1,0 +1,78 @@
+<div id="projects-root" data-search-mode="{{project_search_mode}}">
+  <!-- Page Header -->
+  <div class="mb-10">
+    <h1 class="text-3xl font-bold text-text-primary mb-2 tracking-tight">Projects</h1>
+    <p class="text-text-secondary">All your tracked projects</p>
+  </div>
+
+  {{#has_projects}}
+  <div class="mb-4 flex items-center gap-3 text-sm">
+    <div class="flex-1">
+      <input type="text" id="projectSearchInput" placeholder="Search by project name or tags..." class="w-full px-0 py-2 border-0 border-b border-base-border focus:border-accent focus:outline-none text-sm transition-colors">
+    </div>
+    <button id="projectSearchButton" class="px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg text-sm transition-colors cursor-pointer">
+      Search
+    </button>
+  </div>
+
+  <!-- Sort Controls -->
+  <div class="mb-6 flex items-center gap-3 text-sm">
+    <span class="text-text-secondary">Sort by:</span>
+    <button data-sort="name" class="flex items-center gap-1.5 px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+      <span>Name</span>
+      <span class="sort-indicator text-text-muted">↕</span>
+    </button>
+    <button data-sort="runCount" class="flex items-center gap-1.5 px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+      <span>Run Count</span>
+      <span class="sort-indicator text-text-muted">↕</span>
+    </button>
+    <button data-sort="lastUpdate" class="flex items-center gap-1.5 px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+      <span>Last Update</span>
+      <span class="sort-indicator text-text-muted">↕</span>
+    </button>
+  </div>
+
+  <div id="projects-container" class="space-y-3">
+    {{#projects}}
+    <div class="bg-base-surface border border-base-border p-6 cursor-pointer transition-all project-card card-interactive"
+         data-project="{{name}}"
+         data-run-count="{{run_count}}"
+         data-last-update="{{last_update}}"
+         data-tags="{{#tags}}{{.}} {{/tags}}"
+         tabindex="0"
+         role="link"
+         aria-label="Open {{name}}">
+      <div class="flex items-center justify-between">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <h2 class="text-xl font-bold text-text-primary tracking-tight mb-0">{{name}}</h2>
+            <div id="project-tags-{{name}}" class="flex items-center gap-1.5 flex-wrap" data-project-name="{{name}}">
+              {{#tags}}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-base-bg text-xs text-text-muted border border-base-border">{{.}}</span>
+              {{/tags}}
+            </div>
+          </div>
+          <p class="text-sm text-text-secondary mb-2">{{run_count}} runs</p>
+          <div class="text-xs text-text-muted font-mono">
+            Last updated: {{formatted_last_update}}
+          </div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button class="delete-project-btn p-2 text-text-muted border border-base-border rounded-button hover:bg-base-bg hover:text-status-error transition-colors" data-project="{{name}}" title="Delete project" commandfor="delete-confirm-dialog" command="show-modal">
+            <svg class="w-4 h-4"><use href="#icon-delete"></use></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    {{/projects}}
+  </div>
+  {{/has_projects}}
+
+  {{^has_projects}}
+  <div class="bg-base-surface border border-base-border p-6">
+    <p class="text-text-muted">No projects found. Get started by creating a new project.</p>
+  </div>
+  {{/has_projects}}
+</div>
+
+<script type="module" src="/static/dist/projects-list.js"></script>

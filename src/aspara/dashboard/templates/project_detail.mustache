@@ -1,0 +1,182 @@
+<div>
+  <!-- Page Header -->
+  <div class="mb-10">
+    <div class="flex justify-between items-center">
+      <div>
+        <h1 class="text-3xl font-bold text-text-primary mb-2 tracking-tight">{{project}}</h1>
+        <p class="text-text-secondary">
+          {{run_count}} runs<br>
+          Last updated {{formatted_project_last_update}}
+        </p>
+      </div>
+      {{#has_runs}}
+      <a href="/projects/{{project}}/runs" class="px-4 py-3 bg-action text-white text-sm font-medium border border-action rounded-full hover:bg-action-hover transition-colors">
+        View All Runs →
+      </a>
+      {{/has_runs}}
+    </div>
+  </div>
+
+  <!-- Project Note Section -->
+  <div class="mb-8 bg-base-surface border border-base-border p-6">
+    <div class="flex justify-between items-start mb-4">
+      <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wider">Project Note</h2>
+      <div id="project-note-edit-btn"></div>
+    </div>
+    <div id="project-note" class="text-sm text-text-secondary"
+         data-api-endpoint="/api/projects/{{project}}/metadata"
+         data-edit-btn-id="project-note-edit-btn"></div>
+  </div>
+
+  {{#has_runs}}
+  <div class="flex gap-8">
+    <!-- Left Sidebar: Run Selection -->
+    <div id="runs-sidebar" class="w-80 flex-shrink-0" data-collapsed="false">
+      <div class="bg-base-surface border border-base-border p-6">
+        <!-- Sidebar Header with Toggle -->
+        <div class="flex items-center justify-between mb-6">
+          <h2 id="sidebar-title" class="text-sm font-semibold text-text-primary uppercase tracking-wider">Runs</h2>
+          <button id="toggleSidebar" class="p-1 text-text-muted hover:text-text-primary transition-colors" title="Toggle sidebar">
+            <svg id="sidebar-collapse-icon" class="w-4 h-4"><use href="#icon-chevron-left"></use></svg>
+            <svg id="sidebar-expand-icon" class="w-4 h-4 hidden"><use href="#icon-chevron-right"></use></svg>
+          </button>
+        </div>
+
+        <!-- Collapsed Sidebar Content (shown when collapsed) -->
+        <div id="sidebar-collapsed-content" class="hidden">
+          <div class="text-center">
+            <div class="text-lg font-semibold text-text-primary" id="collapsed-selected-count">0</div>
+            <div class="text-xs text-text-muted">runs</div>
+          </div>
+        </div>
+
+        <!-- Expanded Sidebar Content (shown when expanded) -->
+        <div id="sidebar-expanded-content">
+
+        <!-- Search Input -->
+        <div class="mb-6">
+          <input type="text" id="runFilter" placeholder="Filter runs (regex supported)"
+                 title="Examples: ^test (starts with), _v[0-9]+$ (ends with), train|eval (or)"
+                 class="w-full px-0 py-2 border-0 border-b border-base-border focus:border-accent focus:outline-none text-sm transition-colors">
+        </div>
+
+        <!-- Sort Controls -->
+        <div class="mb-4 flex items-center gap-2 text-xs">
+          <span class="text-text-secondary">Sort:</span>
+          <button data-sort-runs="name" class="px-2 py-1 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+            <span>Name</span>
+            <span class="sort-runs-indicator text-text-muted">↕</span>
+          </button>
+          <button data-sort-runs="lastUpdate" class="px-2 py-1 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+            <span>Date</span>
+            <span class="sort-runs-indicator text-text-muted">↕</span>
+          </button>
+        </div>
+
+        <!-- Run List -->
+        <div id="runs-list-container" class="mb-6">
+          {{#runs}}
+          <div class="run-item flex items-center py-3 bg-base-surface border-b border-base-border"
+               data-run-name="{{name}}"
+               data-run-last-update="{{last_update}}">
+            <label class="flex items-center flex-1 min-w-0 cursor-pointer">
+              <input type="checkbox" class="run-checkbox mr-3 w-4 h-4 accent-accent" value="{{name}}" data-run-name="{{name}}" checked>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-sm text-text-primary truncate flex items-center gap-1">
+                  <span data-run-status-icon="{{name}}" data-status="{{status}}" class="inline-flex">
+                    <svg class="w-4 h-4 flex-shrink-0"><use href="#status-icon-{{status}}"></use></svg>
+                  </span>
+                  <svg class="w-4 h-4 flex-shrink-0 run-color-legend" data-run-legend="{{name}}" style="display: none;">
+                    <line x1="0" y1="8" x2="16" y2="8" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  <span class="truncate">{{name}}</span>
+                </div>
+                <div class="text-xs text-text-muted font-mono">{{formatted_last_update}}</div>
+              </div>
+            </label>
+            <a href="/projects/{{project}}/runs/{{name}}" class="ml-2 text-text-muted hover:text-accent text-sm transition-colors" style="text-decoration: none;">→</a>
+          </div>
+          {{/runs}}
+        </div>
+
+        <!-- Selected Count -->
+        <div>
+          <div class="text-xs text-text-secondary font-mono"><span id="selectedCount">{{run_count}}</span> runs selected</div>
+        </div>
+        </div><!-- /sidebar-expanded-content -->
+      </div>
+    </div>
+
+    <!-- Right Content: Metrics Charts -->
+    <div class="flex-1 min-w-0">
+      <!-- Chart Controls -->
+      <div id="chartControls" class="hidden mb-4 flex items-center gap-6">
+        <div class="flex items-center gap-2">
+          {{> _chart_size_controls}}
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center cursor-pointer">
+            <input type="checkbox" id="syncZoom" class="mr-2 accent-accent">
+            <span class="text-sm text-text-secondary">Sync Zoom</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="metricsSection">
+        <!-- Loading State -->
+        <div id="loadingState" class="bg-base-surface border border-base-border p-6 text-center">
+          <svg class="animate-spin h-8 w-8 text-text-primary mx-auto" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <p class="text-text-secondary mt-2">Loading metrics...</p>
+        </div>
+
+        <!-- Charts Container -->
+        <div id="chartsContainer" class="hidden space-y-8">
+          <!-- Charts will be dynamically inserted here -->
+        </div>
+
+        <!-- No Data State -->
+        <div id="noDataState" class="hidden bg-base-surface border border-base-border p-6 text-center">
+          <svg class="w-12 h-12 text-text-muted mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 00-2-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+          </svg>
+          <p class="text-text-secondary">No metrics data found for the selected runs.</p>
+        </div>
+
+        <!-- Initial State -->
+        <div id="initialState" class="hidden bg-base-surface border border-base-border p-6 text-center">
+          <svg class="w-12 h-12 text-text-muted mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+          </svg>
+          <p class="text-text-secondary">Select runs to view charts.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  {{/has_runs}}
+
+  {{^has_runs}}
+  <div class="bg-base-surface border border-base-border p-6">
+    <p class="text-text-muted">No runs found. Create some runs first to view metrics.</p>
+  </div>
+  {{/has_runs}}
+</div>
+
+<!-- Ensure run data is cleared -->
+<script>
+  window.runData = null;
+  window.projectData = {
+    project: "{{project}}",
+    runCount: {{run_count}}
+  };
+
+  // Initialize project note editor when DOM is loaded
+  document.addEventListener('DOMContentLoaded', function() {
+    initNoteEditorFromDOM('project-note');
+  });
+</script>
+
+<!-- Include the project detail JavaScript -->
+<script type="module" src="/static/dist/pages/project-detail.js"></script>

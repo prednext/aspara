@@ -1,0 +1,190 @@
+/* Aspara TUI Styles */
+
+/* Spacing scale */
+$space-sm: 1;
+$space-md: 2;
+
+/* Global */
+Screen {
+    background: $surface;
+}
+
+/* Main container */
+.main-container {
+    width: 100%;
+    height: 100%;
+    padding: $space-sm $space-md;
+    min-width: 60;
+}
+
+/* Screen title */
+.screen-title {
+    width: 100%;
+    height: 1;
+    text-style: bold;
+    margin-bottom: $space-sm;
+}
+
+/* Section title */
+.section-title {
+    text-style: bold underline;
+    margin-bottom: $space-sm;
+}
+
+/* Search input */
+#search-input {
+    width: 100%;
+    margin-bottom: $space-sm;
+}
+
+/* Table container */
+.table-container {
+    width: 100%;
+    height: 1fr;
+    border: solid $primary;
+}
+
+/* DataTable styling */
+DataTable {
+    width: 100%;
+    height: 100%;
+}
+
+DataTable > .datatable--header {
+    text-style: bold;
+    background: $primary;
+    color: $background;
+}
+
+DataTable > .datatable--cursor {
+    background: $accent;
+}
+
+/* Status legend */
+.status-legend {
+    width: 100%;
+    height: 1;
+    margin-top: $space-sm;
+    text-align: center;
+    color: $text-muted;
+}
+
+/* Info panels (2-column layout) */
+.info-row {
+    width: 100%;
+    height: auto;
+    max-height: 40%;
+    margin-bottom: $space-sm;
+}
+
+.info-panel {
+    width: 1fr;
+    height: 100%;
+    padding: $space-sm;
+    border: solid $primary;
+    margin: 0 $space-sm 0 0;
+}
+
+.info-panel:last-child {
+    margin-right: 0;
+}
+
+.info-content {
+    width: 100%;
+    height: auto;
+}
+
+/* Metrics container */
+.metrics-container {
+    width: 100%;
+    height: 1fr;
+    border: solid $primary;
+}
+
+/* Chart container */
+.chart-container {
+    width: 100%;
+    height: 1fr;
+    border: solid $primary;
+    padding: $space-sm;
+}
+
+#chart {
+    width: 100%;
+    height: 100%;
+}
+
+/* Current value display */
+.current-value {
+    width: 100%;
+    height: 1;
+    margin-top: $space-sm;
+    text-align: center;
+}
+
+/* Watch status */
+.watch-status {
+    width: 100%;
+    height: 1;
+    text-align: center;
+}
+
+/* Metrics scroll container */
+.metrics-scroll {
+    width: 100%;
+    height: 1fr;
+}
+
+/* Mini chart widget */
+MiniChartWidget {
+    height: 22;
+    min-width: 30;
+    border: solid $panel;
+    margin: $space-sm;
+}
+
+MiniChartWidget:focus {
+    border: solid $accent;
+}
+
+MiniChartWidget PlotextPlot {
+    width: 1fr;
+    height: 18;
+}
+
+/* Metrics grid widget */
+MetricsGridWidget {
+    width: 100%;
+    height: auto;
+}
+
+#metrics-rows {
+    width: 100%;
+    height: auto;
+}
+
+.metrics-row {
+    width: 100%;
+    height: auto;
+}
+
+.chart-cell {
+    width: 1fr;
+    height: 14;
+    border: solid $panel;
+    margin: 0 $space-sm $space-sm 0;
+}
+
+.chart-cell:focus {
+    border: solid $accent;
+}
+
+.chart-cell PlotextPlot {
+    width: 100%;
+    height: 12;
+}
+
+#metrics-grid-container {
+    width: 100%;
+    height: auto;
+}

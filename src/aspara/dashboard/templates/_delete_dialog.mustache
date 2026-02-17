@@ -1,0 +1,26 @@
+<dialog id="delete-confirm-dialog"
+        class="delete-dialog"
+        closedby="any"
+        aria-labelledby="delete-dialog-title">
+  <form method="dialog" class="p-6">
+    <div class="flex items-start gap-4">
+      <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-base-bg">
+        <svg class="w-6 h-6 text-status-error"><use href="#icon-exclamation-triangle"></use></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <h3 id="delete-dialog-title" class="text-lg font-semibold text-text-primary">Delete</h3>
+        <p id="delete-dialog-message" class="mt-2 text-sm text-text-secondary whitespace-pre-line"></p>
+      </div>
+    </div>
+    <div class="mt-6 flex justify-end gap-3">
+      <button type="submit" value="cancel"
+              class="px-4 py-2 text-sm font-medium text-text-primary bg-base-bg border border-base-border rounded-md hover:bg-base-surface-hover transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2">
+        Cancel
+      </button>
+      <button type="submit" value="confirm"
+              class="px-4 py-2 text-sm font-medium text-white bg-status-error hover:bg-red-700 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-status-error">
+        Delete
+      </button>
+    </div>
+  </form>
+</dialog>

@@ -1,0 +1,82 @@
+{
+  "icons": [
+    {
+      "name": "stop",
+      "style": "solid",
+      "id": "status-icon-wip",
+      "comment": "Work in progress status"
+    },
+    {
+      "name": "x-mark",
+      "style": "outline",
+      "id": "status-icon-failed",
+      "comment": "Failed status"
+    },
+    {
+      "name": "check",
+      "style": "outline",
+      "id": "status-icon-completed",
+      "comment": "Completed status"
+    },
+    {
+      "name": "pencil-square",
+      "style": "outline",
+      "id": "icon-edit",
+      "comment": "Edit/pencil icon for note editing"
+    },
+    {
+      "name": "arrow-uturn-left",
+      "style": "outline",
+      "id": "icon-reset-zoom",
+      "comment": "Reset zoom for chart controls"
+    },
+    {
+      "name": "arrows-pointing-out",
+      "style": "outline",
+      "id": "icon-fullscreen",
+      "comment": "Full screen/expand for chart controls"
+    },
+    {
+      "name": "arrow-down-tray",
+      "style": "outline",
+      "id": "icon-download",
+      "comment": "Download for chart controls"
+    },
+    {
+      "name": "trash",
+      "style": "outline",
+      "id": "icon-delete",
+      "comment": "Delete/trash icon for delete buttons"
+    },
+    {
+      "name": "chevron-left",
+      "style": "outline",
+      "id": "icon-chevron-left",
+      "comment": "Chevron left for sidebar collapse"
+    },
+    {
+      "name": "chevron-right",
+      "style": "outline",
+      "id": "icon-chevron-right",
+      "comment": "Chevron right for sidebar expand"
+    },
+    {
+      "name": "bars-3",
+      "style": "outline",
+      "id": "icon-menu",
+      "comment": "Hamburger menu icon for settings"
+    },
+    {
+      "name": "exclamation-triangle",
+      "style": "outline",
+      "id": "icon-exclamation-triangle",
+      "comment": "Warning/danger icon for confirm modal and maybe_failed status"
+    },
+    {
+      "name": "information-circle",
+      "style": "outline",
+      "id": "icon-information-circle",
+      "comment": "Info icon for confirm modal"
+    }
+  ]
+}

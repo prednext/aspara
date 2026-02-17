@@ -1,0 +1,48 @@
+<div class="min-h-screen bg-base-bg flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+  <div class="sm:mx-auto sm:w-full sm:max-w-md">
+    <div class="text-center">
+      <!-- Error Icon -->
+      <svg class="mx-auto h-20 w-20 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"></path>
+      </svg>
+
+      <!-- Error Code -->
+      <h1 class="mt-6 text-6xl font-bold text-text-primary tracking-tight">404</h1>
+
+      <!-- Error Message -->
+      <h2 class="mt-4 text-2xl font-semibold text-text-primary">{{error_title}}</h2>
+      <p class="mt-2 text-base text-text-secondary">{{error_message}}</p>
+
+      <!-- Suggestions -->
+      {{#has_suggestions}}
+      <div class="mt-6 bg-base-surface p-4 border border-base-border">
+        <h3 class="text-sm font-medium text-text-primary mb-2">Suggestions:</h3>
+        <ul class="text-sm text-text-secondary space-y-1 text-left">
+          {{#suggestions}}
+          <li class="flex items-start">
+            <span class="text-text-primary mr-2">•</span>
+            <span>{{{.}}}</span>
+          </li>
+          {{/suggestions}}
+        </ul>
+      </div>
+      {{/has_suggestions}}
+
+      <!-- Actions -->
+      <div class="mt-8 flex justify-center space-x-4">
+        <a href="/" class="inline-flex items-center px-4 py-2 bg-action text-white text-sm font-medium border border-action rounded-button hover:bg-action-hover transition-colors">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+          </svg>
+          Go Home
+        </a>
+        <button onclick="history.back()" class="inline-flex items-center px-4 py-2 bg-base-surface text-text-primary text-sm font-medium border border-base-border rounded-button hover:bg-base-bg transition-colors">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+          </svg>
+          Go Back
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

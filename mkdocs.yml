@@ -1,0 +1,88 @@
+site_name: Aspara User Manual
+site_description: Aspara, blazingly fast metrics tracker for machine learning experiments
+site_author: Aspara Development Group
+copyright: Copyright &copy; 2026 Aspara Development Group
+use_directory_urls: false
+
+theme:
+  name: material
+  language: en
+  logo: aspara-icon.png
+  favicon: aspara-icon.png
+  palette:
+    primary: indigo
+    accent: indigo
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+extra_css:
+  - aspara-theme.css
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - src
+          selection:
+            docstring_style: google
+          rendering:
+            show_source: true
+            show_if_no_docstring: false
+            show_root_heading: false
+            show_root_toc_entry: false
+            heading_level: 2
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: false
+            docstring_section_style: "spacy"
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - footnotes
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Overview: getting-started.md
+  - User Guide:
+    - Overview: user-guide/basics.md
+    - Core Concepts: user-guide/concepts.md
+    - Metadata and Notes: user-guide/metadata.md
+    - Visualizing Results in Dashboard: user-guide/dashboard-visualization.md
+    - Terminal UI: user-guide/terminal-ui.md
+    - Best Practices: user-guide/best-practices.md
+    - Troubleshooting: user-guide/troubleshooting.md
+  - Advanced:
+    - Configuration: advanced/configuration.md
+    - LocalRun vs RemoteRun: advanced/local-vs-remote.md
+    - Storage: advanced/storage.md
+    - Dashboard: advanced/dashboard.md
+    - Tracker API: advanced/tracker-api.md
+  - Examples:
+    - Overview: examples/index.md
+    - PyTorch: examples/pytorch_example.md
+    - TensorFlow / Keras: examples/tensorflow_example.md
+    - scikit-learn: examples/sklearn_example.md
+  - API Reference:
+    - Overview: api/index.md
+    - aspara: api/aspara.md
+    - Run: api/run.md
+    - Dashboard API: api/dashboard.md
+    - Tracker API: api/tracker.md
+  - Contributing: contributing.md

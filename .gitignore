@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environment
+.venv/
+
+# Node.js
+node_modules/
+
+# Build output
+src/aspara/dashboard/static/dist/
+
+# Test
+test-results/
+playwright-report/
+.coverage
+htmlcov/
+coverage/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Linter / Type checker cache
+.mypy_cache/
+.ruff_cache/
+
+# Environment variables
+.env
+.env.*
+
+# Database
+*.sqlite
+*.db
+
+# uv
+.python-version
+
+# MkDocs
+site/

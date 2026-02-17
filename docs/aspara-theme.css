@@ -1,0 +1,258 @@
+/* Aspara docs custom theme overrides for MkDocs Material */
+
+/* Import Inter to match dashboard typography */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
+:root {
+  /* Align Material primary/accent with Aspara palette */
+  --md-primary-fg-color: #2C2520; /* action / text primary */
+  --md-primary-fg-color--light: #6B5F55;
+  --md-primary-fg-color--dark: #1A1512;
+
+  --md-accent-fg-color: #CC785C; /* accent */
+  --md-accent-fg-color--transparent: rgba(204, 120, 92, 0.15);
+
+  /* Softer page background similar to dashboard */
+  --md-default-bg-color: #F5F3F0;
+  --md-default-fg-color: #2C2520;
+}
+
+/* Global typography */
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #F5F3F0;
+  color: #2C2520;
+  letter-spacing: -0.01em;
+}
+
+/* Main layout: light cards on warm background */
+.md-main {
+  background-color: #F5F3F0;
+}
+
+.md-main__inner {
+  padding-top: 1.5rem;
+  padding-bottom: 3rem;
+}
+
+.md-content {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* Header and tabs to match app chrome */
+.md-header,
+.md-tabs {
+  background-color: #FDFCFB;
+  color: #2C2520;
+  border-bottom: 1px solid #E6E3E0;
+}
+
+.md-header__button.md-logo svg {
+  border-radius: 0.375rem;
+}
+
+/* Navigation */
+.md-nav__list,
+.md-sidebar__scrollwrap {
+  background-color: #F5F3F0;
+}
+
+.md-sidebar--primary::before,
+.md-sidebar--primary::after {
+  display: none !important;
+}
+
+.md-sidebar--primary .md-sidebar__scrollwrap::before,
+.md-sidebar--primary .md-sidebar__scrollwrap::after {
+  display: none !important;
+}
+
+.md-sidebar--primary .md-sidebar__inner::before,
+.md-sidebar--primary .md-sidebar__inner::after {
+  display: none !important;
+}
+
+.md-sidebar--primary nav::before,
+.md-sidebar--primary nav::after {
+  display: none !important;
+}
+
+.md-nav--primary::before,
+.md-nav--primary::after {
+  display: none !important;
+}
+
+.md-sidebar--primary .md-nav__list::before,
+.md-sidebar--primary .md-nav__list::after {
+  display: none !important;
+}
+
+.md-sidebar--primary ul::before,
+.md-sidebar--primary ul::after {
+  display: none !important;
+}
+
+.md-sidebar--primary,
+.md-sidebar--primary .md-sidebar__scrollwrap,
+.md-sidebar--primary .md-sidebar__inner,
+.md-sidebar--primary nav,
+.md-sidebar--primary .md-nav__list,
+.md-sidebar--primary ul {
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+}
+
+.md-nav__item .md-nav__link--active,
+.md-nav__link:focus,
+.md-nav__link:hover {
+  color: #CC785C;
+}
+
+/* Links */
+a {
+  color: #CC785C;
+}
+
+a:hover {
+  color: #B5654A;
+}
+
+/* Code blocks */
+.md-typeset code {
+  font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.md-typeset pre > code {
+  background-color: #FDFCFB;
+  color: #2C2520;
+  border-radius: 0.5rem;
+  border: 1px solid #E6E3E0;
+}
+
+/* Admonitions and callouts */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 0.5rem;
+  border: 1px solid #E6E3E0;
+}
+
+/* Buttons (e.g. search, pagination) */
+.md-button,
+.md-typeset .md-button {
+  border-radius: 0.5rem;
+  background-color: #2C2520;
+}
+
+.md-button--primary,
+.md-typeset .md-button--primary {
+  background-color: #2C2520;
+}
+
+.md-button--primary:hover,
+.md-typeset .md-button--primary:hover {
+  background-color: #1A1512;
+}
+
+/* Table of contents (right sidebar) */
+.md-nav--secondary .md-nav__title {
+  background: none;
+  background-color: #F5F3F0;
+  box-shadow: none;
+}
+
+.md-nav--secondary .md-nav__list {
+  background: transparent;
+}
+
+/* Primary navigation drawer header (mobile left menu) */
+.md-nav--primary .md-nav__title {
+  background: none;
+  background-color: #F5F3F0;
+  color: #2C2520;
+  box-shadow: none;
+}
+
+/* Fallback: ensure any nav > label and its link in primary drawer lose blue background */
+.md-nav--primary > label,
+.md-nav--primary > label > a {
+  background: none !important;
+  background-color: #F5F3F0 !important;
+  color: #2C2520;
+}
+
+/* Ensure site title text (e.g. "Aspara") in drawer is dark, not white */
+.md-nav--primary .md-nav__title,
+.md-nav--primary .md-nav__title a,
+.md-nav--primary .md-nav__title span {
+  color: #2C2520 !important;
+}
+
+/* Search box */
+.md-search__form {
+  background-color: #E6E3E0;
+  border-radius: 999px;
+  border: 1px solid #E6E3E0;
+  box-shadow: none;
+}
+
+.md-search__input {
+  background-color: transparent;
+  color: #2C2520;
+}
+
+.md-search__input::placeholder {
+  color: #9B8F85;
+}
+
+.md-search__form:hover,
+.md-search__form:focus-within {
+  background-color: #F5F3F0;
+  border-color: #CC785C;
+}
+
+/* Left navigation accordion active state */
+.md-nav__item--active > .md-nav__link,
+.md-nav__link--active,
+.md-nav__item .md-nav__link--active,
+.md-nav__item--active > .md-nav__link[data-md-state="active"] {
+  background: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  color: #2C2520 !important;
+  position: relative;
+}
+
+.md-nav__item--active > .md-nav__link:hover,
+.md-nav__link--active:hover,
+.md-nav__item .md-nav__link--active:hover {
+  background: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  color: #2C2520 !important;
+}
+
+.md-nav__item--active > a.md-nav__link,
+a.md-nav__link--active,
+.md-nav__item a.md-nav__link--active,
+.md-nav__item--active > a.md-nav__link[data-md-state="active"] {
+  position: relative;
+  overflow: visible;
+}
+
+.md-nav__item--active > a.md-nav__link::before,
+a.md-nav__link--active::before,
+.md-nav__item a.md-nav__link--active::before,
+.md-nav__item--active > a.md-nav__link[data-md-state="active"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background-color: #CC785C;
+  transform: translateX(calc(-100% - 0.25em));
+  pointer-events: none;
+}

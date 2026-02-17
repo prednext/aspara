@@ -1,0 +1,46 @@
+{
+  "name": "aspara",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "test:ci": "vitest run --coverage",
+    "lint": "biome lint",
+    "format": "biome format --write",
+    "check": "biome check --write",
+    "build:icons": "node scripts/build-icons.js",
+    "build:js": "vite build",
+    "build:css": "tailwindcss -i ./src/aspara/dashboard/static/css/input.css -o ./src/aspara/dashboard/static/dist/css/styles.css --minify",
+    "watch:css": "tailwindcss -i ./src/aspara/dashboard/static/css/input.css -o ./src/aspara/dashboard/static/dist/css/styles.css --watch",
+    "build": "pnpm run build:icons && pnpm run build:js && pnpm run build:css"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.6.3",
+  "dependencies": {
+    "@jcubic/tagger": "^0.6.2",
+    "@msgpack/msgpack": "^3.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.53.0",
+    "@swc/core": "^1.8.0",
+    "@tailwindcss/cli": "^4.1.18",
+    "@testing-library/dom": "^10.4.0",
+    "@vitest/coverage-v8": "3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "canvas": "npm:@napi-rs/canvas@^0.1.71",
+    "happy-dom": "^18.0.1",
+    "heroicons": "^2.2.0",
+    "jsdom": "^26.1.0",
+    "tailwindcss": "^4.1.18",
+    "vite": "^6.0.0",
+    "vitest": "^3.2.4"
+  }
+}

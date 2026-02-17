@@ -1,0 +1,105 @@
+<div>
+  <!-- Page Header -->
+  <div class="mb-10">
+    <div>
+      <h1 class="text-3xl font-bold text-text-primary mb-2 tracking-tight">Runs</h1>
+      <p class="text-text-secondary">Project: <a href="/projects/{{project}}" class="text-accent hover:underline">{{project}}</a></p>
+    </div>
+  </div>
+
+  {{#has_runs}}
+  <!-- Sort Controls -->
+  <div class="mb-6 flex items-center gap-3 text-sm">
+    <span class="text-text-secondary">Sort by:</span>
+    <button data-sort="name" class="flex items-center gap-1.5 px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+      <span>Name</span>
+      <span class="sort-indicator text-text-muted">↕</span>
+    </button>
+    <button data-sort="paramCount" class="flex items-center gap-1.5 px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+      <span>Params</span>
+      <span class="sort-indicator text-text-muted">↕</span>
+    </button>
+    <button data-sort="lastUpdate" class="flex items-center gap-1.5 px-3 py-1.5 border border-base-border bg-base-surface rounded hover:bg-base-bg transition-colors cursor-pointer">
+      <span>Last Update</span>
+      <span class="sort-indicator text-text-muted">↕</span>
+    </button>
+  </div>
+
+  <div id="runs-container" class="space-y-2">
+    {{#runs}}
+    <div class="bg-base-surface border border-base-border p-4 cursor-pointer transition-all {{#is_corrupted}}border-status-error bg-red-50{{/is_corrupted}} run-card card-interactive"
+         data-run="{{name}}"
+         data-project="{{project}}"
+         data-param-count="{{param_count}}"
+         data-last-update="{{last_update}}"
+         tabindex="0"
+         role="link"
+         aria-label="Open {{name}}">
+      <!-- First row: Status icon + Run name | Date + Delete button -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2 flex-1 min-w-0">
+          <!-- Status icon only -->
+          {{#is_corrupted}}
+          <svg class="w-4 h-4 flex-shrink-0 text-status-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+          {{/is_corrupted}}
+
+          {{^is_corrupted}}
+          <span data-run-status-icon="{{name}}" data-status="{{status}}" class="inline-flex">
+            <svg class="w-4 h-4 flex-shrink-0"><use href="#status-icon-{{status}}"></use></svg>
+          </span>
+          {{/is_corrupted}}
+
+          <!-- Run name -->
+          <div class="font-semibold text-base {{#is_corrupted}}text-status-error{{/is_corrupted}}{{^is_corrupted}}text-text-primary{{/is_corrupted}} truncate">
+            {{name}}
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 ml-4 flex-shrink-0">
+          <!-- Date -->
+          <div class="text-sm {{#is_corrupted}}text-status-error{{/is_corrupted}}{{^is_corrupted}}text-text-muted{{/is_corrupted}} font-mono whitespace-nowrap">
+            {{formatted_last_update}}
+          </div>
+
+          <!-- Delete button -->
+          <button class="delete-run-btn p-2 text-text-muted border border-base-border rounded-button hover:bg-base-bg hover:text-status-error transition-colors" data-project="{{project}}" data-run="{{name}}" title="Delete run" commandfor="delete-confirm-dialog" command="show-modal">
+            <svg class="w-4 h-4"><use href="#icon-delete"></use></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Second row: Tags -->
+      <div id="run-tags-{{project}}-{{name}}" class="flex flex-wrap gap-1.5 ml-6" data-project-name="{{project}}" data-run-name="{{name}}">
+        {{#has_tags}}
+        {{#tags}}
+        <span class="px-2 py-0.5 text-xs bg-base-bg text-text-secondary border border-base-border rounded">{{.}}</span>
+        {{/tags}}
+        {{/has_tags}}
+      </div>
+    </div>
+    {{/runs}}
+  </div>
+  {{/has_runs}}
+
+  {{^has_runs}}
+  <div class="bg-base-surface border border-base-border p-6">
+    <p class="text-text-muted">No runs found. Get started by creating a new run.</p>
+  </div>
+  {{/has_runs}}
+</div>
+
+{{#has_runs}}
+<script type="module" src="/static/dist/runs-list.js"></script>
+<script src="/static/js/runs-list/sse.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const runsListSSE = new RunsListSSE('{{project}}');
+    
+    window.addEventListener('beforeunload', function() {
+      runsListSSE.close();
+    });
+  });
+</script>
+{{/has_runs}}

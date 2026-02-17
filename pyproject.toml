@@ -1,0 +1,122 @@
+[build-system]
+requires = ["uv_build>=0.9.26"]
+build-backend = "uv_build"
+
+[project]
+name = "aspara"
+version = "0.1.0"
+description = "Blazingly fast metrics tracker for machine learning experiments"
+authors = [
+    {name = "TOKUNAGA Hiroyuki"}
+]
+license = "Apache-2.0"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "polars>=1.37.1",
+]
+
+[project.optional-dependencies]
+tracker = [
+    "uvicorn>=0.27.0",
+    "fastapi>=0.115.12",
+    "python-multipart>=0.0.21",
+]
+
+dashboard = [
+    "uvicorn>=0.27.0",
+    "sse-starlette>=1.8.0",
+    "aiofiles>=23.2.0",
+    "watchfiles>=1.1.1",
+    "pystache>=0.6.8",
+    "fastapi>=0.115.12",
+    "lttb>=0.3.2",
+    "numpy>=1.24.0",
+    "msgpack>=1.0.0",
+]
+
+remote = [
+    "requests>=2.31.0",
+]
+
+tui = [
+    "textual>=0.47.0",
+    "textual-plotext>=0.2.0",
+]
+
+all = [
+    "aspara[tracker]",
+    "aspara[dashboard]",
+    "aspara[remote]",
+    "aspara[tui]",
+    "aspara[docs]",
+]
+
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.6.0",
+    "mkdocstrings[python]>=0.24.0",
+    "mkdocs-autorefs>=0.5.0",
+]
+
+[project.scripts]
+aspara = "aspara.cli:main"
+
+[dependency-groups]
+dev = [
+    "aspara[all]",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=7.0.0",
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.6.0",
+    "mkdocstrings[python]>=0.24.0",
+    "mkdocs-autorefs>=0.5.0",
+    "ruff>=0.14.10",
+    "playwright>=1.52.0",
+    "pyrefly>=0.46.1",
+    "py-spy>=0.4.1",
+    "types-requests>=2.31.0",
+    "ty>=0.0.12",
+    "bandit>=1.9.3",
+    "httpx>=0.28.1",
+    "mypy>=1.19.1",
+]
+
+[tool.ruff]
+line-length = 160
+indent-width = 4
+target-version = "py310"
+extend-exclude = [".venv", "build", "dist"]
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+extend-select = [
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "ERA",  # eradicate
+    "UP",   # pyupgrade
+]
+extend-ignore = ["SIM108"]
+
+[tool.pyrefly]
+project-includes = [
+    "src/**/*.py*",
+    "tests/**/*.py*",
+]
+
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+preview = true
+line-ending = "auto"
+docstring-code-format = true
+
+[tool.ruff.lint.isort]
+known-first-party = ["aspara"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.mypy]
+ignore_missing_imports = true

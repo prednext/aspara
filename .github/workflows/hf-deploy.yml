@@ -1,0 +1,47 @@
+name: Deploy to HF Spaces
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "tests/**"
+      - "*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: hf-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch HF Space config
+        run: |
+          git fetch origin hf-space
+          git checkout origin/hf-space -- Dockerfile .dockerignore space_README.md
+
+      - name: Prepare HF Space
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Create orphan branch (no history) to avoid binary files in past commits
+          git checkout --orphan hf-deploy
+          git rm -rf --cached docs/ tests/ >/dev/null 2>&1 || true
+          rm -rf docs/ tests/
+          cp space_README.md README.md
+          git add -A
+          git commit -m "Deploy to HF Spaces"
+
+      - name: Push to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git push --force \
+            https://hf:${HF_TOKEN}@huggingface.co/spaces/PredNext/aspara \
+            HEAD:main
