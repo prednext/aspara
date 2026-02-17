@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 from starlette.requests import Request
 
+from aspara.config import is_read_only
 from aspara.exceptions import RunNotFoundError
 
 from ..dependencies import (
@@ -60,6 +61,7 @@ async def home(
         "projects": formatted_projects,
         "has_projects": len(formatted_projects) > 0,
         "project_search_mode": project_search_mode,
+        "read_only": is_read_only(),
     }
 
     html = render_mustache_response("projects_list", context)
@@ -105,6 +107,7 @@ async def project_detail(
         "has_runs": len(formatted_runs) > 0,
         "run_count": len(formatted_runs),
         "formatted_project_last_update": (project_last_update.strftime("%b %d, %Y at %I:%M %p") if project_last_update else "N/A"),
+        "read_only": is_read_only(),
     }
 
     html = render_mustache_response("project_detail", context)
@@ -138,6 +141,7 @@ async def list_project_runs(
         "project": project,
         "runs": formatted_runs,
         "has_runs": len(formatted_runs) > 0,
+        "read_only": is_read_only(),
     }
 
     html = render_mustache_response("runs_list", context)
@@ -223,6 +227,7 @@ async def get_run(
         "has_artifacts": len(artifacts) > 0,
         "is_corrupted": is_corrupted,
         "error_message": error_message,
+        "read_only": is_read_only(),
     }
 
     html = render_mustache_response("run_detail", context)

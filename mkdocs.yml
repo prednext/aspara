@@ -74,6 +74,7 @@ nav:
     - Storage: advanced/storage.md
     - Dashboard: advanced/dashboard.md
     - Tracker API: advanced/tracker-api.md
+    - Read-only Mode: advanced/read-only-mode.md
   - Examples:
     - Overview: examples/index.md
     - PyTorch: examples/pytorch_example.md
