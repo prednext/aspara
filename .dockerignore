@@ -1,0 +1,38 @@
+# Version control
+.git/
+
+# Virtual environments
+.venv/
+
+# Node modules (reinstalled in build)
+node_modules/
+
+# Build outputs (rebuilt in Docker)
+src/aspara/dashboard/static/dist/
+
+# Test artifacts
+test-results/
+playwright-report/
+.coverage
+htmlcov/
+coverage/
+
+# Documentation build
+site/
+docs/
+
+# IDE / OS
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Cache
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+
+# Environment files
+.env
+.env.*
