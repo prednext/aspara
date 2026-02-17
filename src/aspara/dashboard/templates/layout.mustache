@@ -75,6 +75,28 @@
   </div>
   {{> _delete_dialog}}
   {{> _read_only_dialog}}
+  {{#read_only}}
+  <script>
+    // Read-only mode: inline guard (works without pnpm build)
+    document.addEventListener('DOMContentLoaded', function() {
+      // Remove commandfor/command attributes from delete buttons so the
+      // browser's Invoker Commands API does not open the delete dialog.
+      document.querySelectorAll('[commandfor="delete-confirm-dialog"]').forEach(function(btn) {
+        btn.removeAttribute('commandfor');
+        btn.removeAttribute('command');
+      });
+    });
+    // Capture-phase listener intercepts clicks before any other handler.
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest('.note-edit-btn, .tag-edit-btn, .delete-run-btn, .delete-project-btn');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      var dlg = document.getElementById('read-only-dialog');
+      if (dlg) dlg.showModal();
+    }, true);
+  </script>
+  {{/read_only}}
   <script type="module" src="/static/dist/settings-menu.js"></script>
   <script type="module" src="/static/dist/note-editor.js"></script>
   <script type="module" src="/static/dist/tag-editor.js"></script>
