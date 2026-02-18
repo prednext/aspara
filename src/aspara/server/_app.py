@@ -136,7 +136,7 @@ async def docs_page(request: Request) -> HTMLResponse:
     else:
         html_content += """
             <p class="not-available">Tracker API is not installed</p>
-            <p>To install: <code>uv pip install aspara[tracker]</code></p>
+            <p>To install: <code>uv pip install "aspara[tracker]"</code></p>
         """
 
     html_content += """
@@ -155,7 +155,7 @@ async def docs_page(request: Request) -> HTMLResponse:
     else:
         html_content += """
             <p class="not-available">Dashboard is not installed</p>
-            <p>To install: <code>uv pip install aspara[dashboard]</code></p>
+            <p>To install: <code>uv pip install "aspara[dashboard]"</code></p>
         """
 
     html_content += """

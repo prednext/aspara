@@ -144,7 +144,7 @@ def run_dashboard(
         uvicorn.run("aspara.server:app", host=host, port=port, reload=dev)
     except ImportError:
         print("Error: Dashboard functionality is not installed!")
-        print("To install: uv pip install aspara[dashboard]")
+        print('To install: uv pip install "aspara[dashboard]"')
         sys.exit(1)
 
 
@@ -167,7 +167,7 @@ def run_tui(data_dir: str | None = None) -> None:
         _run_tui(data_dir=data_dir)
     except ImportError:
         print("TUI functionality is not installed!")
-        print("To install: uv pip install aspara[tui]")
+        print('To install: uv pip install "aspara[tui]"')
         sys.exit(1)
 
 
@@ -213,7 +213,7 @@ def run_tracker(
         uvicorn.run("aspara.server:app", host=host, port=port, reload=dev)
     except ImportError:
         print("Error: Tracker functionality is not installed!")
-        print("To install: uv pip install aspara[tracker]")
+        print('To install: uv pip install "aspara[tracker]"')
         sys.exit(1)
 
 

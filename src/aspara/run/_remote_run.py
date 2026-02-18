@@ -36,7 +36,7 @@ class TrackerClient:
             ImportError: If requests library is not installed
         """
         if requests is None:
-            raise ImportError("requests library is required for RemoteRun. Install it with: pip install aspara[remote]")
+            raise ImportError('requests library is required for RemoteRun. Install it with: pip install "aspara[remote]"')
 
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
