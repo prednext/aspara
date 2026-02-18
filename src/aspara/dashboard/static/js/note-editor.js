@@ -12,6 +12,7 @@ import {
   getEditButtonHTML,
   isNoteEmpty,
 } from './note-editor-utils.js';
+import { guardReadOnly } from './read-only-guard.js';
 
 class NoteEditor {
   constructor() {
@@ -129,6 +130,7 @@ class NoteEditor {
    * Start editing mode
    */
   startEditing(wrapper, apiEndpoint) {
+    if (guardReadOnly()) return;
     if (this.isEditing) return; // Prevent multiple edits
 
     this.isEditing = true;

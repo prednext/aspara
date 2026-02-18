@@ -4,6 +4,7 @@
 
 import tagger from '@jcubic/tagger';
 import { ICON_EDIT, escapeHtml } from './html-utils.js';
+import { guardReadOnly } from './read-only-guard.js';
 
 class TagEditor {
   constructor() {
@@ -189,6 +190,7 @@ class TagEditor {
     if (this.isEditing) {
       this.closeEditMode(wrapper, input);
     } else {
+      if (guardReadOnly()) return;
       display.classList.add('hidden');
       edit.classList.remove('hidden');
       this.isEditing = true;

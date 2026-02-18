@@ -23,7 +23,7 @@ import msgpack
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from aspara.config import get_resource_limits
+from aspara.config import get_resource_limits, is_read_only
 from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
 from aspara.utils import validators
 
@@ -288,6 +288,10 @@ async def update_project_metadata_api(
     Raises:
         HTTPException: 400 if project name is invalid.
     """
+    if is_read_only():
+        existing = project_catalog.get_metadata(project)
+        return Metadata.model_validate(existing)
+
     update_data = metadata.model_dump(exclude_none=True)
 
     # Use ProjectCatalog metadata API
@@ -315,6 +319,9 @@ async def delete_project(
         HTTPException: 400 if project name is invalid, 403 if permission denied,
             404 if project not found, 500 for unexpected errors.
     """
+    if is_read_only():
+        return Response(status_code=204)
+
     try:
         project_catalog.delete(project)
         logger.info(f"Deleted project: {project}")
@@ -373,6 +380,10 @@ async def update_run_metadata_api(
     Raises:
         HTTPException: 400 if project/run name is invalid.
     """
+    if is_read_only():
+        existing = run_catalog.get_metadata(project, run)
+        return existing
+
     update_data = metadata.model_dump(exclude_none=True)
 
     # Use RunCatalog metadata API
@@ -402,6 +413,9 @@ async def delete_run(
         HTTPException: 400 if project/run name is invalid, 403 if permission denied,
             404 if project or run not found, 500 for unexpected errors.
     """
+    if is_read_only():
+        return Response(status_code=204)
+
     try:
         run_catalog.delete(project, run)
         logger.info(f"Deleted run: {project}/{run}")

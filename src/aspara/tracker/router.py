@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, UploadFile
 
-from aspara.config import get_data_dir
+from aspara.config import get_data_dir, is_read_only
 from aspara.models import MetricRecord
 from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.utils import validators
@@ -99,6 +99,13 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
+    if is_read_only():
+        return RunCreateResponse(
+            project=project_name,
+            name=request.name,
+            run_id="readonly00000000",
+        )
+
     data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
@@ -174,6 +181,9 @@ async def save_metrics(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
+    if is_read_only():
+        return MetricsResponse()
+
     try:
         # Create storage instance for this specific project/run
         data_dir = get_data_dir()
@@ -232,6 +242,12 @@ async def upload_artifact(
             validators.validate_run_name(run_name)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
+
+        if is_read_only():
+            return ArtifactUploadResponse(
+                artifact_name=name or file.filename or "readonly",
+                file_size=0,
+            )
 
         # Validate category if provided
         if category and category not in ("code", "model", "config", "data", "other"):
@@ -346,6 +362,9 @@ async def update_config(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
+    if is_read_only():
+        return StatusResponse()
+
     data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
@@ -398,6 +417,9 @@ async def update_summary(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
+    if is_read_only():
+        return StatusResponse()
+
     data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
@@ -449,6 +471,9 @@ async def finish_run(
         validators.validate_run_name(run_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+
+    if is_read_only():
+        return StatusResponse()
 
     data_dir = get_data_dir()
     base_dir = Path(data_dir)

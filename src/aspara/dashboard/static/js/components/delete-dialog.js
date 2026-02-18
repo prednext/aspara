@@ -3,6 +3,8 @@
  * Uses native <dialog> with Invoker Commands API for open/close
  * Only JS needed: dynamic content update and delete API calls
  */
+import { guardReadOnly } from '../read-only-guard.js';
+
 class DeleteDialog {
   constructor() {
     this.dialog = document.getElementById('delete-confirm-dialog');
@@ -35,6 +37,12 @@ class DeleteDialog {
       const btn = e.target.closest('[commandfor="delete-confirm-dialog"]');
       if (!btn) return;
 
+      if (guardReadOnly()) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       const project = btn.dataset.project;
       const run = btn.dataset.run;
 
@@ -57,6 +65,7 @@ class DeleteDialog {
    * @returns {Promise<boolean>} Resolves to true if confirmed
    */
   confirm(options) {
+    if (guardReadOnly()) return Promise.resolve(false);
     this.titleEl.textContent = options.title;
     this.messageEl.textContent = options.message;
     this.dialog.showModal();

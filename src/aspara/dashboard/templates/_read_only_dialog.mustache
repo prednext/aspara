@@ -1,0 +1,22 @@
+<dialog id="read-only-dialog"
+        class="delete-dialog"
+        closedby="any"
+        aria-labelledby="read-only-dialog-title">
+  <form method="dialog" class="p-6">
+    <div class="flex items-start gap-4">
+      <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-base-bg">
+        <svg class="w-6 h-6 text-accent"><use href="#icon-information-circle"></use></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <h3 id="read-only-dialog-title" class="text-lg font-semibold text-text-primary">Read-only Mode</h3>
+        <p class="mt-2 text-sm text-text-secondary">This is a demo instance running in read-only mode. Editing is disabled.</p>
+      </div>
+    </div>
+    <div class="mt-6 flex justify-end">
+      <button type="submit" value="ok"
+              class="px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent">
+        OK
+      </button>
+    </div>
+  </form>
+</dialog>

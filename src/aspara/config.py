@@ -12,6 +12,7 @@ __all__ = [
     "get_storage_backend",
     "get_project_search_mode",
     "is_dev_mode",
+    "is_read_only",
 ]
 
 
@@ -202,3 +203,12 @@ def is_dev_mode() -> bool:
         True if ASPARA_DEV_MODE is set to "1", False otherwise.
     """
     return os.environ.get("ASPARA_DEV_MODE") == "1"
+
+
+def is_read_only() -> bool:
+    """Check if running in read-only mode.
+
+    Returns:
+        True if ASPARA_READ_ONLY is set to "1", False otherwise.
+    """
+    return os.environ.get("ASPARA_READ_ONLY") == "1"
