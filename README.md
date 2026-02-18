@@ -27,12 +27,12 @@ The demo lets you explore the experiment results dashboard with sample data.
 
 ```bash
 # Install with all features
-pip install aspara[all]
+pip install "aspara[all]"
 
 # Or install components separately
-pip install aspara              # Client only
-pip install aspara[dashboard]   # Dashboard only
-pip install aspara[tracker]     # Tracker only
+pip install aspara                  # Client only
+pip install "aspara[dashboard]"     # Dashboard only
+pip install "aspara[tracker]"       # Tracker only
 ```
 
 ## Quick Start
@@ -62,7 +62,7 @@ Open http://localhost:3141 to compare runs, explore metrics, and share insights.
 **3. Or use the Terminal UI**
 
 ```bash
-pip install aspara[tui]
+pip install "aspara[tui]"
 aspara tui
 ```
 

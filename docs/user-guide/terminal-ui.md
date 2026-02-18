@@ -9,13 +9,13 @@ Aspara provides a terminal-based user interface for viewing metrics directly in 
 The TUI requires additional dependencies. Install them with the `tui` extra:
 
 ```bash
-pip install aspara[tui]
+pip install "aspara[tui]"
 ```
 
 Or with uv:
 
 ```bash
-uv pip install aspara[tui]
+uv pip install "aspara[tui]"
 ```
 
 ## Starting the TUI
