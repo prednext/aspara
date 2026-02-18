@@ -48,6 +48,7 @@ COPY --from=frontend-builder /app/src/aspara/dashboard/static/dist/ ./src/aspara
 COPY examples/generate_random_runs.py ./examples/
 ENV ASPARA_DATA_DIR=/data/aspara
 ENV ASPARA_ALLOW_IFRAME=1
+ENV ASPARA_READ_ONLY=1
 RUN mkdir -p /data/aspara && uv run python examples/generate_random_runs.py
 
 # Create non-root user (HF Spaces best practice)
