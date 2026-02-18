@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@playwright/test": "^1.53.0",
+    "@playwright/test": "^1.58.2",
     "@swc/core": "^1.8.0",
     "@tailwindcss/cli": "^4.1.18",
     "@testing-library/dom": "^10.4.0",
