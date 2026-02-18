@@ -141,7 +141,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'dashboard'", specifier = ">=1.24.0" },
     { name = "polars", specifier = ">=1.37.1" },
     { name = "pystache", marker = "extra == 'dashboard'", specifier = ">=0.6.8" },
-    { name = "python-multipart", marker = "extra == 'tracker'", specifier = ">=0.0.21" },
+    { name = "python-multipart", marker = "extra == 'tracker'", specifier = ">=0.0.22" },
     { name = "requests", marker = "extra == 'remote'", specifier = ">=2.31.0" },
     { name = "sse-starlette", marker = "extra == 'dashboard'", specifier = ">=1.8.0" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.47.0" },
