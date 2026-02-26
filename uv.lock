@@ -49,6 +49,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "polars" },
+    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
@@ -140,6 +141,7 @@ requires-dist = [
     { name = "msgpack", marker = "extra == 'dashboard'", specifier = ">=1.0.0" },
     { name = "numpy", marker = "extra == 'dashboard'", specifier = ">=1.24.0" },
     { name = "polars", specifier = ">=1.37.1" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "pystache", marker = "extra == 'dashboard'", specifier = ">=0.6.8" },
     { name = "python-multipart", marker = "extra == 'tracker'", specifier = ">=0.0.22" },
     { name = "requests", marker = "extra == 'remote'", specifier = ">=2.31.0" },
