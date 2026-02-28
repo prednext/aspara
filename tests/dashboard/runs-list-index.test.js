@@ -145,7 +145,7 @@ describe('RunsListSorter', () => {
       createRunsDOM();
       sorter = new RunsListSorter();
 
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.run-card');
@@ -158,7 +158,7 @@ describe('RunsListSorter', () => {
       createRunsDOM();
       sorter = new RunsListSorter();
 
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.run-card');
@@ -171,7 +171,7 @@ describe('RunsListSorter', () => {
       createRunsDOM();
       sorter = new RunsListSorter();
 
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.run-card');

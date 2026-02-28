@@ -227,7 +227,7 @@ describe('ProjectsListSorter', () => {
       sorter = new ProjectsListSorter();
 
       // Mock location
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.project-card');
@@ -240,7 +240,7 @@ describe('ProjectsListSorter', () => {
       createProjectsDOM();
       sorter = new ProjectsListSorter();
 
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.project-card');
@@ -253,7 +253,7 @@ describe('ProjectsListSorter', () => {
       createProjectsDOM();
       sorter = new ProjectsListSorter();
 
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.project-card');
@@ -266,7 +266,7 @@ describe('ProjectsListSorter', () => {
       createProjectsDOM();
       sorter = new ProjectsListSorter();
 
-      delete window.location;
+      window.location = undefined;
       window.location = { href: '' };
 
       const card = document.querySelector('.project-card');
