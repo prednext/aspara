@@ -379,3 +379,5 @@ document.addEventListener('DOMContentLoaded', () => {
     new ProjectsListSorter();
   }
 });
+
+export { ProjectsListSorter };

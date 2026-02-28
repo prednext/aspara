@@ -178,3 +178,5 @@ document.addEventListener('DOMContentLoaded', () => {
     new RunsListSorter();
   }
 });
+
+export { RunsListSorter };

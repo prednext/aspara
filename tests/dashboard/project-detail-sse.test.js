@@ -11,17 +11,16 @@ describe('ProjectMetrics SSE Integration', () => {
 
   beforeEach(() => {
     // Setup EventSource mock with proper close method
-    const mockEventSource = vi.fn().mockImplementation((url) => {
-      const instance = {
-        url,
-        readyState: 1, // OPEN
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        close: vi.fn(() => {
-          instance.readyState = 2; // CLOSED
-        }),
-      };
-      return instance;
+    const mockEventSource = vi.fn(class {
+      constructor(url) {
+        this.url = url;
+        this.readyState = 1; // OPEN
+        this.addEventListener = vi.fn();
+        this.removeEventListener = vi.fn();
+        this.close = vi.fn(() => {
+          this.readyState = 2; // CLOSED
+        });
+      }
     });
     global.EventSource = mockEventSource;
 
