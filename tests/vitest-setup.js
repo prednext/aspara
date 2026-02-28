@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 // Canvas API is now handled by vitest-canvas-setup.js with @napi-rs/canvas
 
 // EventSource Mock for SSE testing
-global.EventSource = vi.fn().mockImplementation((url) => {
+global.EventSource = vi.fn().mockImplementation(function (url) {
   const instance = {
     url,
     readyState: 0, // CONNECTING
@@ -21,11 +21,13 @@ global.EventSource = vi.fn().mockImplementation((url) => {
 });
 
 // ResizeObserver Mock
-global.ResizeObserver = vi.fn().mockImplementation((callback) => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}));
+global.ResizeObserver = vi.fn().mockImplementation(function (callback) {
+  return {
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  };
+});
 
 // matchMedia Mock
 Object.defineProperty(window, 'matchMedia', {

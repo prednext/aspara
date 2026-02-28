@@ -11,7 +11,7 @@ describe('ProjectMetrics SSE Integration', () => {
 
   beforeEach(() => {
     // Setup EventSource mock with proper close method
-    const mockEventSource = vi.fn().mockImplementation((url) => {
+    const mockEventSource = vi.fn().mockImplementation(function (url) {
       const instance = {
         url,
         readyState: 1, // OPEN

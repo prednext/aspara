@@ -113,7 +113,7 @@ describe('ProjectMetrics Integration', () => {
       await projectDetail.showMetrics();
 
       // API呼び出しが正しく行われることを確認
-      expect(fetch).toHaveBeenCalledWith('/api/projects/test_project/runs/metrics?runs=run_1%2Crun_2&format=msgpack');
+      expect(fetch).toHaveBeenCalledWith('/api/projects/test_project/runs/metrics?runs=run_1%2Crun_2');
 
       // チャートが実際に作成されることを確認
       const chartsContainer = document.getElementById('chartsContainer');

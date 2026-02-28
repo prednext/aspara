@@ -22,7 +22,7 @@ describe('MetricsDataService SSE Reconnection', () => {
     mockEventSourceInstances = [];
     eventListeners = [];
 
-    const mockEventSource = vi.fn().mockImplementation((url) => {
+    const mockEventSource = vi.fn().mockImplementation(function (url) {
       const listeners = {};
       const instance = {
         url,

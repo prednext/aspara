@@ -8,11 +8,13 @@ import { vi } from 'vitest';
 // This file provides fallback mocks only
 
 // ResizeObserver Mock
-global.ResizeObserver = vi.fn().mockImplementation((callback) => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}));
+global.ResizeObserver = vi.fn().mockImplementation(function (callback) {
+  return {
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  };
+});
 
 // matchMedia Mock
 Object.defineProperty(window, 'matchMedia', {
