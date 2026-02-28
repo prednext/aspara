@@ -22,37 +22,36 @@ describe('MetricsDataService SSE Reconnection', () => {
     mockEventSourceInstances = [];
     eventListeners = [];
 
-    const mockEventSource = vi.fn().mockImplementation(function (url) {
-      const listeners = {};
-      const instance = {
-        url,
-        readyState: 0, // CONNECTING
-        addEventListener: vi.fn((event, handler) => {
+    const mockEventSource = vi.fn(class {
+      constructor(url) {
+        const listeners = {};
+        this.url = url;
+        this.readyState = 0; // CONNECTING
+        this.addEventListener = vi.fn((event, handler) => {
           if (!listeners[event]) {
             listeners[event] = [];
           }
           listeners[event].push(handler);
-        }),
-        removeEventListener: vi.fn(),
-        close: vi.fn(() => {
-          instance.readyState = 2; // CLOSED
-        }),
+        });
+        this.removeEventListener = vi.fn();
+        this.close = vi.fn(() => {
+          this.readyState = 2; // CLOSED
+        });
         // Helper to trigger events in tests
-        _triggerEvent: (eventName, data) => {
+        this._triggerEvent = (eventName, data) => {
           if (listeners[eventName]) {
             for (const handler of listeners[eventName]) {
               handler(data);
             }
           }
-        },
-        _setReadyState: (state) => {
-          instance.readyState = state;
-        },
-        _listeners: listeners,
-      };
-      mockEventSourceInstances.push(instance);
-      eventListeners.push(listeners);
-      return instance;
+        };
+        this._setReadyState = (state) => {
+          this.readyState = state;
+        };
+        this._listeners = listeners;
+        mockEventSourceInstances.push(this);
+        eventListeners.push(listeners);
+      }
     });
 
     global.EventSource = mockEventSource;
