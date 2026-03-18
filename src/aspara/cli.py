@@ -125,6 +125,8 @@ def run_dashboard(
     if data_dir is None:
         data_dir = str(get_data_dir())
 
+    os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
+
     if project_search_mode:
         os.environ["ASPARA_PROJECT_SEARCH_MODE"] = project_search_mode
 
@@ -201,6 +203,8 @@ def run_tracker(
     if data_dir is None:
         data_dir = str(get_data_dir())
 
+    os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
+
     print("Starting Aspara Tracker API server...")
     print(f"Endpoint: http://{host}:{port}/tracker/api/v1")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -261,6 +265,8 @@ def run_serve(
     # Configure data directory
     if data_dir is None:
         data_dir = str(get_data_dir())
+
+    os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
     # Configure dashboard if enabled
     if enable_dashboard:
