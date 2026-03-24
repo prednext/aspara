@@ -109,11 +109,6 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
     data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
-    # Detect duplicate run by checking existing metadata file
-    metadata_path = base_dir / project_name / f"{request.name}.meta.json"
-    if metadata_path.exists():
-        raise HTTPException(status_code=409, detail="Run already exists")
-
     # Initialize run-level metadata using RunMetadataStorage
     storage = RunMetadataStorage(
         base_dir=str(data_dir),
@@ -121,14 +116,27 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
         run_name=request.name,
     )
 
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
-    run_id = uuid.uuid4().hex[:16]  # Server always generates run_id
-    storage.set_init(
-        run_id=run_id,
-        tags=request.tags,
-        notes=request.notes,
-        timestamp=now,
-    )
+    metadata_path = base_dir / project_name / f"{request.name}.meta.json"
+    if metadata_path.exists():
+        # Resume existing run: reuse run_id, reset finish state
+        existing = storage.get_metadata()
+        run_id = existing.get("run_id") or uuid.uuid4().hex[:16]
+        storage.set_init(
+            run_id=run_id,
+            tags=request.tags,
+            notes=request.notes,
+            timestamp=None,
+        )
+        storage.reset_finish()
+    else:
+        now = int(datetime.now(timezone.utc).timestamp() * 1000)
+        run_id = uuid.uuid4().hex[:16]
+        storage.set_init(
+            run_id=run_id,
+            tags=request.tags,
+            notes=request.notes,
+            timestamp=now,
+        )
 
     if request.config:
         storage.update_config(request.config)
