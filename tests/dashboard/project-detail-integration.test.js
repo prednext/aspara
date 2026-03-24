@@ -251,6 +251,36 @@ describe('ProjectMetrics Integration', () => {
         expect(fetch.mock.calls.length).toBeGreaterThan(initialFetchCount);
       });
     });
+
+    test('should clear charts and show empty selection when all runs are deselected', async () => {
+      const checkbox1 = document.querySelector('.run-checkbox[data-run-name="run_1"]');
+      const checkbox2 = document.querySelector('.run-checkbox[data-run-name="run_2"]');
+      const initialState = document.getElementById('initialState');
+      const chartsContainer = document.getElementById('chartsContainer');
+
+      expect(projectDetail.charts.size).toBeGreaterThan(0);
+      expect(chartsContainer.innerHTML.trim()).not.toBe('');
+      // applyGridLayout sets display:grid inline; must be cleared when no runs selected
+      chartsContainer.style.display = 'grid';
+
+      checkbox1.checked = false;
+      checkbox1.dispatchEvent(new Event('change'));
+      checkbox2.checked = false;
+      checkbox2.dispatchEvent(new Event('change'));
+
+      await projectDetail.showMetrics();
+
+      expect(projectDetail.charts.size).toBe(0);
+      expect(chartsContainer.innerHTML.trim()).toBe('');
+      expect(chartsContainer.classList.contains('hidden')).toBe(true);
+      expect(initialState.classList.contains('hidden')).toBe(false);
+      expect(chartsContainer.style.display).toBe('');
+
+      // Sidebar / resize call applyAutoLayout; must not re-apply grid over .hidden
+      projectDetail.applyAutoLayout();
+      expect(chartsContainer.classList.contains('hidden')).toBe(true);
+      expect(chartsContainer.style.display).toBe('');
+    });
   });
 
   describe('Run Filtering', () => {
