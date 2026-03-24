@@ -193,6 +193,14 @@ class RunMetadataStorage:
 
         self._save()
 
+    def reset_finish(self) -> None:
+        """Reset finish state so the run can receive new metrics."""
+        self._metadata["is_finished"] = False
+        self._metadata["exit_code"] = None
+        self._metadata["finish_time"] = None
+        self._metadata["status"] = RunStatus.WIP.value
+        self._save()
+
     def set_tags(self, tags: list[str]) -> None:
         """Set tags (replaces existing tags).
 
