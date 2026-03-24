@@ -144,6 +144,9 @@ class ProjectDetail extends BaseChartPage {
     // Initialize data service
     this.dataService = new MetricsDataService(this.currentProject, {
       onMetricUpdate: (metricName, runName, step, value) => {
+        if (!this.runSelector?.getSelectedRuns().has(runName)) {
+          return;
+        }
         const chart = this.charts.get(metricName);
         if (chart) {
           chart.addDataPoint(runName, step, value);
@@ -168,10 +171,12 @@ class ProjectDetail extends BaseChartPage {
 
   showInitialState() {
     this.loadingState.classList.add('hidden');
+    this.clearAndRenderCharts({});
     this.chartsContainer.classList.add('hidden');
     this.noDataState.classList.add('hidden');
     this.initialState.classList.remove('hidden');
     this.runSelector.hideAllLegends();
+    this.hideChartControls();
   }
 
   showLoadingState() {
@@ -209,6 +214,11 @@ class ProjectDetail extends BaseChartPage {
 
   renderMetricsFromCache() {
     const selectedRuns = this.runSelector.getSelectedRuns();
+    if (selectedRuns.size === 0) {
+      this.showInitialState();
+      return;
+    }
+
     const metricsData = this.dataService.getCachedMetrics(selectedRuns);
 
     this.loadingState.classList.add('hidden');
