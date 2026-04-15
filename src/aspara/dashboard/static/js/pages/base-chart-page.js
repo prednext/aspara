@@ -124,6 +124,12 @@ export class BaseChartPage {
    */
   applyAutoLayout() {
     if (!this.chartsContainer) return;
+    // When the charts area is hidden (e.g. no runs selected), skip layout. Otherwise
+    // applyGridLayout sets display:grid inline and overrides Tailwind .hidden — the
+    // empty charts region stays visible after deselecting all runs.
+    if (this.chartsContainer.classList.contains('hidden')) {
+      return;
+    }
 
     const { columns, chartHeight, gap } = this.calculateChartDimensions();
 
@@ -233,6 +239,9 @@ export class BaseChartPage {
     this.charts.clear();
 
     if (!metricsData || Object.keys(metricsData).length === 0) {
+      // applyGridLayout() sets display:grid inline; that beats Tailwind .hidden, so the
+      // charts area can stay visible with an empty container unless we clear inline styles.
+      this.resetChartsContainerLayoutStyles();
       return false;
     }
 
@@ -256,6 +265,18 @@ export class BaseChartPage {
     }
 
     return true;
+  }
+
+  /**
+   * Clear grid layout inline styles from applyGridLayout / applyAutoLayout so
+   * visibility is controlled only by classes (e.g. hidden).
+   */
+  resetChartsContainerLayoutStyles() {
+    if (!this.chartsContainer) return;
+    this.chartsContainer.style.display = '';
+    this.chartsContainer.style.gridTemplateColumns = '';
+    this.chartsContainer.style.gap = '';
+    this.chartsContainer.classList.add('space-y-8');
   }
 
   /**
