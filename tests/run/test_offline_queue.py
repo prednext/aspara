@@ -131,6 +131,91 @@ class TestOfflineQueueStorage:
             assert (queue_dir / "test_run.queue.meta.json").exists()
             assert _storage is not None
 
+    def test_corrupted_metadata_file_is_rewritten(self):
+        """If the metadata file is corrupted, it should be rewritten on init."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            queue_dir.mkdir(parents=True)
+            meta_file = queue_dir / "test_run.queue.meta.json"
+            meta_file.write_text("{ this is not valid json }")
+
+            # Initialization should not crash; it should rewrite the file.
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            # The metadata file should now be valid JSON.
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            assert metadata.project == "test_project"
+            assert metadata.run_name == "test_run"
+            assert storage is not None
+
+    def test_mismatched_metadata_is_rewritten(self):
+        """If metadata has wrong project/run_name, it should be rewritten."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            queue_dir.mkdir(parents=True)
+            meta_file = queue_dir / "test_run.queue.meta.json"
+
+            # Write metadata with wrong project name
+            wrong_meta = QueueMetadata(
+                tracker_uri="http://localhost:3142",
+                project="wrong_project",
+                run_name="wrong_run",
+                run_id="wrong_id",
+            )
+            meta_file.write_text(wrong_meta.model_dump_json(indent=2))
+
+            # Initialization should detect the mismatch and rewrite.
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            assert metadata.project == "test_project"
+            assert metadata.run_name == "test_run"
+            assert metadata.run_id == "abc123"
+            assert storage is not None
+
+    def test_valid_metadata_is_preserved(self):
+        """If metadata is valid and matches, it should not be rewritten."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            queue_dir.mkdir(parents=True)
+            meta_file = queue_dir / "test_run.queue.meta.json"
+
+            original_meta = QueueMetadata(
+                tracker_uri="http://localhost:3142",
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                created_at=12345,
+            )
+            meta_file.write_text(original_meta.model_dump_json(indent=2))
+
+            OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            # created_at should be preserved (not rewritten with a new timestamp)
+            assert metadata.created_at == 12345
+
     def test_enqueue_item(self):
         """Test enqueueing an item."""
         with tempfile.TemporaryDirectory() as temp_dir:

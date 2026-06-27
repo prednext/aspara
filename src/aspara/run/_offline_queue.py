@@ -136,7 +136,7 @@ class OfflineQueueStorage:
         """Ensure queue directory and metadata file exist."""
         self._queue_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write metadata file if it doesn't exist
+        # Write metadata file if it doesn't exist, or validate it if it does.
         if not self._meta_file.exists():
             metadata = QueueMetadata(
                 tracker_uri=self.tracker_uri,
@@ -145,6 +145,8 @@ class OfflineQueueStorage:
                 run_id=self.run_id,
             )
             self._meta_file.write_text(metadata.model_dump_json(indent=2))
+        else:
+            self._validate_metadata_file()
 
         # Count existing items
         if self._queue_file.exists():
@@ -153,6 +155,41 @@ class OfflineQueueStorage:
                     self._item_count = sum(1 for line in f if line.strip())
             except OSError:
                 self._item_count = 0
+
+    def _validate_metadata_file(self) -> None:
+        """Load and validate the metadata file.
+
+        If the file is corrupted or has mismatched project/run_name, log a
+        warning and overwrite it with correct metadata so the queue can
+        continue operating instead of silently ignoring the mismatch.
+        """
+        try:
+            raw = self._meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+        except (OSError, ValueError, ValidationError) as e:
+            logger.warning(f"Queue metadata file is corrupted, rewriting: {e}")
+            self._write_metadata()
+            return
+
+        # Verify the metadata matches this queue's identity. A mismatch could
+        # happen if the queue directory was manually moved or copied.
+        if metadata.project != self.project or metadata.run_name != self.run_name:
+            logger.warning(
+                f"Queue metadata mismatch: file has project={metadata.project!r} "
+                f"run_name={metadata.run_name!r}, expected project={self.project!r} "
+                f"run_name={self.run_name!r}. Rewriting metadata."
+            )
+            self._write_metadata()
+
+    def _write_metadata(self) -> None:
+        """Write the metadata file with current queue identity."""
+        metadata = QueueMetadata(
+            tracker_uri=self.tracker_uri,
+            project=self.project,
+            run_name=self.run_name,
+            run_id=self.run_id,
+        )
+        self._meta_file.write_text(metadata.model_dump_json(indent=2))
 
     def enqueue(self, item: MetricsQueueItem) -> bool:
         """Add an item to the queue.
