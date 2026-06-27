@@ -89,6 +89,35 @@ class TestBaseRunStepManagement:
         assert step_again == 0
         assert run._current_step == 1
 
+    def test_prepare_step_resets_step_committed_flag(self) -> None:
+        """_prepare_step should reset _step_committed to False before logging.
+
+        Without this reset, the flag would remain stale from the previous
+        log call, incorrectly indicating the current step is already committed.
+        """
+        run = DummyRun()
+
+        # After a committed log, _step_committed should be True.
+        run.log_step(step=None, commit=True)
+        assert run._step_committed is True
+
+        # _prepare_step should reset the flag to False.
+        run._prepare_step(step=None, commit=True)
+        assert run._step_committed is False
+
+    def test_prepare_step_resets_flag_with_explicit_step(self) -> None:
+        """_prepare_step with an explicit step should also reset the flag."""
+        run = DummyRun()
+
+        # After a committed log, _step_committed should be True.
+        run.log_step(step=None, commit=True)
+        assert run._step_committed is True
+
+        # _prepare_step with explicit step should reset the flag.
+        run._prepare_step(step=5, commit=True)
+        assert run._step_committed is False
+        assert run._current_step == 5
+
 
 class TestBaseRunFinishedGuard:
     def test_ensure_not_finished_raises_after_mark_finished(self) -> None:
