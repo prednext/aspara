@@ -6,7 +6,7 @@ Provides Mustache template rendering and context formatting utilities.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,7 @@ def render_mustache_response(template_name: str, context: dict[str, Any]) -> str
     """
     # Add common context variables
     context.update({
-        "current_year": datetime.now().year,
+        "current_year": datetime.now(timezone.utc).year,
         "page_title": context.get("page_title", "Aspara"),
     })
 

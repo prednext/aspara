@@ -127,7 +127,7 @@ async def download_artifacts_zip(
     zip_buffer.seek(0)
 
     # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     zip_filename = f"{project}_{run}_artifacts_{timestamp}.zip"
 
     # Return as streaming response

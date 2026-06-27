@@ -2,6 +2,8 @@
 Tests for ProjectCatalog
 """
 
+from datetime import timezone
+
 import pytest
 
 from aspara.catalog import ProjectCatalog
@@ -32,3 +34,31 @@ def test_project_catalog_list(temp_catalog_dir):
     assert "project1" in project_names
     assert "project2" in project_names
     assert "not_a_project.txt" not in project_names
+
+
+def test_project_last_update_is_timezone_aware(temp_catalog_dir):
+    """last_update must be timezone-aware UTC, not naive local time.
+
+    Naive datetimes from datetime.fromtimestamp() would raise TypeError when
+    compared with aware datetimes elsewhere in the codebase (e.g. in
+    _infer_stale_status which uses datetime.now(timezone.utc)).
+    """
+    catalog = ProjectCatalog(str(temp_catalog_dir))
+    (temp_catalog_dir / "project1").mkdir()
+    (temp_catalog_dir / "project1" / "run1.jsonl").write_text("{}\n")
+
+    projects = catalog.get_projects()
+    assert len(projects) == 1
+    assert projects[0].last_update.tzinfo is not None
+    assert projects[0].last_update.tzinfo == timezone.utc
+
+
+def test_project_get_last_update_is_timezone_aware(temp_catalog_dir):
+    """get() must also return timezone-aware UTC last_update."""
+    catalog = ProjectCatalog(str(temp_catalog_dir))
+    (temp_catalog_dir / "project1").mkdir()
+    (temp_catalog_dir / "project1" / "run1.jsonl").write_text("{}\n")
+
+    project = catalog.get("project1")
+    assert project.last_update.tzinfo is not None
+    assert project.last_update.tzinfo == timezone.utc

@@ -62,6 +62,28 @@ def test_run_catalog_list_nonexistent_project(temp_catalog_dir):
         catalog.get_runs("non_existent_project")
 
 
+def test_run_last_update_is_timezone_aware(temp_catalog_dir):
+    """RunInfo.last_update must be timezone-aware UTC.
+
+    datetime.fromtimestamp() without tz produces naive local-time datetimes
+    that raise TypeError when compared with aware datetimes elsewhere (e.g.
+    _infer_stale_status uses datetime.now(timezone.utc)).
+    """
+    catalog = RunCatalog(str(temp_catalog_dir))
+
+    project_dir = temp_catalog_dir / "test_project"
+    project_dir.mkdir()
+    run_file = project_dir / "run1.jsonl"
+    run_file.write_text(json.dumps({"timestamp": "2024-01-01T00:00:00Z", "step": 0, "metrics": {"loss": 0.5}}) + "\n")
+    meta_file = project_dir / "run1.meta.json"
+    meta_file.write_text(json.dumps({"run_id": "id1", "status": "wip", "is_finished": False}))
+
+    run_info = catalog.get_runs("test_project")[0]
+    assert run_info.last_update is not None
+    assert run_info.last_update.tzinfo is not None
+    assert run_info.last_update.tzinfo == timezone.utc
+
+
 @pytest.mark.asyncio
 async def test_subscribe_single_run(temp_catalog_dir):
     """Test that subscribe() method can monitor a single run file"""

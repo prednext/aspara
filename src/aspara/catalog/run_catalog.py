@@ -329,7 +329,7 @@ class RunCatalog:
 
         # Use file modification time as last_update
         if run_file.exists():
-            last_update = datetime.fromtimestamp(run_file.stat().st_mtime)
+            last_update = datetime.fromtimestamp(run_file.stat().st_mtime, tz=timezone.utc)
 
         if not run_file.exists() and not metadata_file.exists():
             is_corrupted = True

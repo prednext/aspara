@@ -7,7 +7,7 @@ in the data directory.
 
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -81,9 +81,9 @@ class ProjectCatalog:
 
                     # Find last update time - use cached stat from scandir
                     if run_files_mtime:
-                        last_update = datetime.fromtimestamp(max(run_files_mtime))
+                        last_update = datetime.fromtimestamp(max(run_files_mtime), tz=timezone.utc)
                     else:
-                        last_update = datetime.fromtimestamp(project_entry.stat().st_mtime)
+                        last_update = datetime.fromtimestamp(project_entry.stat().st_mtime, tz=timezone.utc)
 
                     projects.append(
                         ProjectInfo(
@@ -123,9 +123,9 @@ class ProjectCatalog:
         run_count = len(run_files)
 
         # Get last update time from run files
-        last_update = datetime.fromtimestamp(project_dir.stat().st_mtime)
+        last_update = datetime.fromtimestamp(project_dir.stat().st_mtime, tz=timezone.utc)
         if run_files:
-            last_update = max(datetime.fromtimestamp(f.stat().st_mtime) for f in run_files)
+            last_update = max(datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc) for f in run_files)
 
         return ProjectInfo(
             name=name,

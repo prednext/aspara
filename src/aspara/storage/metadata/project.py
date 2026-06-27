@@ -5,7 +5,7 @@ This module provides storage for project metadata (notes, tags, timestamps)
 used by the catalog and dashboard layers.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +82,7 @@ class ProjectMetadataStorage(BaseMetadataStorage):
         """
         self._validate_metadata_values(metadata)
 
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         if self._metadata["created_at"] is None:
             self._metadata["created_at"] = now
