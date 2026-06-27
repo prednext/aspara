@@ -35,10 +35,10 @@ class NoteEditor {
     if (!element || !apiEndpoint) return;
 
     this._abortController = new AbortController();
-    const wrapper = this.createNoteWrapper(element, currentNote, editButtonContainerId);
+    const { wrapper, editBtn } = this.createNoteWrapper(element, currentNote, editButtonContainerId);
     element.parentNode.replaceChild(wrapper, element);
 
-    this.attachEventListeners(wrapper, apiEndpoint);
+    this.attachEventListeners(wrapper, apiEndpoint, editBtn);
   }
 
   /**
@@ -89,16 +89,14 @@ class NoteEditor {
     wrapper.appendChild(display);
     wrapper.appendChild(edit);
 
-    return wrapper;
+    return { wrapper, editBtn };
   }
 
   /**
    * Attach event listeners to note wrapper
    */
-  attachEventListeners(wrapper, apiEndpoint) {
+  attachEventListeners(wrapper, apiEndpoint, editBtn) {
     const signal = this._abortController.signal;
-    // Edit button might be outside wrapper, so search globally
-    const editBtn = document.querySelector('.note-edit-btn');
     const saveBtn = wrapper.querySelector('.note-save-btn');
     const cancelBtn = wrapper.querySelector('.note-cancel-btn');
     const textarea = wrapper.querySelector('.note-textarea');
