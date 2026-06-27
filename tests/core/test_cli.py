@@ -122,3 +122,20 @@ class TestFindAvailablePort:
 
             port = find_available_port()
             assert port == 3141
+
+
+class TestMainPortNotFound:
+    """Tests that main() exits with code 1 when no port is available."""
+
+    def test_main_exits_on_no_port(self) -> None:
+        """main() should call sys.exit(1) when find_available_port returns None."""
+        from aspara.cli import main
+
+        with (
+            patch("aspara.cli.find_available_port", return_value=None),
+            patch("sys.argv", ["aspara"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 1

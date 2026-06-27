@@ -394,7 +394,7 @@ def main() -> None:
         port = find_available_port(start_port=3141)
         if port is None:
             print("Error: No available port found!")
-            return
+            sys.exit(1)
 
         run_dashboard(port=port)
 
