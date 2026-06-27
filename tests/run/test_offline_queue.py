@@ -243,6 +243,75 @@ class TestOfflineQueueStorage:
             assert len(remaining) == 1
             assert remaining[0].id == item2.id
 
+    def test_dequeue_leaves_no_temp_files(self):
+        """dequeue must not leave partial temp files behind on success."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+            storage.enqueue(item)
+            storage.dequeue([item.id])
+
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            temp_files = list(queue_dir.glob(".tmp_*"))
+            assert temp_files == []
+
+    def test_dequeue_to_empty_preserves_file_consistency(self):
+        """dequeue that empties the queue must leave a consistent file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+            storage.enqueue(item)
+            storage.dequeue([item.id])
+
+            queue_file = Path(temp_dir) / ".queue" / "test_project" / "test_run.queue.jsonl"
+            # File should exist (atomic replace of empty content) and be empty.
+            assert queue_file.exists()
+            assert queue_file.read_text() == ""
+            assert storage.is_empty()
+
+    def test_update_retry_info_is_atomic(self):
+        """update_retry_info must not leave partial temp files behind."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+            storage.enqueue(item)
+
+            future_time = int(time.time() * 1000) + 10000
+            storage.update_retry_info(item.id, retry_count=2, next_retry_at=future_time)
+
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            temp_files = list(queue_dir.glob(".tmp_*"))
+            assert temp_files == []
+
+            # Content must be a single valid JSONL line with updated fields.
+            queue_file = queue_dir / "test_run.queue.jsonl"
+            lines = [line for line in queue_file.read_text().splitlines() if line.strip()]
+            assert len(lines) == 1
+            restored = MetricsQueueItem.from_jsonl(lines[0])
+            assert restored.retry_count == 2
+            assert restored.next_retry_at == future_time
+
     def test_update_retry_info(self):
         """Test updating retry information for an item."""
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from aspara.config import get_data_dir
 from aspara.logger import logger
+from aspara.utils.file import atomic_write_text
 from aspara.utils.validators import validate_project_name, validate_run_name
 
 if TYPE_CHECKING:
@@ -198,8 +199,7 @@ class OfflineQueueStorage:
                 lines = f.readlines()
 
             remaining = lines[count:]
-            with self._queue_file.open("w") as f:
-                f.writelines(remaining)
+            atomic_write_text(self._queue_file, lambda f: f.writelines(remaining), suffix=".jsonl")
 
             self._item_count = len(remaining)
         except OSError as e:
@@ -279,8 +279,7 @@ class OfflineQueueStorage:
                         logger.debug(f"Skipping invalid queue item during dequeue: {e}")
                     remaining_lines.append(line if line.endswith("\n") else line + "\n")
 
-                with self._queue_file.open("w") as f:
-                    f.writelines(remaining_lines)
+                atomic_write_text(self._queue_file, lambda f: f.writelines(remaining_lines), suffix=".jsonl")
 
                 self._item_count = len(remaining_lines)
             except OSError as e:
@@ -325,8 +324,7 @@ class OfflineQueueStorage:
                     new_lines.append(line if line.endswith("\n") else line + "\n")
 
                 if updated:
-                    with self._queue_file.open("w") as f:
-                        f.writelines(new_lines)
+                    atomic_write_text(self._queue_file, lambda f: f.writelines(new_lines), suffix=".jsonl")
 
                 return updated
             except OSError as e:
