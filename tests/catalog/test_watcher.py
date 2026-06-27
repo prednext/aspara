@@ -265,6 +265,91 @@ class TestDataDirWatcher:
             os.chdir(original_cwd)
 
 
+class TestProcessMetricsChangeTruncation:
+    """Tests for _process_metrics_change handling of file truncation.
+
+    When a WAL file is truncated (e.g. by PolarsMetricsStorage._clear_wal after
+    archiving), the watcher's tracked file size becomes larger than the actual
+    file. Without recovery logic, f.seek(current_size) seeks past EOF and the
+    new content appended after truncation is silently lost forever.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        """Reset singleton instance before and after each test."""
+        DataDirWatcher.reset_instance()
+        yield
+        DataDirWatcher.reset_instance()
+
+    def _make_record_line(self, step: int, loss: float) -> str:
+        return (
+            json.dumps({
+                "type": "metrics",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "step": step,
+                "metrics": {"loss": loss},
+            })
+            + "\n"
+        )
+
+    @pytest.mark.asyncio
+    async def test_recovers_after_truncate(self, tmp_path):
+        """After truncate+append, new content is read despite stale tracked size."""
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "run1.jsonl"
+        # Grow the file well past the new single record size, as a real WAL does
+        # before _clear_wal truncates it.
+        initial_content = "".join(self._make_record_line(i, 0.5) for i in range(50))
+        run_file.write_text(initial_content)
+
+        watcher = DataDirWatcher(tmp_path)
+        resolved = run_file.resolve()
+
+        # Simulate initial read populating _file_sizes with the post-read size.
+        content, end_pos = watcher._read_file_with_strategy(resolved)
+        watcher._file_sizes[resolved] = end_pos
+        stale_size = watcher._file_sizes[resolved]
+        assert stale_size > 0
+
+        # Truncate the file (as _clear_wal does) and append fresh content.
+        run_file.write_text(self._make_record_line(10, 0.1))
+        assert run_file.stat().st_size < stale_size
+
+        since = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        records = await watcher._process_metrics_change(resolved, "test_project", "run1", since)
+
+        # The new record must be recovered, not silently dropped.
+        assert len(records) == 1
+        assert records[0].step == 10
+        # And the tracked size must be reset to a sane value.
+        assert watcher._file_sizes[resolved] == run_file.stat().st_size
+
+    @pytest.mark.asyncio
+    async def test_normal_append_still_works(self, tmp_path):
+        """Normal append (no truncation) still reads only the new tail."""
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "run1.jsonl"
+        run_file.write_text(self._make_record_line(0, 0.5))
+
+        watcher = DataDirWatcher(tmp_path)
+        resolved = run_file.resolve()
+        content, end_pos = watcher._read_file_with_strategy(resolved)
+        watcher._file_sizes[resolved] = end_pos
+
+        # Append new content (file grows).
+        with open(run_file, "a") as f:
+            f.write(self._make_record_line(1, 0.4))
+
+        since = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        records = await watcher._process_metrics_change(resolved, "test_project", "run1", since)
+
+        # Only the newly appended record should be returned.
+        assert len(records) == 1
+        assert records[0].step == 1
+
+
 class TestRunCatalogSubscribe:
     """Tests for RunCatalog.subscribe() method."""
 
