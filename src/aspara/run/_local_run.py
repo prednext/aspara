@@ -218,9 +218,7 @@ class LocalRun(BaseRun):
             # Remove the corrupted destination so a retry can start clean.
             with contextlib.suppress(OSError):
                 os.remove(dest_path)
-            raise OSError(
-                f"Artifact copy verification failed: size mismatch (source={source_size}, dest={dest_size})"
-            )
+            raise OSError(f"Artifact copy verification failed: size mismatch (source={source_size}, dest={dest_size})")
 
         # Get file size
         file_size = dest_size
