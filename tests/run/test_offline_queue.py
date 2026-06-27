@@ -242,6 +242,48 @@ class TestOfflineQueueStorage:
             steps = [item.step for item in ready_items]
             assert steps == [1, 2, 5, 8]
 
+    def test_get_ready_items_respects_limit_with_large_queue(self):
+        """get_ready_items should return only ``limit`` items from a large queue."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            # Enqueue 500 items with steps 0..499
+            for step in range(500):
+                storage.enqueue(MetricsQueueItem(step=step, metrics={"loss": 0.01 * step}))
+
+            ready = storage.get_ready_items(limit=10)
+
+            # Should return exactly 10 items
+            assert len(ready) == 10
+            # Should be the 10 smallest steps (sorted ascending)
+            steps = [item.step for item in ready]
+            assert steps == list(range(10))
+
+    def test_get_ready_items_limit_one(self):
+        """get_ready_items with limit=1 should return the smallest-step item."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            storage.enqueue(MetricsQueueItem(step=5, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(step=2, metrics={"loss": 0.4}))
+            storage.enqueue(MetricsQueueItem(step=8, metrics={"loss": 0.3}))
+
+            ready = storage.get_ready_items(limit=1)
+            assert len(ready) == 1
+            assert ready[0].step == 2
+
     def test_dequeue_items(self):
         """Test removing items from the queue."""
         with tempfile.TemporaryDirectory() as temp_dir:

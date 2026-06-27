@@ -7,6 +7,7 @@ with exponential backoff when the server becomes available again.
 
 from __future__ import annotations
 
+import heapq
 import random
 import threading
 import time
@@ -210,6 +211,9 @@ class OfflineQueueStorage:
     def get_ready_items(self, limit: int = 100) -> list[MetricsQueueItem]:
         """Get items ready for retry, sorted by step.
 
+        Uses a bounded heap so that at most ``limit`` items are held in
+        memory at any time, even if the queue file is very large.
+
         Args:
             limit: Maximum number of items to return
 
@@ -217,33 +221,46 @@ class OfflineQueueStorage:
             List of items ready for retry
         """
         now_ms = int(time.time() * 1000)
-        items: list[MetricsQueueItem] = []
+        # Min-heap of (sort_key, item) — we push negative sort keys to use
+        # heapq as a max-heap of size ``limit``, then pop all and reverse.
+        # This keeps memory usage bounded to ``limit`` items.
+        heap: list[tuple[tuple[int, int], MetricsQueueItem]] = []
 
         with self._lock:
             if not self._queue_file.exists():
-                return items
+                return []
 
             try:
                 with self._queue_file.open("r") as f:
                     for line in f:
-                        if not line.strip():
+                        stripped = line.strip()
+                        if not stripped:
                             continue
                         try:
-                            item = MetricsQueueItem.from_jsonl(line.strip())
-                            if item.next_retry_at <= now_ms:
-                                items.append(item)
+                            item = MetricsQueueItem.from_jsonl(stripped)
                         except (ValueError, ValidationError) as e:
                             logger.debug(f"Skipping invalid queue item: {e}")
                             continue
 
-                        if len(items) >= limit:
-                            break
+                        if item.next_retry_at > now_ms:
+                            continue
+
+                        sort_key = (item.step, item.created_at)
+                        # Use negative key for max-heap behavior: heap[0]
+                        # holds the item with the LARGEST original key, so
+                        # it gets evicted first when a smaller item arrives.
+                        neg_key = (-sort_key[0], -sort_key[1])
+                        if len(heap) < limit:
+                            heapq.heappush(heap, (neg_key, item))
+                        elif neg_key > heap[0][0]:
+                            heapq.heapreplace(heap, (neg_key, item))
             except OSError as e:
                 logger.warning(f"Failed to read queue file {self._queue_file}: {e}")
 
-        # Sort by step to maintain order
-        items.sort(key=lambda x: (x.step, x.created_at))
-        return items[:limit]
+        # Extract items from heap in sorted order (ascending by step, then created_at).
+        result = [heapq.heappop(heap)[1] for _ in range(len(heap))]
+        result.reverse()
+        return result
 
     def dequeue(self, item_ids: list[str]) -> int:
         """Remove items from the queue by ID.
