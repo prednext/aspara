@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 
 class TestRemoteRunOfflineQueue:
@@ -70,7 +71,7 @@ class TestRemoteRunOfflineQueue:
         from aspara.run._remote_run import RemoteRun
 
         # Make save_metrics fail
-        mock_tracker_client.post.side_effect = Exception("Connection refused")
+        mock_tracker_client.post.side_effect = requests.RequestException("Connection refused")
 
         run = RemoteRun(
             name="test_run",
@@ -100,7 +101,7 @@ class TestRemoteRunOfflineQueue:
             return {}
 
         # First make save_metrics fail to queue metrics
-        mock_tracker_client.post.side_effect = Exception("Connection refused")
+        mock_tracker_client.post.side_effect = requests.RequestException("Connection refused")
 
         run = RemoteRun(
             name="test_run",
@@ -136,7 +137,7 @@ class TestRemoteRunOfflineQueue:
         from aspara.run._remote_run import RemoteRun
 
         # Make save_metrics fail initially
-        mock_tracker_client.post.side_effect = Exception("Connection refused")
+        mock_tracker_client.post.side_effect = requests.RequestException("Connection refused")
 
         run = RemoteRun(
             name="test_run",
@@ -188,7 +189,7 @@ class TestRemoteRunOfflineQueue:
         from aspara.run._remote_run import RemoteRun
 
         # Make save_metrics fail initially
-        mock_tracker_client.post.side_effect = Exception("Connection refused")
+        mock_tracker_client.post.side_effect = requests.RequestException("Connection refused")
 
         run = RemoteRun(
             name="test_run",
@@ -239,7 +240,7 @@ class TestRemoteRunOfflineQueue:
         from aspara.run._remote_run import RemoteRun
 
         # Make save_metrics fail
-        mock_tracker_client.post.side_effect = Exception("Connection refused")
+        mock_tracker_client.post.side_effect = requests.RequestException("Connection refused")
 
         run = RemoteRun(
             name="test_run",
@@ -262,7 +263,7 @@ class TestRemoteRunOfflineQueue:
         from aspara.run._remote_run import RemoteRun
 
         # Make save_metrics fail
-        mock_tracker_client.post.side_effect = Exception("Connection refused")
+        mock_tracker_client.post.side_effect = requests.RequestException("Connection refused")
 
         run = RemoteRun(
             name="test_run",
@@ -320,7 +321,7 @@ class TestTrackerClientHealthCheck:
         from aspara.run._remote_run import TrackerClient
 
         mock_session = MagicMock()
-        mock_session.get.side_effect = Exception("Connection refused")
+        mock_session.get.side_effect = requests.RequestException("Connection refused")
 
         client = TrackerClient.__new__(TrackerClient)
         client.base_url = "http://localhost:3142"
@@ -380,7 +381,7 @@ class TestQueueFileStructure:
             )
 
             # Make save_metrics fail to trigger queue
-            mock_session.post.side_effect = Exception("Connection refused")
+            mock_session.post.side_effect = requests.RequestException("Connection refused")
 
             run = RemoteRun(
                 name="test_run",

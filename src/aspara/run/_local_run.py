@@ -205,7 +205,7 @@ class LocalRun(BaseRun):
         dest_path = os.path.join(self._artifacts_dir, artifact_name)
         try:
             shutil.copy2(abs_file_path, dest_path)
-        except Exception as e:  # noqa: BLE001
+        except OSError as e:
             raise OSError(f"Failed to copy artifact file: {e}") from e
 
         # Get file size

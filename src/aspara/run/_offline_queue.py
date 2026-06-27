@@ -236,8 +236,8 @@ class OfflineQueueStorage:
 
                         if len(items) >= limit:
                             break
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning(f"Failed to read queue file {self._queue_file}: {e}")
 
         # Sort by step to maintain order
         items.sort(key=lambda x: (x.step, x.created_at))
@@ -360,8 +360,8 @@ class OfflineQueueStorage:
                     # Try to remove empty directory
                     if self._queue_dir.exists() and not any(self._queue_dir.iterdir()):
                         self._queue_dir.rmdir()
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug(f"Failed to cleanup queue files at {self._queue_dir}: {e}")
 
 
 class MetricsRetryWorker:
