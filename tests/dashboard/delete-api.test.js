@@ -59,6 +59,17 @@ describe('deleteProjectApi', () => {
 
     await expect(deleteProjectApi('test-project')).rejects.toThrow('Network error');
   });
+
+  test('should handle non-JSON error response gracefully', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+    });
+
+    // Should throw a meaningful error, not the raw JSON parse SyntaxError.
+    await expect(deleteProjectApi('test-project')).rejects.toThrow(/Server error|Unknown error|Failed to delete/i);
+  });
 });
 
 describe('deleteRunApi', () => {
@@ -118,5 +129,16 @@ describe('deleteRunApi', () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Connection refused'));
 
     await expect(deleteRunApi('project-1', 'run-1')).rejects.toThrow('Connection refused');
+  });
+
+  test('should handle non-JSON error response gracefully', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+    });
+
+    // Should throw a meaningful error, not the raw JSON parse SyntaxError.
+    await expect(deleteRunApi('project-1', 'run-1')).rejects.toThrow(/Server error|Unknown error|Failed to delete/i);
   });
 });

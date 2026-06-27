@@ -19,8 +19,14 @@ export async function deleteProjectApi(projectName) {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail || 'Unknown error');
+    let detail = 'Unknown error';
+    try {
+      const errorData = await response.json();
+      detail = errorData.detail || detail;
+    } catch {
+      detail = `Server error: ${response.status}`;
+    }
+    throw new Error(detail);
   }
 
   // Handle 204 No Content responses
@@ -48,8 +54,14 @@ export async function deleteRunApi(projectName, runName) {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail || 'Unknown error');
+    let detail = 'Unknown error';
+    try {
+      const errorData = await response.json();
+      detail = errorData.detail || detail;
+    } catch {
+      detail = `Server error: ${response.status}`;
+    }
+    throw new Error(detail);
   }
 
   // Handle 204 No Content responses

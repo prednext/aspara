@@ -267,11 +267,22 @@ class TagEditor {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `Server error: ${response.status}`);
+        let detail = `Server error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          detail = errorData.detail || detail;
+        } catch {
+          // Response body is not JSON (e.g. HTML error page); keep default.
+        }
+        throw new Error(detail);
       }
 
-      const updatedMetadata = await response.json();
+      let updatedMetadata;
+      try {
+        updatedMetadata = await response.json();
+      } catch {
+        throw new Error('Failed to parse server response');
+      }
 
       // Update display with saved tags
       this.updateDisplay(wrapper, updatedMetadata.tags || []);
