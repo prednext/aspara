@@ -133,6 +133,52 @@ def test_stream_does_not_leak_internal_exception_details(sse_test_client):
         app.dependency_overrides.pop(get_run_catalog, None)
 
 
+def test_stream_leaks_exception_details_in_dev_mode(sse_test_client, monkeypatch):
+    """In dev mode, the SSE error event should include the exception text.
+
+    This makes debugging easier during development. The same exception that
+    is masked in production should be visible to the developer.
+    """
+    client, data_dir = sse_test_client
+
+    project_dir = data_dir / "test_project"
+    project_dir.mkdir()
+
+    sensitive_message = "/home/secret/internal/path/leaked"
+
+    async def _exploding_subscribe(*_args, **_kwargs):
+        raise RuntimeError(sensitive_message)
+        yield  # pragma: no cover - make this an async generator
+
+    class _FakeCatalog:
+        def subscribe(self, *_args, **_kwargs):
+            return _exploding_subscribe()
+
+    from aspara.dashboard.dependencies import get_run_catalog
+    from aspara.dashboard.main import app
+
+    # Enable dev mode
+    monkeypatch.setenv("ASPARA_DEV_MODE", "1")
+
+    # Force re-evaluation of dev_mode in the route (it's read at call time)
+    app.dependency_overrides[get_run_catalog] = lambda: _FakeCatalog()
+    try:
+        since = 0
+        response = client.get(
+            f"/api/projects/test_project/runs/stream?runs=run1&since={since}",
+            headers={"Accept": "text/event-stream"},
+        )
+
+        assert response.status_code == 200
+        body = response.text
+        assert "error" in body
+        # In dev mode, the sensitive detail SHOULD appear in the response body.
+        assert sensitive_message in body
+    finally:
+        app.dependency_overrides.pop(get_run_catalog, None)
+        monkeypatch.delenv("ASPARA_DEV_MODE", raising=False)
+
+
 @pytest.mark.asyncio
 async def test_subscribe_cleanup_on_cancellation(tmp_path):
     """Test that file watchers are properly cleaned up when cancelled.
