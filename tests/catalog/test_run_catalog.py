@@ -5,6 +5,7 @@ Tests for RunCatalog
 import asyncio
 import contextlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -859,3 +860,82 @@ class TestRunCatalogMetadata:
 
         assert metadata["notes"] == "Updated notes"
         assert metadata["tags"] == ["ml", "experiment"]
+
+
+class TestReadRunInfoTOCTOU:
+    """Tests for TOCTOU race in _read_run_info.
+
+    The file can be deleted between exists() and stat() calls when the
+    watcher and delete API run concurrently. _read_run_info should handle
+    FileNotFoundError gracefully instead of crashing.
+    """
+
+    def test_run_file_deleted_after_stat_succeeds(self, tmp_path):
+        """Normal case: run file exists and stat succeeds."""
+        catalog = RunCatalog(tmp_path)
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "test_run.jsonl"
+        run_file.write_text('{"step": 0, "metrics": {"loss": 0.5}}\n')
+        meta_file = project_dir / "test_run.meta.json"
+        meta_file.write_text(
+            json.dumps({
+                "run_id": "test-id",
+                "tags": [],
+                "notes": "",
+                "params": {},
+                "config": {},
+                "artifacts": [],
+                "summary": {},
+                "is_finished": False,
+                "exit_code": None,
+                "status": "wip",
+                "start_time": None,
+                "finish_time": None,
+            })
+        )
+
+        run_info = catalog._read_run_info("test_project", "test_run", run_file)
+        assert run_info.name == "test_run"
+        assert run_info.is_corrupted is False
+
+    def test_run_file_deleted_between_exists_and_stat(self, tmp_path):
+        """run_file.stat() raises FileNotFoundError — should not crash."""
+        catalog = RunCatalog(tmp_path)
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "test_run.jsonl"
+        # Don't create the run file — stat() will raise FileNotFoundError.
+
+        run_info = catalog._read_run_info("test_project", "test_run", run_file)
+        # Should be marked corrupted, not crash.
+        assert run_info.is_corrupted is True
+        assert run_info.error_message == "Run file not found"
+
+    def test_run_file_deleted_during_stat_call(self, tmp_path, monkeypatch):
+        """Simulate file being deleted between exists() and stat() calls."""
+        catalog = RunCatalog(tmp_path)
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "test_run.jsonl"
+        run_file.write_text('{"step": 0}\n')
+
+        # Patch os.stat to raise FileNotFoundError for this specific file,
+        # simulating a TOCTOU race where the file is deleted between
+        # exists() and stat() calls.
+        original_stat = os.stat
+
+        def _raising_stat(path, *args, **kwargs):
+            if str(path) == str(run_file):
+                raise FileNotFoundError("File deleted between exists and stat")
+            return original_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr("os.stat", _raising_stat)
+
+        # Should not crash — should handle FileNotFoundError gracefully.
+        run_info = catalog._read_run_info("test_project", "test_run", run_file)
+        assert run_info.is_corrupted is True
+        assert run_info.error_message == "Run file not found"

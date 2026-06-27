@@ -322,19 +322,30 @@ class RunCatalog:
         # Infer stale status
         status = _infer_stale_status(status, start_time, is_finished)
 
-        # Lightweight corruption check: file exists and is not empty
+        # Lightweight corruption check: file exists and is not empty.
+        # Use try/except instead of exists()→stat() to avoid TOCTOU race
+        # when the file is deleted between the two calls (e.g. watcher and
+        # delete API running concurrently).
         is_corrupted = False
         error_message = None
         last_update = None
 
-        # Use file modification time as last_update
-        if run_file.exists():
-            last_update = datetime.fromtimestamp(run_file.stat().st_mtime, tz=timezone.utc)
+        run_exists = False
+        run_size = 0
+        try:
+            run_stat = run_file.stat()
+            run_exists = True
+            run_size = run_stat.st_size
+            last_update = datetime.fromtimestamp(run_stat.st_mtime, tz=timezone.utc)
+        except FileNotFoundError:
+            pass
 
-        if not run_file.exists() and not metadata_file.exists():
+        metadata_exists = metadata_file.exists()
+
+        if not run_exists and not metadata_exists:
             is_corrupted = True
             error_message = "Run file not found"
-        elif run_file.exists() and run_file.stat().st_size == 0 and not metadata_file.exists():
+        elif run_exists and run_size == 0 and not metadata_exists:
             is_corrupted = True
             error_message = "Empty file! No data found!"
 
