@@ -184,8 +184,11 @@ async def stream_multiple_runs(
             logger.info("[SSE] Generator cancelled")
             raise
         except Exception as e:
+            # Log the full exception internally, but send a generic message to
+            # the client so internal paths, library internals, or other
+            # sensitive details are not leaked over the wire.
             logger.error(f"[SSE] Exception in event_generator: {e}", exc_info=True)
-            yield {"event": "error", "data": str(e)}
+            yield {"event": "error", "data": "Internal server error"}
         finally:
             # Clean up: remove this connection from active set
             logger.info("[SSE] event_generator finished, cleaning up")
