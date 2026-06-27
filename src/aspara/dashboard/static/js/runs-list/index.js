@@ -7,6 +7,7 @@ class RunsListSorter {
     this.runs = [];
     this.sortKey = localStorage.getItem('runs_sort_key') || 'name';
     this.sortOrder = localStorage.getItem('runs_sort_order') || 'asc';
+    this._abortController = new AbortController();
     this.init();
   }
 
@@ -18,6 +19,17 @@ class RunsListSorter {
     this.initializeTagEditors();
     this.initializeCardNavigation();
     this.initializeDeleteHandlers();
+  }
+
+  /**
+   * Remove all event listeners and clean up.
+   * Call this when the sorter is no longer needed to prevent memory leaks.
+   */
+  destroy() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
   }
 
   /**
@@ -37,27 +49,36 @@ class RunsListSorter {
    * Prevents navigation when clicking on interactive elements like tag editors or buttons
    */
   initializeCardNavigation() {
+    const signal = this._abortController.signal;
     const runCards = document.querySelectorAll('.run-card');
     for (const card of runCards) {
-      card.addEventListener('click', (e) => {
-        // Check if click is on a button or inside tag editor
-        const isButton = e.target.closest('button');
-        const isTagEditor = e.target.closest('.tag-editor-wrapper');
-        const isTagContainer = e.target.closest('[id^="run-tags-"]');
+      card.addEventListener(
+        'click',
+        (e) => {
+          // Check if click is on a button or inside tag editor
+          const isButton = e.target.closest('button');
+          const isTagEditor = e.target.closest('.tag-editor-wrapper');
+          const isTagContainer = e.target.closest('[id^="run-tags-"]');
 
-        // Only navigate if not clicking on interactive elements
-        if (!isButton && !isTagEditor && !isTagContainer) {
-          this.navigateToRun(card);
-        }
-      });
+          // Only navigate if not clicking on interactive elements
+          if (!isButton && !isTagEditor && !isTagContainer) {
+            this.navigateToRun(card);
+          }
+        },
+        { signal }
+      );
 
       // Keyboard navigation: Enter or Space to activate
-      card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          this.navigateToRun(card);
-        }
-      });
+      card.addEventListener(
+        'keydown',
+        (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.navigateToRun(card);
+          }
+        },
+        { signal }
+      );
     }
   }
 
@@ -77,21 +98,26 @@ class RunsListSorter {
   }
 
   attachEventListeners() {
+    const signal = this._abortController.signal;
     const headers = document.querySelectorAll('[data-sort]');
     for (const header of headers) {
-      header.addEventListener('click', () => {
-        const key = header.dataset.sort;
-        if (this.sortKey === key) {
-          this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-        } else {
-          this.sortKey = key;
-          this.sortOrder = 'asc';
-        }
-        localStorage.setItem('runs_sort_key', this.sortKey);
-        localStorage.setItem('runs_sort_order', this.sortOrder);
-        this.updateSortIndicators();
-        this.sortAndRender();
-      });
+      header.addEventListener(
+        'click',
+        () => {
+          const key = header.dataset.sort;
+          if (this.sortKey === key) {
+            this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+          } else {
+            this.sortKey = key;
+            this.sortOrder = 'asc';
+          }
+          localStorage.setItem('runs_sort_key', this.sortKey);
+          localStorage.setItem('runs_sort_order', this.sortOrder);
+          this.updateSortIndicators();
+          this.sortAndRender();
+        },
+        { signal }
+      );
     }
   }
 
@@ -129,17 +155,22 @@ class RunsListSorter {
     const container = document.getElementById('runs-container');
     if (!container) return;
 
-    container.addEventListener('click', async (e) => {
-      const deleteBtn = e.target.closest('.delete-run-btn');
-      if (!deleteBtn) return;
+    const signal = this._abortController.signal;
+    container.addEventListener(
+      'click',
+      async (e) => {
+        const deleteBtn = e.target.closest('.delete-run-btn');
+        if (!deleteBtn) return;
 
-      e.stopPropagation();
-      const projectName = deleteBtn.dataset.project;
-      const runName = deleteBtn.dataset.run;
-      if (!projectName || !runName) return;
+        e.stopPropagation();
+        const projectName = deleteBtn.dataset.project;
+        const runName = deleteBtn.dataset.run;
+        if (!projectName || !runName) return;
 
-      await this.handleDeleteRun(projectName, runName);
-    });
+        await this.handleDeleteRun(projectName, runName);
+      },
+      { signal }
+    );
   }
 
   /**

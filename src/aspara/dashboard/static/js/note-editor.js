@@ -21,6 +21,7 @@ class NoteEditor {
     this.originalValue = '';
     this.currentElement = null;
     this.currentApiEndpoint = null;
+    this._abortController = null;
   }
 
   /**
@@ -33,6 +34,7 @@ class NoteEditor {
   init(element, apiEndpoint, currentNote = '', editButtonContainerId = null) {
     if (!element || !apiEndpoint) return;
 
+    this._abortController = new AbortController();
     const wrapper = this.createNoteWrapper(element, currentNote, editButtonContainerId);
     element.parentNode.replaceChild(wrapper, element);
 
@@ -94,6 +96,7 @@ class NoteEditor {
    * Attach event listeners to note wrapper
    */
   attachEventListeners(wrapper, apiEndpoint) {
+    const signal = this._abortController.signal;
     // Edit button might be outside wrapper, so search globally
     const editBtn = document.querySelector('.note-edit-btn');
     const saveBtn = wrapper.querySelector('.note-save-btn');
@@ -102,34 +105,42 @@ class NoteEditor {
     const noteContent = wrapper.querySelector('.note-content');
 
     if (editBtn) {
-      editBtn.addEventListener('click', () => this.startEditing(wrapper, apiEndpoint));
+      editBtn.addEventListener('click', () => this.startEditing(wrapper, apiEndpoint), { signal });
     }
 
     // Click on placeholder text enters edit mode
     if (noteContent) {
-      noteContent.addEventListener('click', () => {
-        if (isNoteEmpty(noteContent.textContent)) {
-          this.startEditing(wrapper, apiEndpoint);
-        }
-      });
+      noteContent.addEventListener(
+        'click',
+        () => {
+          if (isNoteEmpty(noteContent.textContent)) {
+            this.startEditing(wrapper, apiEndpoint);
+          }
+        },
+        { signal }
+      );
     }
 
     if (saveBtn) {
-      saveBtn.addEventListener('click', () => this.saveNote(wrapper, apiEndpoint));
+      saveBtn.addEventListener('click', () => this.saveNote(wrapper, apiEndpoint), { signal });
     }
     if (cancelBtn) {
-      cancelBtn.addEventListener('click', () => this.cancelEditing(wrapper));
+      cancelBtn.addEventListener('click', () => this.cancelEditing(wrapper), { signal });
     }
 
     // Save on Ctrl+Enter, Cancel on Escape
     if (textarea) {
-      textarea.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.ctrlKey) {
-          this.saveNote(wrapper, apiEndpoint);
-        } else if (e.key === 'Escape') {
-          this.cancelEditing(wrapper);
-        }
-      });
+      textarea.addEventListener(
+        'keydown',
+        (e) => {
+          if (e.key === 'Enter' && e.ctrlKey) {
+            this.saveNote(wrapper, apiEndpoint);
+          } else if (e.key === 'Escape') {
+            this.cancelEditing(wrapper);
+          }
+        },
+        { signal }
+      );
     }
   }
 
@@ -286,6 +297,18 @@ class NoteEditor {
     this.originalValue = '';
     this.currentElement = null;
     this.currentApiEndpoint = null;
+  }
+
+  /**
+   * Remove all event listeners and clean up.
+   * Call this when the editor is no longer needed to prevent memory leaks.
+   */
+  destroy() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
+    this.resetEditingState();
   }
 }
 

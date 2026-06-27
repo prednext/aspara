@@ -11,6 +11,7 @@ class TagEditor {
   constructor() {
     this.taggerInstance = null;
     this.isEditing = false;
+    this._abortController = null;
   }
 
   /**
@@ -22,6 +23,7 @@ class TagEditor {
   init(element, apiEndpoint, currentTags = []) {
     if (!element || !apiEndpoint) return;
 
+    this._abortController = new AbortController();
     const { wrapper, editBtn, input, saveBtn, cancelBtn } = this.createTagWrapper(element, currentTags);
     element.parentNode.replaceChild(wrapper, element);
 
@@ -127,43 +129,60 @@ class TagEditor {
    * Attach event listeners
    */
   attachEventListeners(wrapper, editBtn, input, saveBtn, cancelBtn, apiEndpoint) {
+    const signal = this._abortController.signal;
     // Store the tags when entering edit mode for cancel restore
     let tagsBeforeEdit = [];
 
     // Prevent clicks from propagating to parent card
-    wrapper.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
+    wrapper.addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+      },
+      { signal }
+    );
 
     // Edit button toggles edit mode
-    editBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // Save current tags before entering edit mode
-      tagsBeforeEdit = input.value
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0);
-      this.toggleEditMode(wrapper, input);
-    });
+    editBtn.addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+        // Save current tags before entering edit mode
+        tagsBeforeEdit = input.value
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0);
+        this.toggleEditMode(wrapper, input);
+      },
+      { signal }
+    );
 
     // Save button saves and closes edit mode
-    saveBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      try {
-        await this.saveTags(wrapper, input, apiEndpoint);
-      } catch (error) {
-        // Error is already logged in saveTags()
-      }
-      this.closeEditMode(wrapper, input);
-    });
+    saveBtn.addEventListener(
+      'click',
+      async (e) => {
+        e.stopPropagation();
+        try {
+          await this.saveTags(wrapper, input, apiEndpoint);
+        } catch (error) {
+          // Error is already logged in saveTags()
+        }
+        this.closeEditMode(wrapper, input);
+      },
+      { signal }
+    );
 
     // Cancel button discards changes and closes edit mode
-    cancelBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // Restore original tags and update display
-      this.restoreTags(wrapper, input, tagsBeforeEdit);
-      this.closeEditMode(wrapper, input);
-    });
+    cancelBtn.addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+        // Restore original tags and update display
+        this.restoreTags(wrapper, input, tagsBeforeEdit);
+        this.closeEditMode(wrapper, input);
+      },
+      { signal }
+    );
 
     // Close on Escape - cancel without saving
     wrapper.addEventListener(
@@ -177,7 +196,7 @@ class TagEditor {
           this.closeEditMode(wrapper, input);
         }
       },
-      true
+      { capture: true, signal }
     ); // true = capture phase
   }
 
@@ -325,6 +344,19 @@ class TagEditor {
     const errorDiv = wrapper.querySelector('.tag-error');
     errorDiv.textContent = message;
     errorDiv.classList.remove('hidden');
+  }
+
+  /**
+   * Remove all event listeners and clean up.
+   * Call this when the editor is no longer needed to prevent memory leaks.
+   */
+  destroy() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
+    this.taggerInstance = null;
+    this.isEditing = false;
   }
 }
 

@@ -477,4 +477,40 @@ describe('TagEditor', () => {
       expect(containers.length).toBe(0); // No containers with run-tags-* ID exist!
     });
   });
+
+  describe('destroy', () => {
+    test('should remove event listeners so edit button no longer works', () => {
+      tagEditor.init(container, '/api/test', ['tag1', 'tag2']);
+      const wrapper = document.querySelector('.tag-editor-wrapper');
+      const editBtn = wrapper.querySelector('.tag-edit-btn');
+
+      // Edit button works before destroy
+      editBtn.click();
+      expect(tagEditor.isEditing).toBe(true);
+
+      // Close edit mode
+      const cancelBtn = wrapper.querySelector('.tag-cancel-btn');
+      cancelBtn.click();
+      expect(tagEditor.isEditing).toBe(false);
+
+      // Destroy and verify edit button no longer works
+      tagEditor.destroy();
+      editBtn.click();
+      expect(tagEditor.isEditing).toBe(false); // unchanged after destroy
+    });
+
+    test('should be safe to call multiple times', () => {
+      tagEditor.init(container, '/api/test', ['tag1']);
+      expect(() => {
+        tagEditor.destroy();
+        tagEditor.destroy();
+      }).not.toThrow();
+    });
+
+    test('should be safe to call without init', () => {
+      expect(() => {
+        tagEditor.destroy();
+      }).not.toThrow();
+    });
+  });
 });
