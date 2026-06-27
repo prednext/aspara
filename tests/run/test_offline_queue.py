@@ -4,7 +4,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from aspara.run._offline_queue import (
     MetricsQueueItem,
@@ -165,6 +165,33 @@ class TestOfflineQueueStorage:
                 storage.enqueue(item)
 
             assert storage.count() == 5
+
+    def test_enqueue_persists_to_disk_synchronously(self):
+        """enqueue must fsync so the item survives a process crash right after."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+
+            # datasync is the single source of truth for fsync in this codebase;
+            # patching it verifies enqueue actually calls it per write.
+            with patch("aspara.run._offline_queue.datasync") as mock_datasync:
+                result = storage.enqueue(item)
+
+            assert result is True
+            mock_datasync.assert_called_once()
+
+            # And the content is actually on disk.
+            queue_file = Path(temp_dir) / ".queue" / "test_project" / "test_run.queue.jsonl"
+            lines = [line for line in queue_file.read_text().splitlines() if line.strip()]
+            assert len(lines) == 1
+            assert MetricsQueueItem.from_jsonl(lines[0]).step == 0
 
     def test_get_ready_items(self):
         """Test getting items ready for retry."""

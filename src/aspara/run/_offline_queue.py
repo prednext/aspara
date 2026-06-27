@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from aspara.config import get_data_dir
 from aspara.logger import logger
-from aspara.utils.file import atomic_write_text
+from aspara.utils.file import atomic_write_text, datasync
 from aspara.utils.validators import validate_project_name, validate_run_name
 
 if TYPE_CHECKING:
@@ -177,6 +177,8 @@ class OfflineQueueStorage:
             try:
                 with self._queue_file.open("a") as f:
                     f.write(item.to_jsonl() + "\n")
+                    f.flush()
+                    datasync(f.fileno())
                 self._item_count += 1
                 return True
             except OSError as e:
