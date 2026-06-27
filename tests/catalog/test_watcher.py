@@ -350,6 +350,78 @@ class TestProcessMetricsChangeTruncation:
         assert records[0].step == 1
 
 
+class TestDispatchLoopSymlinkSkip:
+    """Tests that the dispatch loop skips symlinks.
+
+    The initial read in _read_initial_data already skips symlinks, but the
+    dispatch loop must do the same so a symlink created after subscription
+    cannot bypass the check and read files outside data_dir.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        """Reset singleton instance before and after each test."""
+        DataDirWatcher.reset_instance()
+        yield
+        DataDirWatcher.reset_instance()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_skips_symlink(self, tmp_path):
+        """A symlink inside data_dir must not yield records from its target."""
+        import os
+
+        if os.name == "nt":
+            pytest.skip("Symlink behavior differs on Windows")
+
+        # Create a target file outside data_dir with sensitive content.
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        target_file = outside_dir / "secret.jsonl"
+        target_file.write_text(
+            json.dumps({
+                "type": "metrics",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "step": 0,
+                "metrics": {"secret": 999},
+            })
+            + "\n"
+        )
+
+        # Create project dir inside data_dir with a legitimate run.
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        legit_file = project_dir / "legit.jsonl"
+        legit_file.write_text(
+            json.dumps({
+                "type": "metrics",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "step": 0,
+                "metrics": {"loss": 0.5},
+            })
+            + "\n"
+        )
+
+        # Create a symlink inside data_dir pointing to the outside file.
+        symlink_path = project_dir / "evil.jsonl"
+        os.symlink(target_file, symlink_path)
+        assert symlink_path.is_symlink()
+
+        watcher = await DataDirWatcher.get_instance(tmp_path)
+        since = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        targets = {"test_project": None}  # Watch all runs
+
+        records = await collect_records_with_timeout(watcher.subscribe(targets, since), timeout=1.0)
+
+        # The legit run should produce a record, but the symlink must NOT.
+        metric_records = [r for r in records if isinstance(r, MetricRecord)]
+        run_names = {r.run for r in metric_records}
+        assert "legit" in run_names
+        assert "evil" not in run_names
+        # The secret metric value must never appear.
+        for r in metric_records:
+            assert "secret" not in r.metrics
+
+
 class TestRunCatalogSubscribe:
     """Tests for RunCatalog.subscribe() method."""
 

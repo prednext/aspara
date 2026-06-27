@@ -316,7 +316,16 @@ class DataDirWatcher:
                 logger.debug(f"[Watcher] Received {len(changes)} change(s)")
 
                 for _change_type, changed_path_str in changes:
-                    changed_path = Path(changed_path_str).resolve()
+                    raw_path = Path(changed_path_str)
+                    # Skip symlinks to prevent reading files outside data_dir.
+                    # The initial read in _read_initial_data already skips
+                    # symlinks; the dispatch loop must do the same so a
+                    # symlink created after subscription cannot bypass it.
+                    if raw_path.is_symlink():
+                        logger.warning(f"[Watcher] Skipping symlink in dispatch: {raw_path}")
+                        continue
+
+                    changed_path = raw_path.resolve()
 
                     # Parse file path to get project/run/type
                     parsed = self._parse_file_path(changed_path)
