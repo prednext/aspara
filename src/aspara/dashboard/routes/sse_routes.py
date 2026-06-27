@@ -17,11 +17,11 @@ from typing import Any, cast
 from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
 
-from aspara.config import get_resource_limits, is_dev_mode
+from aspara.config import is_dev_mode
 from aspara.models import MetricRecord, StatusRecord
-from aspara.utils import validators
 
 from ..dependencies import RunCatalogDep, ValidatedProject
+from ..utils import parse_and_validate_run_list
 
 logger = logging.getLogger(__name__)
 
@@ -58,44 +58,14 @@ async def stream_multiple_runs(
 
     from ..main import app_state
 
-    if not runs:
+    try:
+        run_list = parse_and_validate_run_list(runs)
+    except ValueError as e:
 
-        async def no_runs_error_generator():
-            yield {"event": "error", "data": "No runs specified"}
+        async def validation_error_generator(msg: str = str(e)):
+            yield {"event": "error", "data": msg}
 
-        return EventSourceResponse(no_runs_error_generator())
-
-    # Parse and validate run names
-    run_list = [r.strip() for r in runs.split(",") if r.strip()]
-
-    if not run_list:
-
-        async def no_valid_runs_error_generator():
-            yield {"event": "error", "data": "No valid runs specified"}
-
-        return EventSourceResponse(no_valid_runs_error_generator())
-
-    # Validate run count limit
-    limits = get_resource_limits()
-    if len(run_list) > limits.max_metric_names:
-        too_many_runs_msg = f"Too many runs: {len(run_list)} (max: {limits.max_metric_names})"
-
-        async def too_many_runs_error_generator():
-            yield {"event": "error", "data": too_many_runs_msg}
-
-        return EventSourceResponse(too_many_runs_error_generator())
-
-    # Validate each run name
-    for run_name in run_list:
-        try:
-            validators.validate_run_name(run_name)
-        except ValueError:
-            invalid_run_msg = f"Invalid run name: {run_name}"
-
-            async def invalid_run_error_generator(msg: str = invalid_run_msg):
-                yield {"event": "error", "data": msg}
-
-            return EventSourceResponse(invalid_run_error_generator())
+        return EventSourceResponse(validation_error_generator())
 
     # Convert UNIX ms to datetime
     since_dt = datetime.fromtimestamp(since / 1000, tz=timezone.utc)

@@ -35,6 +35,7 @@ from ..dependencies import (
     ValidatedRun,
 )
 from ..models.metrics import Metadata, MetadataUpdateRequest
+from ..utils import parse_and_validate_run_list
 from ..utils.compression import compress_metrics
 
 
@@ -180,31 +181,12 @@ async def runs_metrics_api(
             detail=f"Invalid format: {format}. Must be 'json' or 'msgpack'",
         )
 
-    if not runs:
+    try:
+        run_list = parse_and_validate_run_list(runs)
+    except ValueError as e:
         if format == "msgpack":
-            raise HTTPException(status_code=400, detail="No runs specified")
-        return JSONResponse(content={"error": "No runs specified"})
-
-    run_list = [r.strip() for r in runs.split(",") if r.strip()]
-    if not run_list:
-        if format == "msgpack":
-            raise HTTPException(status_code=400, detail="No valid runs specified")
-        return JSONResponse(content={"error": "No valid runs specified"})
-
-    # Validate number of runs
-    limits = get_resource_limits()
-    if len(run_list) > limits.max_metric_names:  # Reuse max_metric_names limit for runs
-        raise HTTPException(
-            status_code=400,
-            detail=f"Too many runs: {len(run_list)} (max: {limits.max_metric_names})",
-        )
-
-    # Validate each run name
-    for run_name in run_list:
-        try:
-            validators.validate_run_name(run_name)
-        except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
+        return JSONResponse(content={"error": str(e)})
 
     # Convert since (UNIX ms) to datetime if provided
     # Create timezone-naive datetime (matches DataFrame storage)
@@ -219,7 +201,7 @@ async def runs_metrics_api(
             df = await asyncio.to_thread(run_catalog.load_metrics, project, run_name, since_dt)
             return (run_name, compress_metrics(df))
         except Exception as e:
-            logger.warning(f"Failed to load metrics for {project}/{run_name}: {e}")
+            logger.warning(f"Failed to load metrics for {project}/{run_name}: {type(e).__name__}: {e}")
             return (run_name, None)
 
     # Execute all loads in parallel
@@ -332,7 +314,7 @@ async def delete_project(
         logger.warning(f"Permission denied deleting project {project}: {e}")
         raise HTTPException(status_code=403, detail="Permission denied") from e
     except Exception as e:
-        logger.error(f"Error deleting project {project}: {e}")
+        logger.error(f"Error deleting project {project}: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete project") from e
 
 
@@ -428,5 +410,5 @@ async def delete_run(
         logger.warning(f"Permission denied deleting run {project}/{run}: {e}")
         raise HTTPException(status_code=403, detail="Permission denied") from e
     except Exception as e:
-        logger.error(f"Error deleting run {project}/{run}: {e}")
+        logger.error(f"Error deleting run {project}/{run}: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete run") from e
