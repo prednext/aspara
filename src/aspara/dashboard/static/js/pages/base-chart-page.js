@@ -41,6 +41,7 @@ export class BaseChartPage {
     this.resizeHandler = null;
     this.fullWidthChangedHandler = null;
     this.resizeTimeout = null;
+    this.sizeHandlers = [];
   }
 
   /**
@@ -69,14 +70,17 @@ export class BaseChartPage {
    * Initialize size button click handlers.
    */
   initSizeControls() {
-    if (this.sizeSBtn) {
-      this.sizeSBtn.addEventListener('click', () => this.setChartSize('S'));
-    }
-    if (this.sizeMBtn) {
-      this.sizeMBtn.addEventListener('click', () => this.setChartSize('M'));
-    }
-    if (this.sizeLBtn) {
-      this.sizeLBtn.addEventListener('click', () => this.setChartSize('L'));
+    const sizeButtons = [
+      [this.sizeSBtn, 'S'],
+      [this.sizeMBtn, 'M'],
+      [this.sizeLBtn, 'L'],
+    ];
+    for (const [btn, size] of sizeButtons) {
+      if (btn) {
+        const handler = () => this.setChartSize(size);
+        btn.addEventListener('click', handler);
+        this.sizeHandlers.push({ element: btn, handler });
+      }
     }
     this.updateSizeButtons();
   }
@@ -325,6 +329,10 @@ export class BaseChartPage {
       clearTimeout(this.resizeTimeout);
       this.resizeTimeout = null;
     }
+    for (const { element, handler } of this.sizeHandlers) {
+      element.removeEventListener('click', handler);
+    }
+    this.sizeHandlers = [];
     this.charts.clear();
   }
 }

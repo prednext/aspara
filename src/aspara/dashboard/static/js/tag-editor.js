@@ -191,8 +191,8 @@ class TagEditor {
       this.closeEditMode(wrapper, input);
     } else {
       if (guardReadOnly()) return;
-      display.classList.add('hidden');
-      edit.classList.remove('hidden');
+      if (display) display.classList.add('hidden');
+      if (edit) edit.classList.remove('hidden');
       this.isEditing = true;
       input.focus();
     }
@@ -206,9 +206,9 @@ class TagEditor {
     const edit = wrapper.querySelector('.tag-edit');
     const errorDiv = wrapper.querySelector('.tag-error');
 
-    errorDiv.classList.add('hidden');
-    edit.classList.add('hidden');
-    display.classList.remove('hidden');
+    if (errorDiv) errorDiv.classList.add('hidden');
+    if (edit) edit.classList.add('hidden');
+    if (display) display.classList.remove('hidden');
     this.isEditing = false;
   }
 

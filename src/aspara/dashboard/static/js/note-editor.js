@@ -113,17 +113,23 @@ class NoteEditor {
       });
     }
 
-    saveBtn.addEventListener('click', () => this.saveNote(wrapper, apiEndpoint));
-    cancelBtn.addEventListener('click', () => this.cancelEditing(wrapper));
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => this.saveNote(wrapper, apiEndpoint));
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => this.cancelEditing(wrapper));
+    }
 
     // Save on Ctrl+Enter, Cancel on Escape
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.ctrlKey) {
-        this.saveNote(wrapper, apiEndpoint);
-      } else if (e.key === 'Escape') {
-        this.cancelEditing(wrapper);
-      }
-    });
+    if (textarea) {
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.ctrlKey) {
+          this.saveNote(wrapper, apiEndpoint);
+        } else if (e.key === 'Escape') {
+          this.cancelEditing(wrapper);
+        }
+      });
+    }
   }
 
   /**
@@ -288,6 +294,9 @@ async function initNoteEditorFromDOM(elementId) {
 
   try {
     const response = await fetch(apiEndpoint);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     const metadata = await response.json();
     noteEditor.init(noteElement, apiEndpoint, metadata.notes || '', editBtnId);
   } catch (error) {
