@@ -13,6 +13,7 @@ from typing import Any
 import pystache
 
 from aspara.catalog import ProjectInfo, RunInfo
+from aspara.config import is_dev_mode
 
 BASE_DIR = Path(__file__).parent.parent
 _mustache_renderer = pystache.Renderer(search_dirs=[str(BASE_DIR / "templates")])
@@ -57,6 +58,7 @@ def render_mustache_response(template_name: str, context: dict[str, Any]) -> str
     context.update({
         "current_year": datetime.now(timezone.utc).year,
         "page_title": context.get("page_title", "Aspara"),
+        "dev_mode": is_dev_mode(),
     })
 
     # Render content template

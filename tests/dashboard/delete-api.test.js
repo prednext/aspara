@@ -70,6 +70,19 @@ describe('deleteProjectApi', () => {
     // Should throw a meaningful error, not the raw JSON parse SyntaxError.
     await expect(deleteProjectApi('test-project')).rejects.toThrow(/Server error|Unknown error|Failed to delete/i);
   });
+
+  test('should include raw response body in dev mode', async () => {
+    document.body.setAttribute('data-dev-mode', 'true');
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+      text: () => Promise.resolve('<html><body>Bad Gateway</body></html>'),
+    });
+
+    await expect(deleteProjectApi('test-project')).rejects.toThrow(/raw:.*Bad Gateway/i);
+    document.body.removeAttribute('data-dev-mode');
+  });
 });
 
 describe('deleteRunApi', () => {
@@ -140,5 +153,18 @@ describe('deleteRunApi', () => {
 
     // Should throw a meaningful error, not the raw JSON parse SyntaxError.
     await expect(deleteRunApi('project-1', 'run-1')).rejects.toThrow(/Server error|Unknown error|Failed to delete/i);
+  });
+
+  test('should include raw response body in dev mode', async () => {
+    document.body.setAttribute('data-dev-mode', 'true');
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+      text: () => Promise.resolve('<html><body>Proxy Error</body></html>'),
+    });
+
+    await expect(deleteRunApi('project-1', 'run-1')).rejects.toThrow(/raw:.*Proxy Error/i);
+    document.body.removeAttribute('data-dev-mode');
   });
 });

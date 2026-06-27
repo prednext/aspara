@@ -3,6 +3,7 @@
  */
 
 import tagger from '@jcubic/tagger';
+import { isDev } from './dev-mode.js';
 import { ICON_EDIT, escapeHtml } from './html-utils.js';
 import { guardReadOnly } from './read-only-guard.js';
 
@@ -268,13 +269,20 @@ class TagEditor {
 
       if (!response.ok) {
         let detail = `Server error: ${response.status}`;
+        let rawBody = null;
         try {
           const errorData = await response.json();
           detail = errorData.detail || detail;
         } catch {
-          // Response body is not JSON (e.g. HTML error page); keep default.
+          if (isDev()) {
+            try {
+              rawBody = await response.text();
+            } catch {
+              // ignore
+            }
+          }
         }
-        throw new Error(detail);
+        throw new Error(isDev() && rawBody ? `${detail} (raw: ${rawBody.slice(0, 200)})` : detail);
       }
 
       let updatedMetadata;

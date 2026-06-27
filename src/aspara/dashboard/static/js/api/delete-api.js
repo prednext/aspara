@@ -3,6 +3,36 @@
  * Pure API calls without UI logic
  */
 
+import { isDev } from '../dev-mode.js';
+
+/**
+ * Parse an error response, returning a meaningful message.
+ * In dev mode, includes the raw response body for debugging.
+ * @param {Response} response - The failed fetch response
+ * @returns {Promise<string>} Error message
+ */
+async function parseErrorResponse(response) {
+  let detail = 'Unknown error';
+  let rawBody = null;
+  try {
+    const errorData = await response.json();
+    detail = errorData.detail || detail;
+  } catch {
+    detail = `Server error: ${response.status}`;
+    if (isDev()) {
+      try {
+        rawBody = await response.text();
+      } catch {
+        // ignore
+      }
+    }
+  }
+  if (isDev() && rawBody) {
+    return `${detail} (raw: ${rawBody.slice(0, 200)})`;
+  }
+  return detail;
+}
+
 /**
  * Delete a project via API
  * @param {string} projectName - The project name to delete
@@ -19,14 +49,7 @@ export async function deleteProjectApi(projectName) {
   });
 
   if (!response.ok) {
-    let detail = 'Unknown error';
-    try {
-      const errorData = await response.json();
-      detail = errorData.detail || detail;
-    } catch {
-      detail = `Server error: ${response.status}`;
-    }
-    throw new Error(detail);
+    throw new Error(await parseErrorResponse(response));
   }
 
   // Handle 204 No Content responses
@@ -54,14 +77,7 @@ export async function deleteRunApi(projectName, runName) {
   });
 
   if (!response.ok) {
-    let detail = 'Unknown error';
-    try {
-      const errorData = await response.json();
-      detail = errorData.detail || detail;
-    } catch {
-      detail = `Server error: ${response.status}`;
-    }
-    throw new Error(detail);
+    throw new Error(await parseErrorResponse(response));
   }
 
   // Handle 204 No Content responses
