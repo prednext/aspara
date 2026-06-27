@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from datetime import datetime, timezone
@@ -203,13 +204,26 @@ class LocalRun(BaseRun):
 
         # Copy file to artifacts directory
         dest_path = os.path.join(self._artifacts_dir, artifact_name)
+        source_size = os.path.getsize(abs_file_path)
         try:
             shutil.copy2(abs_file_path, dest_path)
         except OSError as e:
             raise OSError(f"Failed to copy artifact file: {e}") from e
 
+        # Verify the copy succeeded by comparing file sizes. A partial copy
+        # (e.g. disk full mid-write) would leave a truncated file that
+        # silently passes without this check.
+        dest_size = os.path.getsize(dest_path)
+        if dest_size != source_size:
+            # Remove the corrupted destination so a retry can start clean.
+            with contextlib.suppress(OSError):
+                os.remove(dest_path)
+            raise OSError(
+                f"Artifact copy verification failed: size mismatch (source={source_size}, dest={dest_size})"
+            )
+
         # Get file size
-        file_size = os.path.getsize(dest_path)
+        file_size = dest_size
 
         # Log artifact metadata
         artifact_data = {

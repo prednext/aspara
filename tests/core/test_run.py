@@ -4,6 +4,7 @@ Tests for the Run class and module-level API.
 
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -599,6 +600,47 @@ class TestRunArtifacts:
 
             assert os.path.exists(artifacts_dir)
             assert os.path.isdir(artifacts_dir)
+
+    def test_log_artifact_verifies_destination_file_size(self):
+        """log_artifact should verify the copied file matches the source size."""
+        with tempfile.TemporaryDirectory() as temp_output_dir:
+            run = Run(name="test_run", dir=temp_output_dir)
+
+            run.log_artifact(self.test_file)
+
+            artifacts_dir = os.path.join(temp_output_dir, "default", "test_run", "artifacts")
+            artifact_path = os.path.join(artifacts_dir, "test_file.txt")
+
+            # The destination file should exist and have the same size as the source.
+            assert os.path.exists(artifact_path)
+            source_size = os.path.getsize(self.test_file)
+            dest_size = os.path.getsize(artifact_path)
+            assert dest_size == source_size
+
+            # The metadata file_size should also match.
+            metadata = read_metadata(temp_output_dir, "default", "test_run")
+            artifacts = metadata.get("artifacts", [])
+            assert len(artifacts) > 0
+            assert artifacts[0]["file_size"] == source_size
+
+    def test_log_artifact_raises_on_partial_copy(self):
+        """log_artifact should raise if the destination file size doesn't match."""
+        import unittest.mock
+
+        with tempfile.TemporaryDirectory() as temp_output_dir:
+            run = Run(name="test_run", dir=temp_output_dir)
+
+            # Mock shutil.copy2 to succeed but leave a truncated file.
+            real_copy2 = shutil.copy2
+
+            def _truncated_copy(src, dst, *args, **kwargs):
+                # Do the real copy, then truncate the destination.
+                real_copy2(src, dst, *args, **kwargs)
+                with open(dst, "w") as f:
+                    f.write("truncated")
+
+            with unittest.mock.patch("shutil.copy2", side_effect=_truncated_copy), pytest.raises(OSError, match="size mismatch"):
+                run.log_artifact(self.test_file)
 
 
 class TestRunFactory:
