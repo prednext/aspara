@@ -97,9 +97,11 @@ class TestDataValidation:
         """Test handling of empty query parameters."""
         response = test_client.get("/api/projects/test_project/runs/metrics?runs=")
 
-        assert response.status_code == 200
+        # Empty runs parameter is a validation error — should return 400
+        # for both json and msgpack formats (unified error handling).
+        assert response.status_code == 400
         data = response.json()
-        assert "error" in data or "runs" in data
+        assert "error" in data
 
 
 class TestPerformance:

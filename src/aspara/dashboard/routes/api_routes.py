@@ -186,7 +186,7 @@ async def runs_metrics_api(
     except ValueError as e:
         if format == "msgpack":
             raise HTTPException(status_code=400, detail=str(e)) from None
-        return JSONResponse(content={"error": str(e)})
+        return JSONResponse(content={"error": str(e)}, status_code=400)
 
     # Convert since (UNIX ms) to datetime if provided
     # Create timezone-naive datetime (matches DataFrame storage)

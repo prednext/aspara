@@ -136,6 +136,18 @@ class TestMessagePackEndpoint:
         # Should return empty metrics
         assert data["metrics"] == {}
 
+    def test_json_error_returns_400(self, setup_test_data):
+        """JSON format error response should return 400, not 200.
+
+        Both json and msgpack formats must return the same status code
+        for validation errors so clients can uniformly check response.ok.
+        """
+        # Empty runs parameter triggers ValueError in parse_and_validate_run_list.
+        response = client.get("/api/projects/test_project/runs/metrics?runs=&format=json")
+        assert response.status_code == 400
+        data = response.json()
+        assert "error" in data
+
     def test_msgpack_with_single_run(self, setup_test_data):
         """Test msgpack endpoint with single run."""
         response = client.get("/api/projects/test_project/runs/metrics?runs=run_1&format=msgpack")
