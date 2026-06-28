@@ -148,12 +148,21 @@ class Run:
         """
         self._backend.finish(exit_code=exit_code, quiet=quiet)
 
-    def flush(self, *args: Any, **kwargs: Any) -> Any:
+    def flush(self, timeout: float = 30.0) -> int:
         """Ensure all data is persisted.
 
-        For LocalRun this is a no-op. For RemoteRun this flushes queued metrics.
+        For LocalRun this is a no-op (data is written directly to disk on
+        every ``log()`` call) and always returns 0. For RemoteRun this
+        flushes any queued metrics that failed to send previously.
+
+        Args:
+            timeout: Maximum time to wait for flush in seconds
+                (only meaningful for remote runs).
+
+        Returns:
+            Number of metrics that failed to persist (always 0 for local runs).
         """
-        return self._backend.flush(*args, **kwargs)
+        return self._backend.flush(timeout=timeout)
 
     def log_artifact(
         self,

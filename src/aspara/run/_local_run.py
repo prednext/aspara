@@ -266,11 +266,23 @@ class LocalRun(BaseRun):
         if not quiet:
             logger.info(f"Run {self.name} finished with exit code {exit_code}")
 
-    def flush(self) -> None:
-        """Ensure all metrics are written to disk."""
+    def flush(self, timeout: float = 30.0) -> int:
+        """Ensure all metrics are written to disk.
+
+        LocalRun writes directly to disk on every ``log()`` call, so there
+        is never any buffered data to flush. This method always returns 0
+        (no failures) for API compatibility with ``RemoteRun.flush()``.
+
+        Args:
+            timeout: Ignored. Accepted for API compatibility with
+                ``RemoteRun.flush()``.
+
+        Returns:
+            Number of metrics that failed to persist (always 0 for local runs).
+        """
         # Currently a no-op as we're writing directly to file
         # This method exists for API compatibility and future buffering support
-        pass
+        return 0
 
     def _ensure_output_dir(self) -> None:
         """Ensure the output directory exists."""

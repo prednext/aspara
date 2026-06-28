@@ -161,6 +161,14 @@ class TestRunBasic:
             with pytest.raises(RuntimeError, match="Cannot log to a finished run"):
                 run.log({"loss": 0.5})
 
+    def test_local_run_flush_returns_int(self):
+        """Test that LocalRun.flush() returns an int (0), not None."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run = Run(name="test_run", dir=temp_dir)
+            result = run.flush()
+            assert result == 0
+            assert isinstance(result, int)
+
 
 class TestConfig:
     """Test suite for Config class."""
