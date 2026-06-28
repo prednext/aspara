@@ -76,6 +76,8 @@ Projects → Runs → Run Detail → Metric Chart
 | `+` / `=` | Zoom in |
 | `-` | Zoom out |
 | `r` | Reset view |
+| `g` | Jump to start |
+| `G` | Jump to end |
 | `w` | Toggle live watch mode |
 
 ## Features

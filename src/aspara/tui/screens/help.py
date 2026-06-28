@@ -36,6 +36,8 @@ HELP_TEXT = """\
   [cyan]+[/] / [cyan]=[/]       Zoom in
   [cyan]-[/]           Zoom out
   [cyan]r[/]           Reset view
+  [cyan]g[/]           Jump to start
+  [cyan]G[/]           Jump to end
   [cyan]w[/]           Toggle live watch mode
 
 [bold underline]Status Icons[/bold underline]

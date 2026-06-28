@@ -7,6 +7,7 @@ from textual.widgets import DataTable, Input
 
 from aspara.tui.app import AsparaTUIApp
 from aspara.tui.screens import HelpScreen, ProjectsScreen, RunDetailScreen
+from aspara.tui.screens.metric_chart import MetricChartScreen
 
 
 @pytest.fixture
@@ -138,4 +139,32 @@ class TestRunDetailScreen:
             await pilot.press("j")
             await pilot.pause()
             await pilot.press("k")
+            await pilot.pause()
+
+
+class TestMetricChartScreen:
+    """Tests for MetricChartScreen."""
+
+    @pytest.mark.asyncio
+    async def test_jump_to_start_and_end(self, tmp_path) -> None:
+        """Test that g/G keys jump to start/end without error."""
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir(exist_ok=True)
+        (project_dir / "test_run.jsonl").touch()
+        (project_dir / "test_run.meta.json").write_text("{}")
+
+        app = AsparaTUIApp(data_dir=str(tmp_path))
+        async with app.run_test() as pilot:
+            screen = MetricChartScreen(
+                project_name="test_project",
+                run_name="test_run",
+                metric_name="loss",
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # g and G should not raise errors even with no data
+            await pilot.press("g")
+            await pilot.pause()
+            await pilot.press("G")
             await pilot.pause()

@@ -49,6 +49,8 @@ class MetricChartScreen(Screen[None]):
         Binding("minus", "zoom_out", "Zoom Out", show=True),
         Binding("r", "reset_view", "Reset", show=True),
         Binding("w", "toggle_watch", "Watch", show=True),
+        Binding("g", "jump_to_start", "Start", show=False),
+        Binding("G", "jump_to_end", "End", show=False),
         Binding("backspace", "go_back", "Back", show=True),
     ]
 
@@ -267,6 +269,32 @@ class MetricChartScreen(Screen[None]):
         """Reset chart view to show all data."""
         self._view_start = None
         self._view_end = None
+        self._update_chart()
+
+    def action_jump_to_start(self) -> None:
+        """Jump to the beginning of the data."""
+        if not self._steps:
+            return
+
+        start, end = self._get_view_range()
+        width = end - start
+        min_step = min(self._steps)
+
+        self._view_start = min_step
+        self._view_end = min_step + width
+        self._update_chart()
+
+    def action_jump_to_end(self) -> None:
+        """Jump to the end of the data."""
+        if not self._steps:
+            return
+
+        start, end = self._get_view_range()
+        width = end - start
+        max_step = max(self._steps)
+
+        self._view_start = max_step - width
+        self._view_end = max_step
         self._update_chart()
 
     def action_toggle_watch(self) -> None:
