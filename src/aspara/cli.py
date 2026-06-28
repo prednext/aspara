@@ -304,8 +304,8 @@ def main() -> None:
     """
     CLI main entry point
     """
-    parser = argparse.ArgumentParser(description="Aspara management tool")
-    subparsers = parser.add_subparsers(dest="command", help="Subcommands")
+    parser = argparse.ArgumentParser(description="Aspara management tool. Run a subcommand to start a server or the TUI.")
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Subcommands")
 
     dashboard_parser = subparsers.add_parser("dashboard", help="Start dashboard server")
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Host name (default: 127.0.0.1)")
@@ -390,13 +390,6 @@ def main() -> None:
             project_search_mode=args.project_search_mode,
             storage_backend=args.storage_backend,
         )
-    else:
-        port = find_available_port(start_port=3141)
-        if port is None:
-            print("Error: No available port found!")
-            sys.exit(1)
-
-        run_dashboard(port=port)
 
 
 if __name__ == "__main__":
