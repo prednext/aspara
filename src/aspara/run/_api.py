@@ -36,11 +36,12 @@ def init(
         project: Project name. Defaults to "default".
         name: Run name. If None, generates a random name.
         config: Initial configuration parameters.
-        tags: List of tags for this run.
+        tags: Tags attached to this individual run (run-wide).
         notes: Run notes/description (wandb-compatible).
         dir: Base directory for storing data. Defaults to XDG-based default (~/.local/share/aspara).
         tracker_uri: Tracker server URI for remote mode. If None, uses local file storage.
         storage_backend: Storage backend type ('jsonl' or 'polars'). Can also be set via ASPARA_STORAGE_BACKEND env var.
+        project_tags: Tags attached to the project as a whole (project-wide), shared across all runs in the project. Distinct from ``tags``, which are per-run.
 
     Returns:
         The initialized Run object.
