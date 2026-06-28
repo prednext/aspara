@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -125,6 +126,34 @@ class TestFindAvailablePort:
             assert port == 3141
 
 
+@pytest.fixture
+def isolated_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point aspara at a temporary data directory with two projects."""
+    data_dir = tmp_path / "aspara-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("ASPARA_DATA_DIR", str(data_dir))
+
+    # Create real data via the aspara API.
+    import aspara
+    import aspara.run._api as _api
+
+    aspara.init(project="proj_a", name="run1")
+    aspara.log({"loss": 0.5}, step=0)
+    aspara.finish(quiet=True)
+
+    aspara.init(project="proj_a", name="run2")
+    aspara.log({"loss": 0.4}, step=0)
+    # Leave run2 as WIP: clear _current_run without finishing so the next
+    # init() call does not auto-finish it.
+    _api._current_run = None
+
+    aspara.init(project="proj_b", name="run3")
+    aspara.log({"loss": 0.3}, step=0)
+    aspara.finish(quiet=True)
+
+    return data_dir
+
+
 class TestVersion:
     """Tests for the ``--version`` flag."""
 
@@ -160,4 +189,98 @@ class TestVersion:
         with pytest.raises(SystemExit) as exc_info:
             main()
 
+        assert exc_info.value.code != 0
+
+
+class TestProjectsList:
+    """Tests for ``aspara projects``."""
+
+    def test_projects_lists_all_projects(
+        self,
+        isolated_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["aspara", "projects"])
+        main()
+        out = capsys.readouterr().out
+        assert "proj_a" in out
+        assert "proj_b" in out
+
+    def test_projects_shows_run_counts(
+        self,
+        isolated_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["aspara", "projects"])
+        main()
+        out = capsys.readouterr().out
+        # proj_a has 2 runs, proj_b has 1 run
+        assert "2" in out
+
+    def test_projects_empty_message(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When no projects exist, a helpful message is shown."""
+        data_dir = tmp_path / "empty"
+        data_dir.mkdir()
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(data_dir))
+        monkeypatch.setattr(sys, "argv", ["aspara", "projects"])
+        main()
+        out = capsys.readouterr().out
+        assert "No projects" in out or "no projects" in out.lower()
+
+
+class TestRunsList:
+    """Tests for ``aspara runs <project>``."""
+
+    def test_runs_lists_all_runs_in_project(
+        self,
+        isolated_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["aspara", "runs", "proj_a"])
+        main()
+        out = capsys.readouterr().out
+        assert "run1" in out
+        assert "run2" in out
+
+    def test_runs_shows_status(
+        self,
+        isolated_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The runs list should show run status (Running/Completed)."""
+        monkeypatch.setattr(sys, "argv", ["aspara", "runs", "proj_a"])
+        main()
+        out = capsys.readouterr().out
+        assert "Running" in out or "WIP" in out or "wip" in out
+        assert "Completed" in out or "completed" in out
+
+    def test_runs_nonexistent_project_exits_nonzero(
+        self,
+        isolated_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``aspara runs <nonexistent>`` should exit with non-zero code."""
+        monkeypatch.setattr(sys, "argv", ["aspara", "runs", "nonexistent"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code != 0
+
+    def test_runs_missing_project_arg_exits_nonzero(
+        self,
+        isolated_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``aspara runs`` without a project argument should error."""
+        monkeypatch.setattr(sys, "argv", ["aspara", "runs"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
         assert exc_info.value.code != 0

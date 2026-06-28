@@ -318,6 +318,64 @@ def run_serve(
         sys.exit(1)
 
 
+def _list_projects(data_dir: str | None) -> None:
+    """Print all projects and their run counts."""
+    from aspara.catalog import ProjectCatalog
+
+    resolved_dir = data_dir or str(get_data_dir())
+    catalog = ProjectCatalog(resolved_dir)
+    projects = catalog.get_projects()
+
+    if not projects:
+        print("No projects found. Use `aspara.init(project=...)` to create one.")
+        return
+
+    # Column widths for alignment
+    name_w = max(len(p.name) for p in projects)
+    print(f"{'PROJECT':<{name_w}}  RUNS  LAST UPDATED")
+    print(f"{'-' * name_w}  ----  ------------")
+    for p in projects:
+        last = p.last_update.strftime("%Y-%m-%d %H:%M") if p.last_update else "N/A"
+        print(f"{p.name:<{name_w}}  {p.run_count:>4}  {last}")
+
+
+def _list_runs(project: str, data_dir: str | None) -> int:
+    """Print all runs in a project.
+
+    Returns 0 on success, 1 if the project does not exist.
+    """
+    from aspara.catalog import ProjectCatalog, RunCatalog
+
+    resolved_dir = data_dir or str(get_data_dir())
+    project_catalog = ProjectCatalog(resolved_dir)
+    if not project_catalog.exists(project):
+        print(f"Project '{project}' not found in {resolved_dir}")
+        return 1
+
+    run_catalog = RunCatalog(resolved_dir)
+    runs = run_catalog.get_runs(project)
+
+    if not runs:
+        print(f"No runs found in project '{project}'.")
+        return 0
+
+    status_display = {
+        "wip": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "maybe_failed": "Maybe Failed",
+    }
+
+    name_w = max(len(r.name) for r in runs)
+    print(f"{'RUN':<{name_w}}  STATUS     STARTED")
+    print(f"{'-' * name_w}  --------   -------")
+    for r in runs:
+        status = status_display.get(r.status.value, r.status.value)
+        started = r.start_time.strftime("%Y-%m-%d %H:%M") if r.start_time else "N/A"
+        print(f"{r.name:<{name_w}}  {status:<8}   {started}")
+    return 0
+
+
 def main() -> None:
     """
     CLI main entry point
@@ -378,6 +436,13 @@ def main() -> None:
         help="Metrics storage backend (default: jsonl or ASPARA_STORAGE_BACKEND)",
     )
 
+    projects_parser = subparsers.add_parser("projects", help="List all projects")
+    projects_parser.add_argument("--data-dir", default=None, help="Data directory (default: XDG-based ~/.local/share/aspara)")
+
+    runs_parser = subparsers.add_parser("runs", help="List runs in a project")
+    runs_parser.add_argument("project", help="Project name")
+    runs_parser.add_argument("--data-dir", default=None, help="Data directory (default: XDG-based ~/.local/share/aspara)")
+
     args = parser.parse_args()
 
     if args.command == "dashboard":
@@ -409,6 +474,12 @@ def main() -> None:
             project_search_mode=args.project_search_mode,
             storage_backend=args.storage_backend,
         )
+    elif args.command == "projects":
+        _list_projects(data_dir=args.data_dir)
+    elif args.command == "runs":
+        exit_code = _list_runs(project=args.project, data_dir=args.data_dir)
+        if exit_code != 0:
+            sys.exit(exit_code)
 
 
 if __name__ == "__main__":
