@@ -26,6 +26,7 @@ def init(
     tracker_uri: str | None = None,
     storage_backend: str | None = None,
     project_tags: list[str] | None = None,
+    resume: bool = False,
 ) -> Run:
     """Initialize a new run.
 
@@ -42,6 +43,9 @@ def init(
         tracker_uri: Tracker server URI for remote mode. If None, uses local file storage.
         storage_backend: Storage backend type ('jsonl' or 'polars'). Can also be set via ASPARA_STORAGE_BACKEND env var.
         project_tags: Tags attached to the project as a whole (project-wide), shared across all runs in the project. Distinct from ``tags``, which are per-run.
+        resume: If True and a run with the same name already exists, resume it
+            (reuse run_id, reset finish state, continue step numbering). If no
+            existing run is found, a new run is created.
 
     Returns:
         The initialized Run object.
@@ -61,6 +65,10 @@ def init(
         Using Polars backend for efficient storage:
 
         >>> run = aspara.init(project="my_project", storage_backend="polars")
+
+        Resuming an existing run after a crash:
+
+        >>> run = aspara.init(project="my_project", name="run1", resume=True)
     """
     global _current_run, _storage_backend
 
@@ -86,6 +94,7 @@ def init(
             storage_backend=selected_backend,
             tracker_uri=tracker_uri,
             project_tags=project_tags,
+            resume=resume,
         )
         _current_run = run
 

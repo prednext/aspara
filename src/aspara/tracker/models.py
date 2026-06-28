@@ -45,6 +45,7 @@ class RunCreateRequest(BaseModel):
     tags: list[str] = []
     notes: str = ""
     project_tags: list[str] | None = None
+    resume: bool = False
 
 
 class RunCreateResponse(BaseModel):

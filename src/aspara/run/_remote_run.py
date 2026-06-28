@@ -52,6 +52,7 @@ class TrackerClient:
         tags: list[str] | None,
         notes: str | None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
         """Create a new run on the tracker.
 
@@ -62,6 +63,7 @@ class TrackerClient:
             tags: List of tags
             notes: Run notes/description
             project_tags: Optional project-level tags
+            resume: If True, resume an existing run with the same name
 
         Returns:
             Parsed JSON response from the tracker (expected to contain
@@ -78,6 +80,7 @@ class TrackerClient:
                 "tags": tags or [],
                 "notes": notes or "",
                 "project_tags": project_tags,
+                "resume": resume,
             },
             timeout=_DEFAULT_TIMEOUT,
         )
@@ -272,6 +275,7 @@ class RemoteRun(BaseRun):
         notes: str | None = None,
         tracker_uri: str | None = None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> None:
         """Initialize a new remote run.
 
@@ -282,6 +286,10 @@ class RemoteRun(BaseRun):
             tags: List of tags for this run.
             notes: Run notes/description (wandb-compatible).
             tracker_uri: Tracker server URI (required for RemoteRun)
+            project_tags: List of tags to add to the project.
+            resume: If True and a run with the same name already exists on the
+                tracker, resume it (reuse run_id, reset finish state). If no
+                existing run is found, a new run is created.
 
         Raises:
             ValueError: If tracker_uri is not provided
@@ -295,7 +303,7 @@ class RemoteRun(BaseRun):
         # Initialize tracker client
         self.client = TrackerClient(tracker_uri)
 
-        # Create run on tracker
+        # Create (or resume) run on tracker
         try:
             response = self.client.create_run(
                 name=self.name,
@@ -304,6 +312,7 @@ class RemoteRun(BaseRun):
                 tags=self.tags,
                 notes=self.notes,
                 project_tags=project_tags,
+                resume=resume,
             )
             # Server always generates run_id
             self.id = response["run_id"]

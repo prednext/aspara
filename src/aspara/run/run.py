@@ -33,6 +33,7 @@ class Run:
         storage_backend: str | None = None,
         tracker_uri: str | None = None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> None:
         """Create a new run instance.
 
@@ -46,6 +47,9 @@ class Run:
             storage_backend: Storage backend type ('jsonl' or 'polars'). Defaults to 'jsonl'.
             tracker_uri: Tracker server URI for remote mode. If None, uses local file storage.
             project_tags: List of tags to add to the project.
+            resume: If True and a run with the same name already exists, resume
+                it (reuse run_id, reset finish state, continue step numbering).
+                If no existing run is found, a new run is created.
         """
         if tracker_uri is not None:
             from aspara.run._remote_run import RemoteRun
@@ -58,6 +62,7 @@ class Run:
                 notes=notes,
                 tracker_uri=tracker_uri,
                 project_tags=project_tags,
+                resume=resume,
             )
         else:
             from aspara.run._local_run import LocalRun
@@ -71,6 +76,7 @@ class Run:
                 dir=dir,
                 storage_backend=storage_backend,
                 project_tags=project_tags,
+                resume=resume,
             )
 
     # ---- Property delegations ----------------------------------------

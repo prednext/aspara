@@ -367,7 +367,7 @@ class TestModuleLevelAPI:
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
         monkeypatch.setattr(
             "aspara.run._remote_run.TrackerClient.create_run",
-            lambda self, name, project, config, tags, notes, project_tags=None: {"run_id": "server-gen-id", "name": name},
+            lambda self, name, project, config, tags, notes, project_tags=None, resume=False: {"run_id": "server-gen-id", "name": name},
         )
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
 
@@ -395,7 +395,7 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = MagicMock()
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):  # type: ignore[override]
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):  # type: ignore[override]
             captured_kwargs.update(
                 name=name,
                 project=project,
@@ -429,7 +429,7 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):  # type: ignore[override]
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):  # type: ignore[override]
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
@@ -458,7 +458,7 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):  # type: ignore[override]
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):  # type: ignore[override]
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)

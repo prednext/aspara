@@ -244,6 +244,69 @@ class TestTrackerAPIIntegration:
         data = response2.json()
         assert data["detail"] == "Run already exists"
 
+    def test_resume_existing_run_reuses_run_id(self, tmp_path, monkeypatch):
+        """resume=True should reuse the existing run_id and reset finish state."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+
+        client = TestClient(app)
+
+        project = "test_project"
+        run_name = "run1"
+
+        payload = {
+            "name": run_name,
+            "config": {},
+            "tags": [],
+            "notes": "first run",
+        }
+
+        # First creation
+        response1 = client.post(f"/api/v1/projects/{project}/runs", json=payload, headers=CSRF_HEADER)
+        assert response1.status_code == 200
+        first_id = response1.json()["run_id"]
+
+        # Finish the run
+        finish_resp = client.post(
+            f"/api/v1/projects/{project}/runs/{run_name}/finish",
+            json={"exit_code": 0},
+            headers=CSRF_HEADER,
+        )
+        assert finish_resp.status_code == 200
+
+        # Verify finished state on disk
+        meta_path = tmp_path / project / f"{run_name}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        assert meta["is_finished"] is True
+
+        # Resume with resume=True
+        payload["resume"] = True
+        response2 = client.post(f"/api/v1/projects/{project}/runs", json=payload, headers=CSRF_HEADER)
+        assert response2.status_code == 200
+        assert response2.json()["run_id"] == first_id
+
+        # Verify finish state was reset
+        meta = json.loads(meta_path.read_text())
+        assert meta["is_finished"] is False
+        assert meta["status"] == "wip"
+
+    def test_resume_without_existing_run_creates_new(self, tmp_path, monkeypatch):
+        """resume=True when no existing run should create a new run."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+
+        client = TestClient(app)
+
+        payload = {
+            "name": "run1",
+            "config": {},
+            "tags": [],
+            "notes": "",
+            "resume": True,
+        }
+
+        response = client.post("/api/v1/projects/test_project/runs", json=payload, headers=CSRF_HEADER)
+        assert response.status_code == 200
+        assert "run_id" in response.json()
+
     def test_upload_artifact_basic(self, tmp_path, monkeypatch):
         """Test basic artifact upload functionality."""
         monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))

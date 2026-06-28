@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ class LocalRun(BaseRun):
         dir: str | None = None,
         storage_backend: str | None = None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> None:
         """Initialize a new local run.
 
@@ -42,13 +44,12 @@ class LocalRun(BaseRun):
             notes: Run notes/description (wandb-compatible).
             dir: Base directory for storing data. If None, uses XDG-based default (~/.local/share/aspara).
             storage_backend: Storage backend type ('jsonl' or 'polars'). Defaults to 'jsonl'. ASPARA_STORAGE_BACKEND has higher priority than this argument.
+            project_tags: List of tags to add to the project.
+            resume: If True and a run with the same name already exists, resume
+                it (reuse run_id, reset finish state, continue step numbering).
+                If no existing run is found, a new run is created.
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
-
-        # LocalRun generates its own run_id
-        self.id = self._generate_run_id()
-
-        self.config = Config(config, on_change=self._on_config_change)
 
         # Determine data directory
         data_dir = dir or str(get_data_dir())
@@ -83,6 +84,38 @@ class LocalRun(BaseRun):
             run_name=self.name,
         )
 
+        # Detect existing run by checking for a metadata file with a run_id.
+        existing_meta_path = Path(base_dir) / f"{self.name}.meta.json"
+        existing_run_id: str | None = None
+        if existing_meta_path.exists():
+            try:
+                with open(existing_meta_path) as f:
+                    existing_meta = json.load(f)
+                existing_run_id = existing_meta.get("run_id")
+            except (json.JSONDecodeError, OSError):
+                existing_run_id = None
+
+        is_resuming = resume and existing_run_id is not None
+
+        if is_resuming:
+            # Reuse the existing run_id and reset finish state.
+            self.id = existing_run_id
+            self._metadata_storage.reset_finish()
+            # Continue step numbering from where the previous session left off.
+            self._current_step = self._recover_last_step(data_dir)
+        else:
+            # New run: generate a fresh run_id.
+            self.id = self._generate_run_id()
+            if existing_run_id is not None and not resume:
+                # A run with the same name already exists and the user did not
+                # request a resume. Warn that new metrics will be appended.
+                print(
+                    f"aspara: Warning: run '{self.name}' already exists in project "
+                    f"'{self.project}'. New metrics will be appended to the existing "
+                    f"file. Use resume=True to continue the existing run."
+                )
+
+        self.config = Config(config, on_change=self._on_config_change)
         self.summary = Summary(on_change=self._on_summary_change)
 
         # Update project-level metadata tags if provided
@@ -91,17 +124,40 @@ class LocalRun(BaseRun):
         # User-facing guidance: where data is stored and how to view it.
         backend_msg = f" (backend: {self._storage_backend_type})" if self._storage_backend_type == "polars" else ""
         storage_location = (
-            os.path.abspath(os.path.join(base_dir, f"{self.name}.wal.jsonl"))
-            if self._storage_backend_type == "polars"
-            else os.path.abspath(self._output_path)
+            os.path.abspath(os.path.join(base_dir, f"{self.name}.wal.jsonl")) if self._storage_backend_type == "polars" else os.path.abspath(self._output_path)
         )
-        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'{backend_msg}")
+        resume_msg = " (resumed)" if is_resuming else ""
+        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'{backend_msg}{resume_msg}")
         print(f"aspara: Data directory: {os.path.abspath(data_dir)}")
         print(f"aspara: Writing metrics to: {storage_location}")
         print("aspara: View results with: aspara dashboard")
 
         self._ensure_output_dir()
         self._write_init_record()
+
+    def _recover_last_step(self, data_dir: str) -> int:
+        """Recover the next step number from existing metrics.
+
+        Reads the existing metrics file and returns ``max(step) + 1`` so that
+        resumed logging continues without overwriting earlier rows. Returns 0
+        when no prior metrics are present.
+
+        Args:
+            data_dir: Base data directory.
+
+        Returns:
+            Next step number to use.
+        """
+        try:
+            df = self._metrics_storage.load()
+        except Exception:
+            return 0
+        if df is None or len(df) == 0 or "step" not in df.columns:
+            return 0
+        last_step = df.select("step").to_series().max()
+        if last_step is None:
+            return 0
+        return int(last_step) + 1
 
     def _write_init_record(self) -> None:
         """Write initial run record with metadata."""

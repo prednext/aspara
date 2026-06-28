@@ -3,6 +3,7 @@
 RESTful API endpoints using FastAPI APIRouter.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -110,10 +111,40 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
     data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
-    # Detect duplicate run by checking existing metadata file
+    # Detect existing run by checking metadata file
     metadata_path = base_dir / project_name / f"{request.name}.meta.json"
     if metadata_path.exists():
-        raise HTTPException(status_code=409, detail="Run already exists")
+        if not request.resume:
+            raise HTTPException(status_code=409, detail="Run already exists")
+        # Resume path: reuse existing run_id and reset finish state.
+        try:
+            with open(metadata_path) as f:
+                existing_meta = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to read existing run metadata",
+            ) from e
+        run_id = existing_meta.get("run_id") or uuid.uuid4().hex[:16]
+        storage = RunMetadataStorage(
+            base_dir=str(data_dir),
+            project_name=project_name,
+            run_name=request.name,
+        )
+        storage.reset_finish()
+        if request.config:
+            storage.update_config(request.config)
+        if request.project_tags:
+            update_project_metadata_tags(
+                base_dir=data_dir,
+                project_name=project_name,
+                new_tags=request.project_tags,
+            )
+        return RunCreateResponse(
+            project=project_name,
+            name=request.name,
+            run_id=run_id,
+        )
 
     # Initialize run-level metadata using RunMetadataStorage
     storage = RunMetadataStorage(

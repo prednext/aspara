@@ -26,7 +26,7 @@ class TestRemoteRunOfflineQueue:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
