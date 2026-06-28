@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import socket
+import sys
 from unittest.mock import patch
 
 import pytest
 
-from aspara.cli import find_available_port, get_default_port, parse_serve_components
+from aspara.cli import _get_version, find_available_port, get_default_port, main, parse_serve_components
 
 
 class TestParseServeComponents:
@@ -124,18 +125,39 @@ class TestFindAvailablePort:
             assert port == 3141
 
 
-class TestMainPortNotFound:
-    """Tests that main() exits with code 1 when no port is available."""
+class TestVersion:
+    """Tests for the ``--version`` flag."""
 
-    def test_main_exits_on_no_port(self) -> None:
-        """main() should call sys.exit(1) when find_available_port returns None."""
-        from aspara.cli import main
+    def test_get_version_returns_nonempty_string(self) -> None:
+        """_get_version returns a non-empty version string."""
+        version = _get_version()
+        assert isinstance(version, str)
+        assert version  # non-empty
 
-        with (
-            patch("aspara.cli.find_available_port", return_value=None),
-            patch("sys.argv", ["aspara"]),
-            pytest.raises(SystemExit) as exc_info,
-        ):
+    def test_version_flag_prints_version_and_exits_zero(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``aspara --version`` prints ``aspara <version>`` and exits 0."""
+        monkeypatch.setattr(sys, "argv", ["aspara", "--version"])
+
+        with pytest.raises(SystemExit) as exc_info:
             main()
 
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "aspara" in captured.out
+        assert _get_version() in captured.out
+
+    def test_no_subcommand_exits_nonzero(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``aspara`` without a subcommand exits with a non-zero code."""
+        monkeypatch.setattr(sys, "argv", ["aspara"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code != 0

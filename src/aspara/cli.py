@@ -11,10 +11,28 @@ import argparse
 import os
 import socket
 import sys
+from importlib.metadata import version as _pkg_version
 
 import uvicorn
 
 from aspara.config import get_data_dir, get_storage_backend
+
+
+def _get_version() -> str:
+    """Get the installed aspara version.
+
+    Reads package metadata (sourced from pyproject.toml) so the CLI does not
+    need to import the aspara package (and its heavy dependencies) just to
+    print ``--version``.
+    """
+    try:
+        return _pkg_version("aspara")
+    except Exception:
+        # Fallback for environments without installed metadata (e.g. running
+        # directly from a source checkout without install).
+        from aspara import __version__
+
+        return __version__
 
 
 def parse_serve_components(components: list[str]) -> tuple[bool, bool]:
@@ -305,6 +323,7 @@ def main() -> None:
     CLI main entry point
     """
     parser = argparse.ArgumentParser(description="Aspara management tool. Run a subcommand to start a server or the TUI.")
+    parser.add_argument("--version", action="version", version=f"aspara {_get_version()}")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Subcommands")
 
     dashboard_parser = subparsers.add_parser("dashboard", help="Start dashboard server")
