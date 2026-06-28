@@ -116,6 +116,14 @@ class TestProjectsScreen:
             await pilot.press("k")
             await pilot.pause()
 
+    @pytest.mark.asyncio
+    async def test_reload_projects(self, app: AsparaTUIApp) -> None:
+        """Test that Ctrl+r reloads the project list without error."""
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+r")
+            await pilot.pause()
+
 
 class TestRunDetailScreen:
     """Tests for RunDetailScreen."""

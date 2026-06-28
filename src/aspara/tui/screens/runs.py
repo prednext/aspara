@@ -38,6 +38,7 @@ class RunsScreen(Screen[None]):
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("backspace", "go_back", "Back", show=True),
+        Binding("ctrl+r", "reload", "Reload", show=True),
         Binding("escape", "unfocus_search", "Clear focus", show=False),
     ]
 
@@ -231,6 +232,12 @@ class RunsScreen(Screen[None]):
         """Move cursor up in table."""
         table = self.query_one("#runs-table", DataTable)
         table.action_cursor_up()
+
+    def action_reload(self) -> None:
+        """Reload the run list from disk."""
+        search_input = self.query_one("#search-input", Input)
+        self._load_runs(filter_text=search_input.value)
+        self.notify("Runs reloaded")
 
     def action_go_back(self) -> None:
         """Go back to previous screen if not editing."""

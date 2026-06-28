@@ -33,6 +33,7 @@ class ProjectsScreen(Screen[None]):
         Binding("s", "toggle_sort", "Sort", show=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
+        Binding("ctrl+r", "reload", "Reload", show=True),
         Binding("escape", "unfocus_search", "Clear focus", show=False),
     ]
 
@@ -220,6 +221,12 @@ class ProjectsScreen(Screen[None]):
         """Move cursor up in table."""
         table = self.query_one("#projects-table", DataTable)
         table.action_cursor_up()
+
+    def action_reload(self) -> None:
+        """Reload the project list from disk."""
+        search_input = self.query_one("#search-input", Input)
+        self._load_projects(filter_text=search_input.value)
+        self.notify("Projects reloaded")
 
     def action_unfocus_search(self) -> None:
         """Remove focus from search input (Escape key)."""

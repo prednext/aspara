@@ -66,6 +66,7 @@ Projects → Runs → Run Detail → Metric Chart
 |-----|--------|
 | `/` | Focus search input |
 | `s` | Toggle sort order |
+| `Ctrl+r` | Reload list from disk |
 
 #### Chart View
 

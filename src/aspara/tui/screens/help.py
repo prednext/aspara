@@ -29,6 +29,7 @@ HELP_TEXT = """\
 [bold underline]List Screens (Projects, Runs)[/bold underline]
   [cyan]/[/]           Focus search input
   [cyan]s[/]           Toggle sort order
+  [cyan]Ctrl+r[/]       Reload list from disk
 
 [bold underline]Chart View[/bold underline]
   [cyan]h[/] / [cyan]←[/]       Pan left
