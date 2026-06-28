@@ -6,7 +6,7 @@ import pytest
 from textual.widgets import DataTable, Input
 
 from aspara.tui.app import AsparaTUIApp
-from aspara.tui.screens import HelpScreen, ProjectsScreen
+from aspara.tui.screens import HelpScreen, ProjectsScreen, RunDetailScreen
 
 
 @pytest.fixture
@@ -110,6 +110,31 @@ class TestProjectsScreen:
 
             # j should move down, k should move up
             # These should not raise errors even with empty table
+            await pilot.press("j")
+            await pilot.pause()
+            await pilot.press("k")
+            await pilot.pause()
+
+
+class TestRunDetailScreen:
+    """Tests for RunDetailScreen."""
+
+    @pytest.mark.asyncio
+    async def test_scroll_with_j_k(self, tmp_path) -> None:
+        """Test that j/k keys scroll the metrics container without error."""
+        # Create a minimal project/run directory so the catalog doesn't raise
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir(exist_ok=True)
+        (project_dir / "test_run.jsonl").touch()
+        (project_dir / "test_run.meta.json").write_text("{}")
+
+        app = AsparaTUIApp(data_dir=str(tmp_path))
+        async with app.run_test() as pilot:
+            screen = RunDetailScreen(project_name="test_project", run_name="test_run")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # j and k should not raise errors even with no metrics
             await pilot.press("j")
             await pilot.pause()
             await pilot.press("k")

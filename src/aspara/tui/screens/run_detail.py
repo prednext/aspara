@@ -32,6 +32,8 @@ class RunDetailScreen(Screen[None]):
 
     BINDINGS = [
         Binding("backspace", "go_back", "Back", show=True),
+        Binding("j", "scroll_down", "Down", show=False),
+        Binding("k", "scroll_up", "Up", show=False),
     ]
 
     def __init__(self, project_name: str, run_name: str) -> None:
@@ -216,6 +218,16 @@ class RunDetailScreen(Screen[None]):
         from aspara.tui.screens.metric_chart import MetricChartScreen
 
         self.app.push_screen(MetricChartScreen(self._project_name, self._run_name, event.metric_name))
+
+    def action_scroll_down(self) -> None:
+        """Scroll the metrics container down."""
+        scroll = self.query_one(".metrics-scroll", VerticalScroll)
+        scroll.scroll_down()
+
+    def action_scroll_up(self) -> None:
+        """Scroll the metrics container up."""
+        scroll = self.query_one(".metrics-scroll", VerticalScroll)
+        scroll.scroll_up()
 
     def action_go_back(self) -> None:
         """Go back to previous screen."""
