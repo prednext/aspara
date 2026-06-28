@@ -90,10 +90,11 @@ On list screens (Projects, Runs), you can:
 
 - Press `/` to focus the search input and filter items
 - Press `s` to toggle between different sort orders
+- Press `Ctrl+r` to reload the list from disk (useful when new experiments are created during a TUI session)
 
 ### Mini Charts
 
-The Run Detail screen shows mini sparkline charts for each metric, giving you a quick overview of metric trends without opening the full chart view.
+The Run Detail screen shows mini sparkline charts for each metric, giving you a quick overview of metric trends without opening the full chart view. Use `j`/`k` to scroll through the metrics grid, `Tab` to focus a chart cell, and `Enter` to open the full-screen chart view.
 
 ### Interactive Chart
 
@@ -102,6 +103,7 @@ The Metric Chart screen provides a full-screen chart with:
 - **Pan**: Use `h`/`l` or arrow keys to scroll through time
 - **Zoom**: Use `+`/`-` to zoom in and out
 - **Reset**: Press `r` to reset the view to show all data
+- **Jump**: Press `g` to jump to the start of the data, `G` to jump to the end
 - **Watch Mode**: Press `w` to enable live updates when the run is still recording
 
 ### Status Icons
