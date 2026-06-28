@@ -5,7 +5,6 @@ Tests for RunCatalog
 import asyncio
 import contextlib
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -923,17 +922,20 @@ class TestReadRunInfoTOCTOU:
         run_file = project_dir / "test_run.jsonl"
         run_file.write_text('{"step": 0}\n')
 
-        # Patch os.stat to raise FileNotFoundError for this specific file,
+        # Patch Path.stat to raise FileNotFoundError for this specific file,
         # simulating a TOCTOU race where the file is deleted between
         # exists() and stat() calls.
-        original_stat = os.stat
+        # Patch Path.stat (not os.stat) because Python 3.10's pathlib binds
+        # os.stat into _NormalAccessor at import time, so monkeypatching
+        # os.stat does not affect Path.stat() on 3.10 (it does on 3.11+).
+        original_stat = Path.stat
 
-        def _raising_stat(path, *args, **kwargs):
-            if str(path) == str(run_file):
+        def _raising_stat(self, *args, **kwargs):
+            if str(self) == str(run_file):
                 raise FileNotFoundError("File deleted between exists and stat")
-            return original_stat(path, *args, **kwargs)
+            return original_stat(self, *args, **kwargs)
 
-        monkeypatch.setattr("os.stat", _raising_stat)
+        monkeypatch.setattr(Path, "stat", _raising_stat)
 
         # Should not crash — should handle FileNotFoundError gracefully.
         run_info = catalog._read_run_info("test_project", "test_run", run_file)
