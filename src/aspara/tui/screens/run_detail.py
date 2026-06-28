@@ -70,7 +70,7 @@ class RunDetailScreen(Screen[None]):
                 classes="info-row",
             ),
             Vertical(
-                Static("Metrics (Click to view detail)", classes="section-title"),
+                Static("Metrics (Tab to focus, Enter to view detail)", classes="section-title"),
                 VerticalScroll(
                     Container(id="metrics-grid-container"),
                     classes="metrics-scroll",

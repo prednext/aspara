@@ -59,6 +59,7 @@ Projects → Runs → Run Detail → Metric Chart
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `Enter` | Select / Confirm |
+| `Tab` | Focus next widget (e.g. metric charts on Run Detail) |
 
 #### List Screens (Projects, Runs)
 

@@ -25,6 +25,7 @@ HELP_TEXT = """\
   [cyan]j[/] / [cyan]↓[/]       Move down
   [cyan]k[/] / [cyan]↑[/]       Move up
   [cyan]Enter[/]       Select / Confirm
+  [cyan]Tab[/]         Focus next widget (e.g. metric charts)
 
 [bold underline]List Screens (Projects, Runs)[/bold underline]
   [cyan]/[/]           Focus search input

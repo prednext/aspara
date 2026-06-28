@@ -149,6 +149,38 @@ class TestRunDetailScreen:
             await pilot.press("k")
             await pilot.pause()
 
+    @pytest.mark.asyncio
+    async def test_tab_enter_opens_metric_chart(self, tmp_path) -> None:
+        """Test that Tab focuses a chart cell and Enter opens the metric chart."""
+        import json
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir(exist_ok=True)
+
+        # Write metrics data with one metric
+        with (project_dir / "test_run.jsonl").open("w") as f:
+            f.write(json.dumps({"timestamp": 1700000000000, "step": 0, "metrics": {"loss": 0.5}}) + "\n")
+            f.write(json.dumps({"timestamp": 1700000001000, "step": 1, "metrics": {"loss": 0.3}}) + "\n")
+
+        (project_dir / "test_run.meta.json").write_text("{}")
+
+        app = AsparaTUIApp(data_dir=str(tmp_path))
+        async with app.run_test() as pilot:
+            screen = RunDetailScreen(project_name="test_project", run_name="test_run")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Tab to focus the first chart cell, then Enter to open it
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # Should have pushed MetricChartScreen
+            from aspara.tui.screens.metric_chart import MetricChartScreen
+
+            assert isinstance(app.screen, MetricChartScreen)
+
 
 class TestMetricChartScreen:
     """Tests for MetricChartScreen."""
