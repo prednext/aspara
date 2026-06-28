@@ -28,6 +28,7 @@ from .models import (
     RunCreateResponse,
     StatusResponse,
     SummaryUpdateRequest,
+    TagsUpdateRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -495,3 +496,58 @@ async def finish_run(
     except Exception as e:
         logger.error(f"Error finishing run: {e}")
         raise HTTPException(status_code=500, detail="Failed to finish run") from e
+
+
+@router.post(
+    "/api/v1/projects/{project_name}/runs/{run_name}/tags",
+    response_model=StatusResponse,
+    tags=["Runs"],
+    dependencies=[Depends(verify_csrf_header)],
+)
+async def update_tags(
+    project_name: str,
+    run_name: str,
+    request: TagsUpdateRequest,
+) -> StatusResponse:
+    """Update tags for a run.
+
+    Args:
+        project_name: Target project name
+        run_name: Target run name
+        request: Tags update request containing the new tag list
+
+    Returns:
+        StatusResponse: Response with status
+
+    Raises:
+        HTTPException: If validation fails or run doesn't exist
+    """
+    # Validate input names to prevent path traversal
+    try:
+        validators.validate_project_name(project_name)
+        validators.validate_run_name(run_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    if is_read_only():
+        return StatusResponse()
+
+    data_dir = get_data_dir()
+    base_dir = Path(data_dir)
+
+    # Check if run exists
+    metadata_path = base_dir / project_name / f"{run_name}.meta.json"
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    try:
+        storage = RunMetadataStorage(
+            base_dir=str(data_dir),
+            project_name=project_name,
+            run_name=run_name,
+        )
+        storage.set_tags(request.tags)
+        return StatusResponse()
+    except Exception as e:
+        logger.error(f"Error updating tags: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update tags") from e

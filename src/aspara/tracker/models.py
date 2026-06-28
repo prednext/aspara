@@ -82,6 +82,12 @@ class FinishRequest(BaseModel):
     exit_code: int = 0
 
 
+class TagsUpdateRequest(BaseModel):
+    """Request model for updating run tags."""
+
+    tags: list[str] = []
+
+
 class StatusResponse(BaseModel):
     """Generic status response model."""
 

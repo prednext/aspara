@@ -767,3 +767,56 @@ class TestExperimentLifecycle:
         with project_meta.open(encoding="utf-8") as f:
             proj_meta = json.load(f)
         assert set(proj_meta["tags"]) >= {"mnist", "classification"}
+
+    def test_update_tags(self, tmp_path, monkeypatch):
+        """Test updating tags for an existing run."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+
+        client = TestClient(app)
+
+        project = "test_project"
+        run_name = "test_run"
+
+        # Create run first
+        client.post(
+            f"/api/v1/projects/{project}/runs",
+            json={
+                "name": run_name,
+                "config": {},
+                "tags": ["initial"],
+                "notes": "",
+            },
+            headers=CSRF_HEADER,
+        )
+
+        # Update tags
+        response = client.post(
+            f"/api/v1/projects/{project}/runs/{run_name}/tags",
+            json={"tags": ["new", "tags"]},
+            headers=CSRF_HEADER,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+        # Verify metadata was updated
+        metadata_path = tmp_path / project / f"{run_name}.meta.json"
+        with metadata_path.open(encoding="utf-8") as f:
+            metadata = json.load(f)
+
+        assert metadata["tags"] == ["new", "tags"]
+
+    def test_update_tags_nonexistent_run(self, tmp_path, monkeypatch):
+        """Test updating tags for a nonexistent run returns 404."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/v1/projects/test_project/runs/nonexistent/tags",
+            json={"tags": ["new"]},
+            headers=CSRF_HEADER,
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Run not found"

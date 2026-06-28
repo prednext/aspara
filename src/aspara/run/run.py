@@ -184,11 +184,10 @@ class Run:
     def set_tags(self, tags: list[str]) -> None:
         """Set tags for this run.
 
+        Replaces the existing run-level tags with the provided list.
+
         Args:
             tags: List of tags
-
-        Note:
-            This method is only available for local runs.
         """
         self._backend.set_tags(tags)
 

@@ -175,6 +175,24 @@ class TrackerClient:
         )
         response.raise_for_status()
 
+    def update_tags(self, project: str, run_name: str, tags: list[str]) -> None:
+        """Update tags for a run on the tracker.
+
+        Args:
+            project: Project name
+            run_name: Run name
+            tags: New list of tags (replaces existing tags)
+
+        Raises:
+            requests.RequestException: If HTTP request fails
+        """
+        response = self.session.post(
+            f"{self.base_url}/api/v1/projects/{quote(project, safe='')}/runs/{quote(run_name, safe='')}/tags",
+            json={"tags": tags},
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+
     def health_check(self, timeout: float = 5.0) -> bool:
         """Check if the tracker server is healthy.
 
@@ -463,10 +481,19 @@ class RemoteRun(BaseRun):
     def set_tags(self, tags: list[str]) -> None:
         """Set tags for this run.
 
-        Note:
-            This method is not yet supported for remote runs.
+        Replaces the existing run-level tags with the provided list.
+
+        Args:
+            tags: List of tags
 
         Raises:
-            NotImplementedError: Always raised as remote tag setting is not implemented.
+            RuntimeError: If run has already finished
         """
-        raise NotImplementedError("set_tags is not yet supported for remote runs")
+        if self._finished:
+            raise RuntimeError("Cannot modify a finished run")
+
+        self.tags = tags
+        try:
+            self.client.update_tags(self.project, self.name, tags)
+        except Exception as e:
+            logger.warning(f"Failed to sync tags to tracker: {e}")
