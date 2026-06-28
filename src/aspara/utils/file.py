@@ -6,7 +6,7 @@ import os
 import platform
 import stat
 import tempfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import IO, Any
 
@@ -64,15 +64,23 @@ def secure_open_append(path: str | Path) -> Generator[IO[str], None, None]:
             os.close(fd_to_close)
 
 
-def atomic_write_json(path: str | Path, data: dict[str, Any]) -> None:
-    """Atomically write JSON data to a file.
+def atomic_write_text(
+    path: str | Path,
+    write_fn: Callable[[IO[str]], None],
+    *,
+    suffix: str = ".tmp",
+) -> None:
+    """Atomically write text content to a file.
 
-    Writes to a secure temporary file first, then renames to avoid partial writes.
-    Uses tempfile.NamedTemporaryFile to prevent symlink attacks and race conditions.
+    Writes to a secure temporary file in the same directory, fsyncs it, then
+    atomically renames it over the target. This avoids the partial-write /
+    truncate-then-write races that lose data on crash or disk-full.
 
     Args:
         path: Target file path
-        data: Dictionary to write as JSON
+        write_fn: Callback that receives an open text file object and writes
+            the desired content to it. Must not close the file object.
+        suffix: Suffix for the temporary file.
     """
     target_path = Path(path)
     target_dir = target_path.parent
@@ -80,15 +88,14 @@ def atomic_write_json(path: str | Path, data: dict[str, Any]) -> None:
     # Ensure target directory exists
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use tempfile.NamedTemporaryFile for secure temp file creation
+    # Use tempfile.mkstemp for secure temp file creation
     # - Creates file with O_EXCL flag (prevents symlink attacks)
     # - Creates in same directory as target (allows atomic rename)
-    # - delete=False because we want to rename it, not delete it
     tmp_fd = None
     tmp_path = None
     try:
         tmp_fd, tmp_name = tempfile.mkstemp(
-            suffix=".json",
+            suffix=suffix,
             prefix=".tmp_",
             dir=str(target_dir),
         )
@@ -97,7 +104,7 @@ def atomic_write_json(path: str | Path, data: dict[str, Any]) -> None:
         # Write data to temp file
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             tmp_fd = None  # fd is now owned by the file object
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            write_fn(f)
             f.flush()
             datasync(f.fileno())
 
@@ -115,3 +122,20 @@ def atomic_write_json(path: str | Path, data: dict[str, Any]) -> None:
         if tmp_path is not None and tmp_path.exists():
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
+
+
+def atomic_write_json(path: str | Path, data: dict[str, Any]) -> None:
+    """Atomically write JSON data to a file.
+
+    Writes to a secure temporary file first, then renames to avoid partial writes.
+    Uses tempfile.NamedTemporaryFile to prevent symlink attacks and race conditions.
+
+    Args:
+        path: Target file path
+        data: Dictionary to write as JSON
+    """
+
+    def _write(f: IO[str]) -> None:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    atomic_write_text(path, _write, suffix=".json")

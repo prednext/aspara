@@ -18,6 +18,14 @@ class RunsListSSE {
     this.sseMetricHandler = null;
     this.sseErrorHandler = null;
 
+    // Reconnection state — exponential backoff aligned with
+    // metrics-data-service.js to avoid reconnection storms when the
+    // server is down for an extended period.
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 10;
+    this.baseReconnectDelay = 1000;
+
     this.setupSSE();
   }
 
@@ -37,6 +45,9 @@ class RunsListSSE {
     // Store handlers as member variables for cleanup
     this.sseOpenHandler = () => {
       console.log('[RunsListSSE] SSE connection opened with since:', this.lastTimestamp);
+      // Reset reconnection state on successful connection.
+      this.isReconnecting = false;
+      this.reconnectAttempts = 0;
       // Note: Don't update lastTimestamp here - it's updated when receiving events
       // This ensures we don't miss data between the last event and reconnection
     };
@@ -84,22 +95,47 @@ class RunsListSSE {
   }
 
   /**
-   * Reconnect SSE with updated since timestamp
+   * Reconnect SSE with updated since timestamp.
+   * Uses exponential backoff (1s, 2s, 4s, 8s... max 30s) and a max retry
+   * limit to prevent reconnection storms when the server is down.
    */
   reconnect() {
-    // Close existing connection if any
+    // Guard against concurrent reconnection attempts.
+    if (this.isReconnecting) {
+      console.log('[RunsListSSE] Already reconnecting, skipping');
+      return;
+    }
+
+    // Check max retry count.
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('[RunsListSSE] Max reconnection attempts reached, giving up');
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    // Exponential backoff: 1s, 2s, 4s, 8s... (max 30s)
+    const delay = Math.min(this.baseReconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
+    console.log(`[RunsListSSE] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}, waiting ${delay}ms`);
+
+    // Close existing connection if any.
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
     }
 
-    // Delay reconnection slightly to avoid rapid reconnection loops
     setTimeout(() => {
       if (this.runs.length > 0) {
         console.log('[RunsListSSE] Reconnecting SSE with since:', this.lastTimestamp);
         this.setupSSE();
       }
-    }, 1000);
+      // isReconnecting is reset in the 'open' handler on successful
+      // connection. If runs is empty, reset here to avoid getting stuck.
+      if (this.runs.length === 0) {
+        this.isReconnecting = false;
+      }
+    }, delay);
   }
 
   handleStatusUpdate(statusData) {
@@ -129,7 +165,12 @@ class RunsListSSE {
     this.sseStatusHandler = null;
     this.sseMetricHandler = null;
     this.sseErrorHandler = null;
+    // Reset reconnection state so a future re-init starts fresh.
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
   }
 }
 
 window.RunsListSSE = RunsListSSE;
+
+export { RunsListSSE };

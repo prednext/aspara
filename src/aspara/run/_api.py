@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any
 
 from aspara.storage.metrics import resolve_metrics_storage_backend
@@ -12,6 +13,7 @@ if TYPE_CHECKING:
 
 _current_run: Run | None = None
 _storage_backend: str = "jsonl"  # Global storage backend setting
+_lock = threading.Lock()
 
 
 def init(
@@ -61,31 +63,32 @@ def init(
     """
     global _current_run, _storage_backend
 
-    # Finish previous run if exists
-    if _current_run is not None:
-        _current_run.finish(quiet=True)
+    with _lock:
+        # Finish previous run if exists
+        if _current_run is not None:
+            _current_run.finish(quiet=True)
 
-    # Determine storage backend using central resolver
-    selected_backend = resolve_metrics_storage_backend(storage_backend)
-    _storage_backend = selected_backend
+        # Determine storage backend using central resolver
+        selected_backend = resolve_metrics_storage_backend(storage_backend)
+        _storage_backend = selected_backend
 
-    # Create Run which internally delegates to LocalRun or RemoteRun based on tracker_uri
-    from aspara.run.run import Run
+        # Create Run which internally delegates to LocalRun or RemoteRun based on tracker_uri
+        from aspara.run.run import Run
 
-    run = Run(
-        name=name,
-        project=project,
-        config=config,
-        tags=tags,
-        notes=notes,
-        dir=dir,
-        storage_backend=selected_backend,
-        tracker_uri=tracker_uri,
-        project_tags=project_tags,
-    )
-    _current_run = run
+        run = Run(
+            name=name,
+            project=project,
+            config=config,
+            tags=tags,
+            notes=notes,
+            dir=dir,
+            storage_backend=selected_backend,
+            tracker_uri=tracker_uri,
+            project_tags=project_tags,
+        )
+        _current_run = run
 
-    return run
+        return run
 
 
 def log(
@@ -113,7 +116,12 @@ def log(
     if _current_run is None:
         raise RuntimeError("No active run. Call aspara.init() first.")
 
-    _current_run.log(data, step=step, commit=commit, timestamp=timestamp)
+    with _lock:
+        # Re-check inside the lock: finish() may have cleared _current_run
+        # between the check above and acquiring the lock.
+        if _current_run is None:
+            raise RuntimeError("No active run. Call aspara.init() first.")
+        _current_run.log(data, step=step, commit=commit, timestamp=timestamp)
 
 
 def finish(exit_code: int = 0, quiet: bool = False) -> None:
@@ -133,9 +141,10 @@ def finish(exit_code: int = 0, quiet: bool = False) -> None:
     """
     global _current_run
 
-    if _current_run is not None:
-        _current_run.finish(exit_code=exit_code, quiet=quiet)
-        _current_run = None
+    with _lock:
+        if _current_run is not None:
+            _current_run.finish(exit_code=exit_code, quiet=quiet)
+            _current_run = None
 
 
 def get_current_run() -> Run | None:
@@ -144,4 +153,5 @@ def get_current_run() -> Run | None:
     Returns:
         The current Run object, or None if no run is active.
     """
-    return _current_run
+    with _lock:
+        return _current_run

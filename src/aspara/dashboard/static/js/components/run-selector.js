@@ -20,6 +20,11 @@ export class RunSelector {
     this.onSelectionChange = options.onSelectionChange || null;
     this.initialLoadComplete = false;
 
+    // Stored handlers for cleanup
+    this._filterHandler = null;
+    this._checkboxHandlers = [];
+    this._sortButtonHandlers = [];
+
     this.initializeElements();
     this.setupEventListeners();
     this.loadInitialRuns();
@@ -40,20 +45,23 @@ export class RunSelector {
    */
   setupEventListeners() {
     if (this.filterInput) {
-      this.filterInput.addEventListener('input', (e) => {
+      this._filterHandler = (e) => {
         this.filterRuns(e.target.value);
-      });
+      };
+      this.filterInput.addEventListener('input', this._filterHandler);
     }
 
     for (const checkbox of this.runCheckboxes) {
-      checkbox.addEventListener('change', (e) => {
+      const handler = (e) => {
         this.handleRunSelection(e.target);
-      });
+      };
+      checkbox.addEventListener('change', handler);
+      this._checkboxHandlers.push({ element: checkbox, handler });
     }
 
     const sortButtons = document.querySelectorAll('[data-sort-runs]');
     for (const button of sortButtons) {
-      button.addEventListener('click', () => {
+      const handler = () => {
         const key = button.dataset.sortRuns;
         if (this.sortKey === key) {
           this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
@@ -65,7 +73,9 @@ export class RunSelector {
         localStorage.setItem('project_runs_sort_order', this.sortOrder);
         this.updateSortIndicators();
         this.sortRuns();
-      });
+      };
+      button.addEventListener('click', handler);
+      this._sortButtonHandlers.push({ element: button, handler });
     }
 
     this.updateSortIndicators();
@@ -279,5 +289,23 @@ export class RunSelector {
     for (const legend of allLegends) {
       legend.style.display = 'none';
     }
+  }
+
+  /**
+   * Clean up event listeners.
+   */
+  destroy() {
+    if (this.filterInput && this._filterHandler) {
+      this.filterInput.removeEventListener('input', this._filterHandler);
+      this._filterHandler = null;
+    }
+    for (const { element, handler } of this._checkboxHandlers) {
+      element.removeEventListener('change', handler);
+    }
+    this._checkboxHandlers = [];
+    for (const { element, handler } of this._sortButtonHandlers) {
+      element.removeEventListener('click', handler);
+    }
+    this._sortButtonHandlers = [];
   }
 }

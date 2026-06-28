@@ -7,6 +7,7 @@ with exponential backoff when the server becomes available again.
 
 from __future__ import annotations
 
+import heapq
 import random
 import threading
 import time
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from aspara.config import get_data_dir
 from aspara.logger import logger
+from aspara.utils.file import atomic_write_text, datasync
 from aspara.utils.validators import validate_project_name, validate_run_name
 
 if TYPE_CHECKING:
@@ -134,7 +136,7 @@ class OfflineQueueStorage:
         """Ensure queue directory and metadata file exist."""
         self._queue_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write metadata file if it doesn't exist
+        # Write metadata file if it doesn't exist, or validate it if it does.
         if not self._meta_file.exists():
             metadata = QueueMetadata(
                 tracker_uri=self.tracker_uri,
@@ -143,6 +145,8 @@ class OfflineQueueStorage:
                 run_id=self.run_id,
             )
             self._meta_file.write_text(metadata.model_dump_json(indent=2))
+        else:
+            self._validate_metadata_file()
 
         # Count existing items
         if self._queue_file.exists():
@@ -151,6 +155,41 @@ class OfflineQueueStorage:
                     self._item_count = sum(1 for line in f if line.strip())
             except OSError:
                 self._item_count = 0
+
+    def _validate_metadata_file(self) -> None:
+        """Load and validate the metadata file.
+
+        If the file is corrupted or has mismatched project/run_name, log a
+        warning and overwrite it with correct metadata so the queue can
+        continue operating instead of silently ignoring the mismatch.
+        """
+        try:
+            raw = self._meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+        except (OSError, ValueError, ValidationError) as e:
+            logger.warning(f"Queue metadata file is corrupted, rewriting: {e}")
+            self._write_metadata()
+            return
+
+        # Verify the metadata matches this queue's identity. A mismatch could
+        # happen if the queue directory was manually moved or copied.
+        if metadata.project != self.project or metadata.run_name != self.run_name:
+            logger.warning(
+                f"Queue metadata mismatch: file has project={metadata.project!r} "
+                f"run_name={metadata.run_name!r}, expected project={self.project!r} "
+                f"run_name={self.run_name!r}. Rewriting metadata."
+            )
+            self._write_metadata()
+
+    def _write_metadata(self) -> None:
+        """Write the metadata file with current queue identity."""
+        metadata = QueueMetadata(
+            tracker_uri=self.tracker_uri,
+            project=self.project,
+            run_name=self.run_name,
+            run_id=self.run_id,
+        )
+        self._meta_file.write_text(metadata.model_dump_json(indent=2))
 
     def enqueue(self, item: MetricsQueueItem) -> bool:
         """Add an item to the queue.
@@ -176,6 +215,8 @@ class OfflineQueueStorage:
             try:
                 with self._queue_file.open("a") as f:
                     f.write(item.to_jsonl() + "\n")
+                    f.flush()
+                    datasync(f.fileno())
                 self._item_count += 1
                 return True
             except OSError as e:
@@ -198,8 +239,7 @@ class OfflineQueueStorage:
                 lines = f.readlines()
 
             remaining = lines[count:]
-            with self._queue_file.open("w") as f:
-                f.writelines(remaining)
+            atomic_write_text(self._queue_file, lambda f: f.writelines(remaining), suffix=".jsonl")
 
             self._item_count = len(remaining)
         except OSError as e:
@@ -208,6 +248,9 @@ class OfflineQueueStorage:
     def get_ready_items(self, limit: int = 100) -> list[MetricsQueueItem]:
         """Get items ready for retry, sorted by step.
 
+        Uses a bounded heap so that at most ``limit`` items are held in
+        memory at any time, even if the queue file is very large.
+
         Args:
             limit: Maximum number of items to return
 
@@ -215,33 +258,46 @@ class OfflineQueueStorage:
             List of items ready for retry
         """
         now_ms = int(time.time() * 1000)
-        items: list[MetricsQueueItem] = []
+        # Min-heap of (sort_key, item) — we push negative sort keys to use
+        # heapq as a max-heap of size ``limit``, then pop all and reverse.
+        # This keeps memory usage bounded to ``limit`` items.
+        heap: list[tuple[tuple[int, int], MetricsQueueItem]] = []
 
         with self._lock:
             if not self._queue_file.exists():
-                return items
+                return []
 
             try:
                 with self._queue_file.open("r") as f:
                     for line in f:
-                        if not line.strip():
+                        stripped = line.strip()
+                        if not stripped:
                             continue
                         try:
-                            item = MetricsQueueItem.from_jsonl(line.strip())
-                            if item.next_retry_at <= now_ms:
-                                items.append(item)
+                            item = MetricsQueueItem.from_jsonl(stripped)
                         except (ValueError, ValidationError) as e:
                             logger.debug(f"Skipping invalid queue item: {e}")
                             continue
 
-                        if len(items) >= limit:
-                            break
-            except OSError:
-                pass
+                        if item.next_retry_at > now_ms:
+                            continue
 
-        # Sort by step to maintain order
-        items.sort(key=lambda x: (x.step, x.created_at))
-        return items[:limit]
+                        sort_key = (item.step, item.created_at)
+                        # Use negative key for max-heap behavior: heap[0]
+                        # holds the item with the LARGEST original key, so
+                        # it gets evicted first when a smaller item arrives.
+                        neg_key = (-sort_key[0], -sort_key[1])
+                        if len(heap) < limit:
+                            heapq.heappush(heap, (neg_key, item))
+                        elif neg_key > heap[0][0]:
+                            heapq.heapreplace(heap, (neg_key, item))
+            except OSError as e:
+                logger.warning(f"Failed to read queue file {self._queue_file}: {e}")
+
+        # Extract items from heap in sorted order (ascending by step, then created_at).
+        result = [heapq.heappop(heap)[1] for _ in range(len(heap))]
+        result.reverse()
+        return result
 
     def dequeue(self, item_ids: list[str]) -> int:
         """Remove items from the queue by ID.
@@ -279,8 +335,7 @@ class OfflineQueueStorage:
                         logger.debug(f"Skipping invalid queue item during dequeue: {e}")
                     remaining_lines.append(line if line.endswith("\n") else line + "\n")
 
-                with self._queue_file.open("w") as f:
-                    f.writelines(remaining_lines)
+                atomic_write_text(self._queue_file, lambda f: f.writelines(remaining_lines), suffix=".jsonl")
 
                 self._item_count = len(remaining_lines)
             except OSError as e:
@@ -325,8 +380,7 @@ class OfflineQueueStorage:
                     new_lines.append(line if line.endswith("\n") else line + "\n")
 
                 if updated:
-                    with self._queue_file.open("w") as f:
-                        f.writelines(new_lines)
+                    atomic_write_text(self._queue_file, lambda f: f.writelines(new_lines), suffix=".jsonl")
 
                 return updated
             except OSError as e:
@@ -360,8 +414,8 @@ class OfflineQueueStorage:
                     # Try to remove empty directory
                     if self._queue_dir.exists() and not any(self._queue_dir.iterdir()):
                         self._queue_dir.rmdir()
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug(f"Failed to cleanup queue files at {self._queue_dir}: {e}")
 
 
 class MetricsRetryWorker:

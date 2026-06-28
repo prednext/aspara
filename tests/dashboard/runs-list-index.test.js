@@ -293,4 +293,46 @@ describe('RunsListSorter', () => {
       expect(window.showErrorNotification).toHaveBeenCalledWith(expect.stringContaining('Network error'));
     });
   });
+
+  describe('destroy', () => {
+    test('should remove event listeners so sort clicks no longer work', () => {
+      createRunsDOM();
+      sorter = new RunsListSorter();
+
+      // Sort click works before destroy
+      document.querySelector('[data-sort="name"]').click();
+      expect(sorter.sortOrder).toBe('desc');
+
+      // Destroy and verify clicks are no longer handled
+      sorter.destroy();
+      document.querySelector('[data-sort="name"]').click();
+      expect(sorter.sortOrder).toBe('desc'); // unchanged
+    });
+
+    test('should remove card navigation listeners', () => {
+      createRunsDOM();
+      sorter = new RunsListSorter();
+      window.location = { href: '' };
+
+      // Navigation works before destroy
+      const card = document.querySelector('.run-card');
+      card.click();
+      expect(window.location.href).toContain('/projects/proj/runs/run-0');
+
+      // Reset and destroy
+      window.location = { href: '' };
+      sorter.destroy();
+      card.click();
+      expect(window.location.href).toBe(''); // no navigation after destroy
+    });
+
+    test('should be safe to call multiple times', () => {
+      createRunsDOM();
+      sorter = new RunsListSorter();
+      expect(() => {
+        sorter.destroy();
+        sorter.destroy();
+      }).not.toThrow();
+    });
+  });
 });

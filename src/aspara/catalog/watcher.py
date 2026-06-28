@@ -316,7 +316,16 @@ class DataDirWatcher:
                 logger.debug(f"[Watcher] Received {len(changes)} change(s)")
 
                 for _change_type, changed_path_str in changes:
-                    changed_path = Path(changed_path_str).resolve()
+                    raw_path = Path(changed_path_str)
+                    # Skip symlinks to prevent reading files outside data_dir.
+                    # The initial read in _read_initial_data already skips
+                    # symlinks; the dispatch loop must do the same so a
+                    # symlink created after subscription cannot bypass it.
+                    if raw_path.is_symlink():
+                        logger.warning(f"[Watcher] Skipping symlink in dispatch: {raw_path}")
+                        continue
+
+                    changed_path = raw_path.resolve()
 
                     # Parse file path to get project/run/type
                     parsed = self._parse_file_path(changed_path)
@@ -409,9 +418,17 @@ class DataDirWatcher:
         records: list[MetricRecord] = []
 
         try:
-            current_size = self._file_sizes.get(file_path, 0)
+            # Determine where to resume reading. The tracked size may be stale
+            # if the file was truncated (e.g. PolarsMetricsStorage._clear_wal
+            # truncates the WAL to 0 bytes after archiving) or replaced. When
+            # the actual size is smaller than what we last read, rewind to the
+            # beginning so the newly appended content is not silently skipped.
+            actual_size = file_path.stat().st_size
+            tracked_size = self._file_sizes.get(file_path, 0)
+            read_from = 0 if actual_size < tracked_size else tracked_size
+
             with open(file_path) as f:
-                f.seek(current_size)
+                f.seek(read_from)
                 new_content = f.read()
                 self._file_sizes[file_path] = f.tell()
 

@@ -62,6 +62,28 @@ def test_run_catalog_list_nonexistent_project(temp_catalog_dir):
         catalog.get_runs("non_existent_project")
 
 
+def test_run_last_update_is_timezone_aware(temp_catalog_dir):
+    """RunInfo.last_update must be timezone-aware UTC.
+
+    datetime.fromtimestamp() without tz produces naive local-time datetimes
+    that raise TypeError when compared with aware datetimes elsewhere (e.g.
+    _infer_stale_status uses datetime.now(timezone.utc)).
+    """
+    catalog = RunCatalog(str(temp_catalog_dir))
+
+    project_dir = temp_catalog_dir / "test_project"
+    project_dir.mkdir()
+    run_file = project_dir / "run1.jsonl"
+    run_file.write_text(json.dumps({"timestamp": "2024-01-01T00:00:00Z", "step": 0, "metrics": {"loss": 0.5}}) + "\n")
+    meta_file = project_dir / "run1.meta.json"
+    meta_file.write_text(json.dumps({"run_id": "id1", "status": "wip", "is_finished": False}))
+
+    run_info = catalog.get_runs("test_project")[0]
+    assert run_info.last_update is not None
+    assert run_info.last_update.tzinfo is not None
+    assert run_info.last_update.tzinfo == timezone.utc
+
+
 @pytest.mark.asyncio
 async def test_subscribe_single_run(temp_catalog_dir):
     """Test that subscribe() method can monitor a single run file"""
@@ -837,3 +859,85 @@ class TestRunCatalogMetadata:
 
         assert metadata["notes"] == "Updated notes"
         assert metadata["tags"] == ["ml", "experiment"]
+
+
+class TestReadRunInfoTOCTOU:
+    """Tests for TOCTOU race in _read_run_info.
+
+    The file can be deleted between exists() and stat() calls when the
+    watcher and delete API run concurrently. _read_run_info should handle
+    FileNotFoundError gracefully instead of crashing.
+    """
+
+    def test_run_file_deleted_after_stat_succeeds(self, tmp_path):
+        """Normal case: run file exists and stat succeeds."""
+        catalog = RunCatalog(tmp_path)
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "test_run.jsonl"
+        run_file.write_text('{"step": 0, "metrics": {"loss": 0.5}}\n')
+        meta_file = project_dir / "test_run.meta.json"
+        meta_file.write_text(
+            json.dumps({
+                "run_id": "test-id",
+                "tags": [],
+                "notes": "",
+                "params": {},
+                "config": {},
+                "artifacts": [],
+                "summary": {},
+                "is_finished": False,
+                "exit_code": None,
+                "status": "wip",
+                "start_time": None,
+                "finish_time": None,
+            })
+        )
+
+        run_info = catalog._read_run_info("test_project", "test_run", run_file)
+        assert run_info.name == "test_run"
+        assert run_info.is_corrupted is False
+
+    def test_run_file_deleted_between_exists_and_stat(self, tmp_path):
+        """run_file.stat() raises FileNotFoundError — should not crash."""
+        catalog = RunCatalog(tmp_path)
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "test_run.jsonl"
+        # Don't create the run file — stat() will raise FileNotFoundError.
+
+        run_info = catalog._read_run_info("test_project", "test_run", run_file)
+        # Should be marked corrupted, not crash.
+        assert run_info.is_corrupted is True
+        assert run_info.error_message == "Run file not found"
+
+    def test_run_file_deleted_during_stat_call(self, tmp_path, monkeypatch):
+        """Simulate file being deleted between exists() and stat() calls."""
+        catalog = RunCatalog(tmp_path)
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+        run_file = project_dir / "test_run.jsonl"
+        run_file.write_text('{"step": 0}\n')
+
+        # Patch Path.stat to raise FileNotFoundError for this specific file,
+        # simulating a TOCTOU race where the file is deleted between
+        # exists() and stat() calls.
+        # Patch Path.stat (not os.stat) because Python 3.10's pathlib binds
+        # os.stat into _NormalAccessor at import time, so monkeypatching
+        # os.stat does not affect Path.stat() on 3.10 (it does on 3.11+).
+        original_stat = Path.stat
+
+        def _raising_stat(self, *args, **kwargs):
+            if str(self) == str(run_file):
+                raise FileNotFoundError("File deleted between exists and stat")
+            return original_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _raising_stat)
+
+        # Should not crash — should handle FileNotFoundError gracefully.
+        run_info = catalog._read_run_info("test_project", "test_run", run_file)
+        assert run_info.is_corrupted is True
+        assert run_info.error_message == "Run file not found"

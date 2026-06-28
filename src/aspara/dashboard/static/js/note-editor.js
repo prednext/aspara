@@ -3,6 +3,7 @@
  * GitHub Issue-style inline editing for project/run notes
  */
 
+import { isDev } from './dev-mode.js';
 import {
   EMPTY_NOTE_PLACEHOLDER,
   createSaveNoteRequestBody,
@@ -20,6 +21,7 @@ class NoteEditor {
     this.originalValue = '';
     this.currentElement = null;
     this.currentApiEndpoint = null;
+    this._abortController = null;
   }
 
   /**
@@ -32,10 +34,11 @@ class NoteEditor {
   init(element, apiEndpoint, currentNote = '', editButtonContainerId = null) {
     if (!element || !apiEndpoint) return;
 
-    const wrapper = this.createNoteWrapper(element, currentNote, editButtonContainerId);
+    this._abortController = new AbortController();
+    const { wrapper, editBtn } = this.createNoteWrapper(element, currentNote, editButtonContainerId);
     element.parentNode.replaceChild(wrapper, element);
 
-    this.attachEventListeners(wrapper, apiEndpoint);
+    this.attachEventListeners(wrapper, apiEndpoint, editBtn);
   }
 
   /**
@@ -86,44 +89,57 @@ class NoteEditor {
     wrapper.appendChild(display);
     wrapper.appendChild(edit);
 
-    return wrapper;
+    return { wrapper, editBtn };
   }
 
   /**
    * Attach event listeners to note wrapper
    */
-  attachEventListeners(wrapper, apiEndpoint) {
-    // Edit button might be outside wrapper, so search globally
-    const editBtn = document.querySelector('.note-edit-btn');
+  attachEventListeners(wrapper, apiEndpoint, editBtn) {
+    const signal = this._abortController.signal;
     const saveBtn = wrapper.querySelector('.note-save-btn');
     const cancelBtn = wrapper.querySelector('.note-cancel-btn');
     const textarea = wrapper.querySelector('.note-textarea');
     const noteContent = wrapper.querySelector('.note-content');
 
     if (editBtn) {
-      editBtn.addEventListener('click', () => this.startEditing(wrapper, apiEndpoint));
+      editBtn.addEventListener('click', () => this.startEditing(wrapper, apiEndpoint), { signal });
     }
 
     // Click on placeholder text enters edit mode
     if (noteContent) {
-      noteContent.addEventListener('click', () => {
-        if (isNoteEmpty(noteContent.textContent)) {
-          this.startEditing(wrapper, apiEndpoint);
-        }
-      });
+      noteContent.addEventListener(
+        'click',
+        () => {
+          if (isNoteEmpty(noteContent.textContent)) {
+            this.startEditing(wrapper, apiEndpoint);
+          }
+        },
+        { signal }
+      );
     }
 
-    saveBtn.addEventListener('click', () => this.saveNote(wrapper, apiEndpoint));
-    cancelBtn.addEventListener('click', () => this.cancelEditing(wrapper));
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => this.saveNote(wrapper, apiEndpoint), { signal });
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => this.cancelEditing(wrapper), { signal });
+    }
 
     // Save on Ctrl+Enter, Cancel on Escape
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.ctrlKey) {
-        this.saveNote(wrapper, apiEndpoint);
-      } else if (e.key === 'Escape') {
-        this.cancelEditing(wrapper);
-      }
-    });
+    if (textarea) {
+      textarea.addEventListener(
+        'keydown',
+        (e) => {
+          if (e.key === 'Enter' && e.ctrlKey) {
+            this.saveNote(wrapper, apiEndpoint);
+          } else if (e.key === 'Escape') {
+            this.cancelEditing(wrapper);
+          }
+        },
+        { signal }
+      );
+    }
   }
 
   /**
@@ -200,11 +216,29 @@ class NoteEditor {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `Server error: ${response.status}`);
+        let detail = `Server error: ${response.status}`;
+        let rawBody = null;
+        try {
+          const errorData = await response.json();
+          detail = errorData.detail || detail;
+        } catch {
+          if (isDev()) {
+            try {
+              rawBody = await response.text();
+            } catch {
+              // ignore
+            }
+          }
+        }
+        throw new Error(isDev() && rawBody ? `${detail} (raw: ${rawBody.slice(0, 200)})` : detail);
       }
 
-      const updatedMetadata = await response.json();
+      let updatedMetadata;
+      try {
+        updatedMetadata = await response.json();
+      } catch {
+        throw new Error('Failed to parse server response');
+      }
 
       this.updateDisplay(wrapper, extractNoteFromResponse(updatedMetadata));
       this.finishEditing(wrapper);
@@ -262,6 +296,18 @@ class NoteEditor {
     this.currentElement = null;
     this.currentApiEndpoint = null;
   }
+
+  /**
+   * Remove all event listeners and clean up.
+   * Call this when the editor is no longer needed to prevent memory leaks.
+   */
+  destroy() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
+    this.resetEditingState();
+  }
 }
 
 /**
@@ -288,6 +334,9 @@ async function initNoteEditorFromDOM(elementId) {
 
   try {
     const response = await fetch(apiEndpoint);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     const metadata = await response.json();
     noteEditor.init(noteElement, apiEndpoint, metadata.notes || '', editBtnId);
   } catch (error) {

@@ -190,7 +190,8 @@ class TrackerClient:
                 timeout=timeout,
             )
             return response.status_code == 200
-        except Exception:
+        except requests.RequestException as e:
+            logger.debug(f"Health check failed: {e}")
             return False
 
     def log_artifact(
@@ -291,14 +292,14 @@ class RemoteRun(BaseRun):
             # Update name if server generated one
             if "name" in response:
                 self.name = response["name"]
-        except Exception as e:
+        except requests.RequestException as e:
             raise RuntimeError(f"Failed to create run on tracker: {e}") from e
 
         # Create config with sync callback
         def sync_config() -> None:
             try:
                 self.client.log_config(self.project, self.name, self.config.to_dict())
-            except Exception as e:
+            except requests.RequestException as e:
                 logger.warning(f"Failed to sync config to tracker: {e}")
 
         self.config = Config(config, on_change=sync_config)
@@ -307,7 +308,7 @@ class RemoteRun(BaseRun):
         def sync_summary() -> None:
             try:
                 self.client.log_summary(self.project, self.name, self.summary.to_dict())
-            except Exception as e:
+            except requests.RequestException as e:
                 logger.warning(f"Failed to sync summary to tracker: {e}")
 
         self.summary = Summary(on_change=sync_summary)
@@ -369,7 +370,7 @@ class RemoteRun(BaseRun):
                     metrics=metrics,
                     timestamp=timestamp,
                 )
-            except Exception as e:
+            except requests.RequestException as e:
                 logger.warning(f"Failed to log metrics to tracker: {e}. Queueing for retry.")
                 # Queue for later retry
                 item = MetricsQueueItem(
@@ -401,7 +402,7 @@ class RemoteRun(BaseRun):
 
         try:
             self.client.finish_run(self.project, self.name, exit_code)
-        except Exception as e:
+        except requests.RequestException as e:
             logger.warning(f"Failed to finish run on tracker: {e}")
 
         if not quiet:
@@ -441,7 +442,7 @@ class RemoteRun(BaseRun):
                 description=description,
                 category=category,
             )
-        except Exception as e:
+        except (requests.RequestException, OSError) as e:
             logger.warning(f"Failed to upload artifact to tracker: {e}")
 
     def flush(self, timeout: float = 30.0) -> int:

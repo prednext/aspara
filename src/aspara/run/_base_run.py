@@ -113,12 +113,19 @@ class BaseRun:
         - If an explicit step is provided, use it as-is.
         - Otherwise, keep the current step value. Auto-increment happens
           *after* logging when commit=True.
+
+        The ``_step_committed`` flag is reset here so that it always
+        reflects whether the *current* step has been committed by a
+        subsequent ``_after_log`` call. Without this reset, an explicit
+        ``step=`` argument would leave the flag stale from the previous
+        log call.
         """
 
         if step is not None:
             self._current_step = step
-        # When step is None and previous step was committed, we keep the
-        # current value here and only increment after logging.
+        # Mark the current step as not-yet-committed. _after_log will set
+        # it to True (commit=True) or False (commit=False) after logging.
+        self._step_committed = False
         return self._current_step
 
     def _after_log(self, commit: bool) -> None:

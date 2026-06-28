@@ -4,7 +4,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from aspara.run._offline_queue import (
     MetricsQueueItem,
@@ -131,6 +131,91 @@ class TestOfflineQueueStorage:
             assert (queue_dir / "test_run.queue.meta.json").exists()
             assert _storage is not None
 
+    def test_corrupted_metadata_file_is_rewritten(self):
+        """If the metadata file is corrupted, it should be rewritten on init."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            queue_dir.mkdir(parents=True)
+            meta_file = queue_dir / "test_run.queue.meta.json"
+            meta_file.write_text("{ this is not valid json }")
+
+            # Initialization should not crash; it should rewrite the file.
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            # The metadata file should now be valid JSON.
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            assert metadata.project == "test_project"
+            assert metadata.run_name == "test_run"
+            assert storage is not None
+
+    def test_mismatched_metadata_is_rewritten(self):
+        """If metadata has wrong project/run_name, it should be rewritten."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            queue_dir.mkdir(parents=True)
+            meta_file = queue_dir / "test_run.queue.meta.json"
+
+            # Write metadata with wrong project name
+            wrong_meta = QueueMetadata(
+                tracker_uri="http://localhost:3142",
+                project="wrong_project",
+                run_name="wrong_run",
+                run_id="wrong_id",
+            )
+            meta_file.write_text(wrong_meta.model_dump_json(indent=2))
+
+            # Initialization should detect the mismatch and rewrite.
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            assert metadata.project == "test_project"
+            assert metadata.run_name == "test_run"
+            assert metadata.run_id == "abc123"
+            assert storage is not None
+
+    def test_valid_metadata_is_preserved(self):
+        """If metadata is valid and matches, it should not be rewritten."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            queue_dir.mkdir(parents=True)
+            meta_file = queue_dir / "test_run.queue.meta.json"
+
+            original_meta = QueueMetadata(
+                tracker_uri="http://localhost:3142",
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                created_at=12345,
+            )
+            meta_file.write_text(original_meta.model_dump_json(indent=2))
+
+            OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            # created_at should be preserved (not rewritten with a new timestamp)
+            assert metadata.created_at == 12345
+
     def test_enqueue_item(self):
         """Test enqueueing an item."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -165,6 +250,33 @@ class TestOfflineQueueStorage:
                 storage.enqueue(item)
 
             assert storage.count() == 5
+
+    def test_enqueue_persists_to_disk_synchronously(self):
+        """enqueue must fsync so the item survives a process crash right after."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+
+            # datasync is the single source of truth for fsync in this codebase;
+            # patching it verifies enqueue actually calls it per write.
+            with patch("aspara.run._offline_queue.datasync") as mock_datasync:
+                result = storage.enqueue(item)
+
+            assert result is True
+            mock_datasync.assert_called_once()
+
+            # And the content is actually on disk.
+            queue_file = Path(temp_dir) / ".queue" / "test_project" / "test_run.queue.jsonl"
+            lines = [line for line in queue_file.read_text().splitlines() if line.strip()]
+            assert len(lines) == 1
+            assert MetricsQueueItem.from_jsonl(lines[0]).step == 0
 
     def test_get_ready_items(self):
         """Test getting items ready for retry."""
@@ -215,6 +327,48 @@ class TestOfflineQueueStorage:
             steps = [item.step for item in ready_items]
             assert steps == [1, 2, 5, 8]
 
+    def test_get_ready_items_respects_limit_with_large_queue(self):
+        """get_ready_items should return only ``limit`` items from a large queue."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            # Enqueue 500 items with steps 0..499
+            for step in range(500):
+                storage.enqueue(MetricsQueueItem(step=step, metrics={"loss": 0.01 * step}))
+
+            ready = storage.get_ready_items(limit=10)
+
+            # Should return exactly 10 items
+            assert len(ready) == 10
+            # Should be the 10 smallest steps (sorted ascending)
+            steps = [item.step for item in ready]
+            assert steps == list(range(10))
+
+    def test_get_ready_items_limit_one(self):
+        """get_ready_items with limit=1 should return the smallest-step item."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            storage.enqueue(MetricsQueueItem(step=5, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(step=2, metrics={"loss": 0.4}))
+            storage.enqueue(MetricsQueueItem(step=8, metrics={"loss": 0.3}))
+
+            ready = storage.get_ready_items(limit=1)
+            assert len(ready) == 1
+            assert ready[0].step == 2
+
     def test_dequeue_items(self):
         """Test removing items from the queue."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -242,6 +396,75 @@ class TestOfflineQueueStorage:
             remaining = storage.get_ready_items()
             assert len(remaining) == 1
             assert remaining[0].id == item2.id
+
+    def test_dequeue_leaves_no_temp_files(self):
+        """dequeue must not leave partial temp files behind on success."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+            storage.enqueue(item)
+            storage.dequeue([item.id])
+
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            temp_files = list(queue_dir.glob(".tmp_*"))
+            assert temp_files == []
+
+    def test_dequeue_to_empty_preserves_file_consistency(self):
+        """dequeue that empties the queue must leave a consistent file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+            storage.enqueue(item)
+            storage.dequeue([item.id])
+
+            queue_file = Path(temp_dir) / ".queue" / "test_project" / "test_run.queue.jsonl"
+            # File should exist (atomic replace of empty content) and be empty.
+            assert queue_file.exists()
+            assert queue_file.read_text() == ""
+            assert storage.is_empty()
+
+    def test_update_retry_info_is_atomic(self):
+        """update_retry_info must not leave partial temp files behind."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            item = MetricsQueueItem(step=0, metrics={"loss": 0.5})
+            storage.enqueue(item)
+
+            future_time = int(time.time() * 1000) + 10000
+            storage.update_retry_info(item.id, retry_count=2, next_retry_at=future_time)
+
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            temp_files = list(queue_dir.glob(".tmp_*"))
+            assert temp_files == []
+
+            # Content must be a single valid JSONL line with updated fields.
+            queue_file = queue_dir / "test_run.queue.jsonl"
+            lines = [line for line in queue_file.read_text().splitlines() if line.strip()]
+            assert len(lines) == 1
+            restored = MetricsQueueItem.from_jsonl(lines[0])
+            assert restored.retry_count == 2
+            assert restored.next_retry_at == future_time
 
     def test_update_retry_info(self):
         """Test updating retry information for an item."""

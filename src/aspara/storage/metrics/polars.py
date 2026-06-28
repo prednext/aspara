@@ -8,7 +8,7 @@ and PyArrow for Parquet I/O, with a Write-Ahead Log (WAL) pattern for lock-free 
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +105,7 @@ class PolarsMetricsStorage(MetricsStorage):
             datetime: Parsed datetime object
         """
         if isinstance(ts, int):
-            return datetime.fromtimestamp(ts / 1000.0)
+            return datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
         return datetime.fromisoformat(ts)
 
     def _create_long_dataframe(self, rows: list[dict[str, Any]]) -> pl.DataFrame:

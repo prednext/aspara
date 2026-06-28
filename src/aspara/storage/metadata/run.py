@@ -5,18 +5,16 @@ This module provides storage for run metadata (params, config, tags, notes, etc.
 used for experiment tracking.
 """
 
-import json
 from pathlib import Path
 from typing import Any
 
 from aspara.models import RunStatus
-from aspara.utils import atomic_write_json
 from aspara.utils.validators import validate_name, validate_safe_path
 
-from .models import validate_metadata
+from .base import BaseMetadataStorage
 
 
-class RunMetadataStorage:
+class RunMetadataStorage(BaseMetadataStorage):
     """Run-level metadata storage.
 
     Stores run metadata in {run_name}.meta.json files.
@@ -67,45 +65,6 @@ class RunMetadataStorage:
             Path to the metadata JSON file
         """
         return self.base_dir / self.project_name / f"{self.run_name}.meta.json"
-
-    def _load(self) -> None:
-        """Load existing metadata from file if it exists.
-
-        Uses try/except pattern instead of exists() check to avoid TOCTOU race condition.
-        """
-        try:
-            with open(self._metadata_path, encoding="utf-8") as f:
-                self._metadata = json.load(f)
-        except FileNotFoundError:
-            # File doesn't exist yet, keep default values
-            pass
-        except (json.JSONDecodeError, OSError):
-            # File is corrupted or unreadable, keep default values
-            pass
-
-    def _save(self) -> None:
-        """Save metadata to file.
-
-        Raises:
-            ValueError: If failed to write metadata file
-        """
-        self._metadata_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            atomic_write_json(self._metadata_path, self._metadata)
-        except OSError as e:
-            raise ValueError(f"Failed to write metadata file: {e}") from e
-
-    def _validate_metadata_values(self, metadata: dict[str, Any]) -> None:
-        """Validate notes/tags against resource limits.
-
-        Args:
-            metadata: Metadata dictionary to validate
-
-        Raises:
-            ValueError: If validation fails
-        """
-        validate_metadata(metadata)
 
     def set_init(
         self,
@@ -206,14 +165,6 @@ class RunMetadataStorage:
         self._metadata["tags"] = tags
         self._save()
 
-    def get_metadata(self) -> dict[str, Any]:
-        """Get all metadata.
-
-        Returns:
-            Complete metadata dictionary
-        """
-        return dict(self._metadata)
-
     def update_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
         """Update metadata fields (notes, tags).
 
@@ -310,7 +261,3 @@ class RunMetadataStorage:
         """
         status_value = self._metadata.get("status", RunStatus.WIP.value)
         return RunStatus(status_value)
-
-    def close(self) -> None:
-        """Close storage (no-op for file-based storage)."""
-        pass

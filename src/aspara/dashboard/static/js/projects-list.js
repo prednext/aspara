@@ -13,6 +13,9 @@ class ProjectsListSorter {
     // Search input handler and timeout (stored for cleanup)
     this.searchInputHandler = null;
     this.searchTimeoutId = null;
+    this._sortHeaderHandlers = [];
+    this._cardHandlers = [];
+    this._deleteContainerHandler = null;
 
     this.init();
   }
@@ -46,7 +49,7 @@ class ProjectsListSorter {
   initializeCardNavigation() {
     const projectCards = document.querySelectorAll('.project-card');
     for (const card of projectCards) {
-      card.addEventListener('click', (e) => {
+      const clickHandler = (e) => {
         // Check if click is on a button or inside tag editor
         const isButton = e.target.closest('button');
         const isTagEditor = e.target.closest('.tag-editor-wrapper');
@@ -56,15 +59,16 @@ class ProjectsListSorter {
         if (!isButton && !isTagEditor && !isTagContainer) {
           this.navigateToProject(card);
         }
-      });
-
-      // Keyboard navigation: Enter or Space to activate
-      card.addEventListener('keydown', (e) => {
+      };
+      const keydownHandler = (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           this.navigateToProject(card);
         }
-      });
+      };
+      card.addEventListener('click', clickHandler);
+      card.addEventListener('keydown', keydownHandler);
+      this._cardHandlers.push({ element: card, handlers: [clickHandler, keydownHandler] });
     }
   }
 
@@ -133,7 +137,7 @@ class ProjectsListSorter {
   attachEventListeners() {
     const headers = document.querySelectorAll('[data-sort]');
     for (const header of headers) {
-      header.addEventListener('click', () => {
+      const handler = () => {
         const key = header.dataset.sort;
         if (this.sortKey === key) {
           this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
@@ -145,7 +149,9 @@ class ProjectsListSorter {
         localStorage.setItem('projects_sort_order', this.sortOrder);
         this.updateSortIndicators();
         this.sortAndRender();
-      });
+      };
+      header.addEventListener('click', handler);
+      this._sortHeaderHandlers.push({ element: header, handler });
     }
   }
 
@@ -189,7 +195,7 @@ class ProjectsListSorter {
     const container = document.getElementById('projects-container');
     if (!container) return;
 
-    container.addEventListener('click', async (e) => {
+    this._deleteContainerHandler = async (e) => {
       const deleteBtn = e.target.closest('.delete-project-btn');
       if (!deleteBtn) return;
 
@@ -198,7 +204,8 @@ class ProjectsListSorter {
       if (!projectName) return;
 
       await this.handleDeleteProject(projectName);
-    });
+    };
+    container.addEventListener('click', this._deleteContainerHandler);
   }
 
   /**
@@ -370,6 +377,24 @@ class ProjectsListSorter {
         searchInput.removeEventListener('input', this.searchInputHandler);
       }
       this.searchInputHandler = null;
+    }
+    for (const { element, handler } of this._sortHeaderHandlers) {
+      element.removeEventListener('click', handler);
+    }
+    this._sortHeaderHandlers = [];
+    for (const { element, handlers } of this._cardHandlers) {
+      for (const handler of handlers) {
+        element.removeEventListener('click', handler);
+        element.removeEventListener('keydown', handler);
+      }
+    }
+    this._cardHandlers = [];
+    if (this._deleteContainerHandler) {
+      const container = document.getElementById('projects-container');
+      if (container) {
+        container.removeEventListener('click', this._deleteContainerHandler);
+      }
+      this._deleteContainerHandler = null;
     }
   }
 }
