@@ -347,8 +347,10 @@ class RemoteRun(BaseRun):
         )
         self._retry_worker.start()
 
-        logger.info(f"RemoteRun {self.name} initialized")
-        logger.info(f"Sending metrics to: {tracker_uri}")
+        # User-facing guidance: where data is being sent and how to view it.
+        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'")
+        print(f"aspara: Sending metrics to: {tracker_uri}")
+        print("aspara: View results with: aspara dashboard")
 
     def log(
         self,
@@ -424,7 +426,8 @@ class RemoteRun(BaseRun):
             logger.warning(f"Failed to finish run on tracker: {e}")
 
         if not quiet:
-            logger.info(f"RemoteRun {self.name} finished with exit code {exit_code}")
+            print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
+            print("aspara: View results with: aspara dashboard")
 
     def log_artifact(
         self,

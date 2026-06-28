@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from aspara.config import get_data_dir
-from aspara.logger import logger
 from aspara.run._base_run import BaseRun
 from aspara.run._config import Config
 from aspara.run._summary import Summary
@@ -89,16 +88,17 @@ class LocalRun(BaseRun):
         # Update project-level metadata tags if provided
         update_project_metadata_tags(self._data_dir, self.project, project_tags)
 
-        # Log initialization message
+        # User-facing guidance: where data is stored and how to view it.
         backend_msg = f" (backend: {self._storage_backend_type})" if self._storage_backend_type == "polars" else ""
-        logger.info(f"Run {self.name} initialized{backend_msg}")
-
-        # Log storage location based on backend
-        if self._storage_backend_type == "polars":
-            wal_path = os.path.join(base_dir, f"{self.name}.wal.jsonl")
-            logger.info(f"Writing metrics to: {os.path.abspath(wal_path)}")
-        else:
-            logger.info(f"Writing logs to: {os.path.abspath(self._output_path)}")
+        storage_location = (
+            os.path.abspath(os.path.join(base_dir, f"{self.name}.wal.jsonl"))
+            if self._storage_backend_type == "polars"
+            else os.path.abspath(self._output_path)
+        )
+        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'{backend_msg}")
+        print(f"aspara: Data directory: {os.path.abspath(data_dir)}")
+        print(f"aspara: Writing metrics to: {storage_location}")
+        print("aspara: View results with: aspara dashboard")
 
         self._ensure_output_dir()
         self._write_init_record()
@@ -264,7 +264,8 @@ class LocalRun(BaseRun):
             self._metadata_storage.close()
 
         if not quiet:
-            logger.info(f"Run {self.name} finished with exit code {exit_code}")
+            print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
+            print("aspara: View results with: aspara dashboard")
 
     def flush(self, timeout: float = 30.0) -> int:
         """Ensure all metrics are written to disk.
