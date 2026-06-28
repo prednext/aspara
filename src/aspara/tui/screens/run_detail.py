@@ -31,7 +31,7 @@ class RunDetailScreen(Screen[None]):
     """Screen displaying details of a specific run."""
 
     BINDINGS = [
-        Binding("backspace", "go_back", "Back", show=False),
+        Binding("backspace", "go_back", "Back", show=True),
     ]
 
     def __init__(self, project_name: str, run_name: str) -> None:

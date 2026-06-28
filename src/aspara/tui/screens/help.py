@@ -19,12 +19,14 @@ HELP_TEXT = """\
   [cyan]q[/]           Quit application
   [cyan]?[/]           Show this help
   [cyan]Backspace[/]   Go back to previous screen
-  [cyan]Esc[/]         Go back / Close modal
+  [cyan]Esc[/]         Close modal / Unfocus search
 
 [bold underline]Navigation (vim-style)[/bold underline]
   [cyan]j[/] / [cyan]↓[/]       Move down
   [cyan]k[/] / [cyan]↑[/]       Move up
   [cyan]Enter[/]       Select / Confirm
+
+[bold underline]List Screens (Projects, Runs)[/bold underline]
   [cyan]/[/]           Focus search input
   [cyan]s[/]           Toggle sort order
 

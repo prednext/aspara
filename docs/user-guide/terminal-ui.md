@@ -50,7 +50,7 @@ Projects → Runs → Run Detail → Metric Chart
 | `q` | Quit application |
 | `?` | Show help |
 | `Backspace` | Go back to previous screen |
-| `Esc` | Go back / Close modal |
+| `Esc` | Close modal / Unfocus search input |
 
 #### Navigation (vim-style)
 
@@ -59,6 +59,11 @@ Projects → Runs → Run Detail → Metric Chart
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `Enter` | Select / Confirm |
+
+#### List Screens (Projects, Runs)
+
+| Key | Action |
+|-----|--------|
 | `/` | Focus search input |
 | `s` | Toggle sort order |
 

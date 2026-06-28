@@ -49,7 +49,7 @@ class MetricChartScreen(Screen[None]):
         Binding("minus", "zoom_out", "Zoom Out", show=True),
         Binding("r", "reset_view", "Reset", show=True),
         Binding("w", "toggle_watch", "Watch", show=True),
-        Binding("backspace", "go_back", "Back", show=False),
+        Binding("backspace", "go_back", "Back", show=True),
     ]
 
     def __init__(self, project_name: str, run_name: str, metric_name: str) -> None:

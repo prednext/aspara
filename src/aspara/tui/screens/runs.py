@@ -37,7 +37,7 @@ class RunsScreen(Screen[None]):
         Binding("s", "toggle_sort", "Sort", show=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
-        Binding("backspace", "go_back", "Back", show=False),
+        Binding("backspace", "go_back", "Back", show=True),
         Binding("escape", "unfocus_search", "Clear focus", show=False),
     ]
 
