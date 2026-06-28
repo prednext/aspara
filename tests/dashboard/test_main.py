@@ -45,6 +45,9 @@ class TestProjectRunsEndpoints:
 
         assert response.status_code == 200
         assert "No runs found" in response.text
+        # Empty state should include a code example to guide the user
+        assert "aspara.init" in response.text
+        assert "empty_project" in response.text
 
     def test_project_runs_list_nonexistent_project(self, test_client, setup_test_data):
         """Test runs list for nonexistent project returns 404."""

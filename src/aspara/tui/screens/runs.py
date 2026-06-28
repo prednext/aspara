@@ -122,15 +122,15 @@ class RunsScreen(Screen[None]):
             logger.debug("Project not found: %s", self._project_name)
             self._runs = []
         except FileNotFoundError:
-            logger.debug("Data directory not found")
+            logger.debug("Data directory not found: %s", self.tui_app.data_dir)
             self._runs = []
         except PermissionError as e:
             logger.warning("Permission denied loading runs: %s", e)
-            self.notify("Permission denied", severity="error")
+            self.notify(f"Permission denied: {self.tui_app.data_dir}", severity="error")
             self._runs = []
         except OSError as e:
             logger.error("Failed to load runs: %s", e)
-            self.notify("Failed to load runs", severity="error")
+            self.notify(f"Failed to load runs: {e}", severity="error")
             self._runs = []
 
         if filter_text:

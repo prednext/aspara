@@ -15,6 +15,7 @@
         <p class="text-sm {{#is_corrupted}}text-status-error{{/is_corrupted}}{{^is_corrupted}}text-text-secondary{{/is_corrupted}}">Project: <a href="/projects/{{project}}" class="text-accent hover:underline">{{project}}</a></p>
         {{#is_corrupted}}
         <p class="text-sm text-status-error mt-1">{{error_message}}</p>
+        <p class="text-xs text-text-muted mt-1">This run's metadata may be incomplete. You can delete it from the runs list and re-run your experiment.</p>
         {{/is_corrupted}}
       </div>
 

@@ -27,3 +27,5 @@ class TestCorruptedRuns:
 
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
+        # Corrupted run detail should include a recovery hint
+        assert "delete" in response.text.lower() or "re-run" in response.text.lower()

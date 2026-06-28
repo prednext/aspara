@@ -96,7 +96,7 @@ class RunDetailScreen(Screen[None]):
             self._run_info = None
         except OSError as e:
             logger.error("Failed to load run info: %s", e)
-            self.notify("Failed to load run info", severity="error")
+            self.notify(f"Failed to load run info: {e}", severity="error")
             self._run_info = None
 
         info_widget = self.query_one("#run-info-content", Static)
@@ -202,7 +202,7 @@ class RunDetailScreen(Screen[None]):
             logger.debug("Metrics not found for %s/%s", self._project_name, self._run_name)
         except OSError as e:
             logger.error("Failed to load metrics: %s", e)
-            self.notify("Failed to load metrics", severity="error")
+            self.notify(f"Failed to load metrics: {e}", severity="error")
 
         if metrics_data:
             grid = MetricsGridWidget(metrics_data, id="metrics-grid")
