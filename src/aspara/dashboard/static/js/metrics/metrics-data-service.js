@@ -20,12 +20,14 @@ export class MetricsDataService {
    * @param {function} options.onMetricUpdate - Callback when metric is updated via SSE
    * @param {function} options.onStatusUpdate - Callback when run status is updated via SSE
    * @param {function} options.onCacheUpdated - Callback when cache is updated (for re-rendering)
+   * @param {function} [options.onConnectionStateChange] - Callback when SSE connection state changes. Receives (state, detail).
    */
   constructor(project, options = {}) {
     this.project = project;
     this.onMetricUpdate = options.onMetricUpdate || null;
     this.onStatusUpdate = options.onStatusUpdate || null;
     this.onCacheUpdated = options.onCacheUpdated || null;
+    this.onConnectionStateChange = options.onConnectionStateChange || null;
 
     // Cache mechanism: metric-first format {metric: {run: data}}
     this.metricsCache = {};
@@ -40,6 +42,7 @@ export class MetricsDataService {
     // SSE state
     this.eventSource = null;
     this.lastSSETimestamp = INITIAL_SINCE_TIMESTAMP;
+    this.lastEventTime = 0;
     this.currentSSERuns = '';
     this.isReconnecting = false;
     this.reconnectAttempts = 0;
@@ -228,6 +231,7 @@ export class MetricsDataService {
       // Reset reconnection state on successful connection
       this.isReconnecting = false;
       this.reconnectAttempts = 0;
+      this._notifyConnectionState('connected');
     };
 
     this.sseMetricHandler = (event) => {
@@ -239,6 +243,7 @@ export class MetricsDataService {
             this.lastSSETimestamp = ts;
           }
         }
+        this.lastEventTime = Date.now();
         this.handleMetricUpdate(metric);
       } catch (error) {
         console.error('Error processing SSE metric:', error);
@@ -295,11 +300,16 @@ export class MetricsDataService {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('[SSE] Max reconnection attempts reached, giving up');
       this.isReconnecting = false;
+      this._notifyConnectionState('disconnected', { lastEventTime: this.lastEventTime });
       return;
     }
 
     this.isReconnecting = true;
     this.reconnectAttempts++;
+    this._notifyConnectionState('reconnecting', {
+      attempt: this.reconnectAttempts,
+      max: this.maxReconnectAttempts,
+    });
 
     // Exponential backoff: 1s, 2s, 4s, 8s... (max 30s)
     const delay = Math.min(this.baseReconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
@@ -447,6 +457,17 @@ export class MetricsDataService {
       if (this.onMetricUpdate) {
         this.onMetricUpdate(metricName, runName, step, value);
       }
+    }
+  }
+
+  /**
+   * Notify connection state change callback.
+   * @param {string} state - 'connected' | 'reconnecting' | 'disconnected'
+   * @param {Object} [detail] - Additional context (attempt, max, lastEventTime)
+   */
+  _notifyConnectionState(state, detail = {}) {
+    if (this.onConnectionStateChange) {
+      this.onConnectionStateChange(state, detail);
     }
   }
 

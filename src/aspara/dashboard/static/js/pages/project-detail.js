@@ -4,6 +4,7 @@
  */
 import { Chart } from '../chart.js';
 import { RunSelector } from '../components/run-selector.js';
+import { SSEStatusIndicator } from '../components/sse-status-indicator.js';
 import { MetricsDataService } from '../metrics/metrics-data-service.js';
 import { convertToChartFormat } from '../metrics/metrics-utils.js';
 import { updateRunStatusIcon } from '../runs-list/sse-utils.js';
@@ -24,6 +25,7 @@ class ProjectDetail extends BaseChartPage {
     this.globalZoomState = null;
     this.dataService = null;
     this.runSelector = null;
+    this.sseIndicator = null;
 
     this.init();
     this.setupProjectSpecificListeners();
@@ -141,6 +143,9 @@ class ProjectDetail extends BaseChartPage {
       this.currentProject = pathParts[2];
     }
 
+    // Initialize SSE status indicator
+    this.sseIndicator = new SSEStatusIndicator('sse-status');
+
     // Initialize data service
     this.dataService = new MetricsDataService(this.currentProject, {
       onMetricUpdate: (metricName, runName, step, value) => {
@@ -151,9 +156,20 @@ class ProjectDetail extends BaseChartPage {
         if (chart) {
           chart.addDataPoint(runName, step, value);
         }
+        this.sseIndicator?.recordEvent();
       },
       onStatusUpdate: (statusData) => this.handleStatusUpdate(statusData),
       onCacheUpdated: () => this.renderMetricsFromCache(),
+      onConnectionStateChange: (state, detail) => {
+        if (!this.sseIndicator) return;
+        if (state === 'connected') {
+          this.sseIndicator.setConnected();
+        } else if (state === 'reconnecting') {
+          this.sseIndicator.setReconnecting(detail.attempt ?? 0, detail.max ?? 0);
+        } else if (state === 'disconnected') {
+          this.sseIndicator.setDisconnected(detail.lastEventTime ?? 0);
+        }
+      },
     });
 
     // Initialize run selector

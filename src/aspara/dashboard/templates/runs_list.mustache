@@ -99,10 +99,23 @@ aspara.finish()</code></pre>
 {{#has_runs}}
 <script type="module" src="/static/dist/runs-list.js"></script>
 <script src="/static/js/runs-list/sse.js"></script>
-<script>
+<script type="module">
+  import { SSEStatusIndicator } from '/static/js/components/sse-status-indicator.js';
+
   document.addEventListener('DOMContentLoaded', function() {
-    const runsListSSE = new RunsListSSE('{{project}}');
-    
+    const sseIndicator = new SSEStatusIndicator('sse-status');
+    const runsListSSE = new RunsListSSE('{{project}}', {
+      onConnectionStateChange: (state, detail) => {
+        if (state === 'connected') {
+          sseIndicator.setConnected();
+        } else if (state === 'reconnecting') {
+          sseIndicator.setReconnecting(detail.attempt ?? 0, detail.max ?? 0);
+        } else if (state === 'disconnected') {
+          sseIndicator.setDisconnected(detail.lastEventTime ?? 0);
+        }
+      },
+    });
+
     window.addEventListener('beforeunload', function() {
       runsListSSE.close();
     });

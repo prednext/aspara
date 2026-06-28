@@ -6,11 +6,13 @@
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl, extractRunNamesFromElements, isConnectionClosed, parseStatusUpdate, updateRunStatusIcon } from './sse-utils.js';
 
 class RunsListSSE {
-  constructor(project) {
+  constructor(project, options = {}) {
     this.project = project;
     this.eventSource = null;
     this.lastTimestamp = INITIAL_SINCE_TIMESTAMP;
+    this.lastEventTime = 0;
     this.runs = [];
+    this.onConnectionStateChange = options.onConnectionStateChange || null;
 
     // SSE event handlers (stored for cleanup)
     this.sseOpenHandler = null;
@@ -45,6 +47,7 @@ class RunsListSSE {
     // Store handlers as member variables for cleanup
     this.sseOpenHandler = () => {
       console.log('[RunsListSSE] SSE connection opened with since:', this.lastTimestamp);
+      this._notifyConnectionState('connected');
       // Reset reconnection state on successful connection.
       this.isReconnecting = false;
       this.reconnectAttempts = 0;
@@ -58,6 +61,7 @@ class RunsListSSE {
         return; // Skip invalid data
       }
       this.handleStatusUpdate(statusData);
+      this.lastEventTime = Date.now();
       // Update lastTimestamp if the event has a timestamp
       if (statusData.timestamp) {
         this.lastTimestamp = statusData.timestamp;
@@ -72,6 +76,7 @@ class RunsListSSE {
         console.error('[RunsListSSE] Error parsing metric JSON:', error);
         return;
       }
+      this.lastEventTime = Date.now();
       // Update lastTimestamp if the event has a timestamp
       if (metricData?.timestamp) {
         this.lastTimestamp = metricData.timestamp;
@@ -100,6 +105,7 @@ class RunsListSSE {
    * limit to prevent reconnection storms when the server is down.
    */
   reconnect() {
+    this._notifyConnectionState('reconnecting');
     // Guard against concurrent reconnection attempts.
     if (this.isReconnecting) {
       console.log('[RunsListSSE] Already reconnecting, skipping');
@@ -140,6 +146,17 @@ class RunsListSSE {
 
   handleStatusUpdate(statusData) {
     updateRunStatusIcon(statusData, '[RunsListSSE]');
+  }
+
+  /**
+   * Notify connection state change callback.
+   * @param {string} state - 'connected' | 'reconnecting' | 'disconnected'
+   * @param {Object} [detail] - Additional context
+   */
+  _notifyConnectionState(state, detail = {}) {
+    if (this.onConnectionStateChange) {
+      this.onConnectionStateChange(state, detail);
+    }
   }
 
   close() {

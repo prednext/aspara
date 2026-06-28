@@ -169,3 +169,51 @@ dialog.delete-dialog::backdrop {
         @apply transition-none;
     }
 }
+
+/* === SSE Status Indicator === */
+
+.sse-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.sse-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+}
+
+.sse-dot--connected {
+    background: var(--color-status-success);
+    animation: sse-pulse 2s ease-in-out infinite;
+}
+
+.sse-dot--reconnecting {
+    background: var(--color-status-warning);
+    animation: sse-blink 1s ease-in-out infinite;
+}
+
+.sse-dot--disconnected {
+    background: var(--color-status-error);
+}
+
+@keyframes sse-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+@keyframes sse-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sse-dot--connected,
+    .sse-dot--reconnecting {
+        animation: none;
+    }
+}

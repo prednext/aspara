@@ -34,13 +34,17 @@
             Aspara
           </a>
 
-          <!-- Settings Menu -->
-          <div id="settings-menu" class="relative">
-            <button id="settings-menu-button"
-                    class="w-8 h-8 flex items-center justify-center border border-base-border rounded-md bg-base-surface text-text-secondary hover:bg-base-bg hover:text-text-primary transition-colors"
-                    title="Settings">
-              <svg class="w-5 h-5"><use href="#icon-menu"></use></svg>
-            </button>
+          <div class="flex items-center gap-3">
+            <!-- SSE Status Indicator (populated by JS on pages that use SSE) -->
+            <div id="sse-status" class="hidden"></div>
+
+            <!-- Settings Menu -->
+            <div id="settings-menu" class="relative">
+              <button id="settings-menu-button"
+                      class="w-8 h-8 flex items-center justify-center border border-base-border rounded-md bg-base-surface text-text-secondary hover:bg-base-bg hover:text-text-primary transition-colors"
+                      title="Settings">
+                <svg class="w-5 h-5"><use href="#icon-menu"></use></svg>
+              </button>
 
             <!-- Dropdown Menu -->
             <div id="settings-menu-dropdown" class="absolute right-0 top-full mt-2 w-56 bg-base-surface border border-base-border rounded-md shadow-lg z-50 transition-all duration-150 ease-out origin-top-right opacity-0 scale-95 pointer-events-none">
@@ -50,6 +54,7 @@
                   <span class="text-sm text-text-primary">Full Width Mode</span>
                 </label>
               </div>
+            </div>
             </div>
           </div>
         </div>
