@@ -170,7 +170,11 @@ A: New data is appended to the existing file. We recommend using different names
 
 ### Q: What if log files become too large?
 
-A: Since each run has its own file, they are naturally split. Manually delete old logs if they are no longer needed.
+A: Since each run has its own file, they are naturally split. Manually delete old logs if they are no longer needed. Note that Aspara enforces a default limit of 1 GB / 1,000,000 lines per metrics file when reading; see [Configuration (Advanced)](../advanced/configuration.md#resource-limits) for details and how to adjust these limits.
+
+### Q: Are there limits on tags, notes, or artifact uploads?
+
+A: Yes. By default, a run can have up to **100 tags** and notes up to **10 KB** in length. Artifact uploads to the tracker are limited to **100 MB** per file. The tags and notes limits can be adjusted via environment variables; see [Configuration (Advanced)](../advanced/configuration.md#resource-limits) for the full list.
 
 For more details, see [Troubleshooting](troubleshooting.md).
 
