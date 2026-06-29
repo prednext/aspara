@@ -11,17 +11,19 @@ describe('ProjectMetrics SSE Integration', () => {
 
   beforeEach(() => {
     // Setup EventSource mock with proper close method
-    const mockEventSource = vi.fn(class {
-      constructor(url) {
-        this.url = url;
-        this.readyState = 1; // OPEN
-        this.addEventListener = vi.fn();
-        this.removeEventListener = vi.fn();
-        this.close = vi.fn(() => {
-          this.readyState = 2; // CLOSED
-        });
+    const mockEventSource = vi.fn(
+      class {
+        constructor(url) {
+          this.url = url;
+          this.readyState = 1; // OPEN
+          this.addEventListener = vi.fn();
+          this.removeEventListener = vi.fn();
+          this.close = vi.fn(() => {
+            this.readyState = 2; // CLOSED
+          });
+        }
       }
-    });
+    );
     global.EventSource = mockEventSource;
 
     createTestContainer();
@@ -96,6 +98,7 @@ describe('ProjectMetrics SSE Integration', () => {
   });
 
   afterEach(() => {
+    projectDetail?.destroy();
     cleanupTestContainer();
     vi.restoreAllMocks();
   });
@@ -424,6 +427,37 @@ describe('ProjectMetrics SSE Integration', () => {
 
       // Verify SSE was closed
       expect(projectDetail.dataService.eventSource).toBeNull();
+    });
+  });
+
+  describe('destroy', () => {
+    test('should call destroy on dataService and null the reference', () => {
+      const dataService = projectDetail.dataService;
+      const destroySpy = vi.spyOn(dataService, 'destroy');
+      projectDetail.destroy();
+      expect(destroySpy).toHaveBeenCalled();
+      expect(projectDetail.dataService).toBeNull();
+    });
+
+    test('should call destroy on runSelector and null the reference', () => {
+      const runSelector = projectDetail.runSelector;
+      const destroySpy = vi.spyOn(runSelector, 'destroy');
+      projectDetail.destroy();
+      expect(destroySpy).toHaveBeenCalled();
+      expect(projectDetail.runSelector).toBeNull();
+    });
+
+    test('should remove syncZoom change listener', () => {
+      const checkbox = document.getElementById('syncZoom');
+      const removeSpy = vi.spyOn(checkbox, 'removeEventListener');
+      const handler = projectDetail.syncZoomHandler;
+      projectDetail.destroy();
+      expect(removeSpy).toHaveBeenCalledWith('change', handler);
+    });
+
+    test('should be idempotent', () => {
+      expect(() => projectDetail.destroy()).not.toThrow();
+      expect(() => projectDetail.destroy()).not.toThrow();
     });
   });
 });

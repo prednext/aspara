@@ -4,8 +4,8 @@
  */
 import { decode as msgpackDecode } from '@msgpack/msgpack';
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl } from '../runs-list/sse-utils.js';
-import { decompressDeltaData, findLatestTimestamp, mergeDataPoint } from './metrics-utils.js';
 import { SSEReconnectManager } from '../sse-reconnect-manager.js';
+import { decompressDeltaData, findLatestTimestamp, mergeDataPoint } from './metrics-utils.js';
 
 /**
  * MetricsDataService handles fetching, caching, and real-time updates for metrics data.

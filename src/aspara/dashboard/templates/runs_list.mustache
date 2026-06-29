@@ -117,7 +117,7 @@ aspara.finish()</code></pre>
     });
 
     window.addEventListener('beforeunload', function() {
-      runsListSSE.close();
+      runsListSSE.destroy();
     });
   });
 </script>

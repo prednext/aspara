@@ -364,9 +364,11 @@ class TagEditor {
  * Initialize tag editors for elements matching a selector
  * @param {string} selector - CSS selector for tag containers
  * @param {function} getApiEndpoint - Function that takes container and returns API endpoint (or null to skip)
+ * @returns {TagEditor[]} Array of initialized TagEditor instances (for cleanup via destroy())
  */
 function initializeTagEditorsForElements(selector, getApiEndpoint) {
   const tagContainers = document.querySelectorAll(selector);
+  const editors = [];
   for (const container of tagContainers) {
     const apiEndpoint = getApiEndpoint(container);
     if (!apiEndpoint) continue;
@@ -381,7 +383,9 @@ function initializeTagEditorsForElements(selector, getApiEndpoint) {
 
     // Initialize tag editor
     tagEditor.init(container, apiEndpoint, currentTags);
+    editors.push(tagEditor);
   }
+  return editors;
 }
 
 // Export for use in other scripts

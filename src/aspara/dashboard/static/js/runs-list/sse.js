@@ -3,8 +3,8 @@
  * Handles real-time status updates for runs displayed in the runs list
  */
 
-import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl, extractRunNamesFromElements, isConnectionClosed, parseStatusUpdate, updateRunStatusIcon } from './sse-utils.js';
 import { SSEReconnectManager } from '../sse-reconnect-manager.js';
+import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl, extractRunNamesFromElements, isConnectionClosed, parseStatusUpdate, updateRunStatusIcon } from './sse-utils.js';
 
 class RunsListSSE {
   constructor(project, options = {}) {
@@ -137,7 +137,11 @@ class RunsListSSE {
     updateRunStatusIcon(statusData, '[RunsListSSE]');
   }
 
-  close() {
+  /**
+   * Destroy the SSE connection and release all resources.
+   * Implements the Destroyable lifecycle contract.
+   */
+  destroy() {
     if (this.eventSource) {
       // Remove event listeners before closing to prevent memory leaks
       if (this.sseOpenHandler) {
@@ -154,7 +158,7 @@ class RunsListSSE {
       }
       this.eventSource.close();
       this.eventSource = null;
-      console.log('[RunsListSSE] SSE connection closed manually');
+      console.log('[RunsListSSE] SSE connection closed');
     }
     this.sseOpenHandler = null;
     this.sseStatusHandler = null;

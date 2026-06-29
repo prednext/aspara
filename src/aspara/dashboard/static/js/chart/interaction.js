@@ -62,6 +62,16 @@ export class ChartInteraction {
   }
 
   /**
+   * Destroy the interaction and release all resources.
+   * Implements the Destroyable lifecycle contract.
+   */
+  destroy() {
+    this.removeEventListeners();
+    this._cachedRanges = null;
+    this._lastDataRef = null;
+  }
+
+  /**
    * Remove event listeners from canvas.
    */
   removeEventListeners() {

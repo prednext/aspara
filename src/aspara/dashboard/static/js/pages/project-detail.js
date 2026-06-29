@@ -27,6 +27,10 @@ class ProjectDetail extends BaseChartPage {
     this.runSelector = null;
     this.sseIndicator = null;
 
+    // Project-specific event handlers (stored for cleanup in destroy())
+    this.syncZoomHandler = null;
+    this.sidebarToggleHandler = null;
+
     this.init();
     this.setupProjectSpecificListeners();
     this.loadInitialData();
@@ -54,13 +58,14 @@ class ProjectDetail extends BaseChartPage {
     // Setup sync zoom event listener
     if (this.syncZoomCheckbox) {
       this.syncZoomCheckbox.checked = this.syncZoom;
-      this.syncZoomCheckbox.addEventListener('change', (e) => {
+      this.syncZoomHandler = (e) => {
         this.syncZoom = e.target.checked;
         localStorage.setItem('sync_zoom', this.syncZoom);
         if (!this.syncZoom) {
           this.globalZoomState = null;
         }
-      });
+      };
+      this.syncZoomCheckbox.addEventListener('change', this.syncZoomHandler);
     }
 
     // Setup sidebar toggle
@@ -75,14 +80,15 @@ class ProjectDetail extends BaseChartPage {
       this.collapseSidebar();
     }
 
-    this.toggleSidebarBtn.addEventListener('click', () => {
+    this.sidebarToggleHandler = () => {
       const collapsed = this.sidebar.dataset.collapsed === 'true';
       if (collapsed) {
         this.expandSidebar();
       } else {
         this.collapseSidebar();
       }
-    });
+    };
+    this.toggleSidebarBtn.addEventListener('click', this.sidebarToggleHandler);
   }
 
   collapseSidebar() {
@@ -307,11 +313,54 @@ class ProjectDetail extends BaseChartPage {
   handleStatusUpdate(statusData) {
     updateRunStatusIcon(statusData, '[SSE]');
   }
+
+  /**
+   * Clean up all resources held by this page.
+   * Overrides BaseChartPage.destroy() to also clean up project-specific
+   * resources (dataService, runSelector, sseIndicator, event listeners).
+   */
+  destroy() {
+    // Clean up project-specific event listeners
+    if (this.syncZoomCheckbox && this.syncZoomHandler) {
+      this.syncZoomCheckbox.removeEventListener('change', this.syncZoomHandler);
+      this.syncZoomHandler = null;
+    }
+    if (this.toggleSidebarBtn && this.sidebarToggleHandler) {
+      this.toggleSidebarBtn.removeEventListener('click', this.sidebarToggleHandler);
+      this.sidebarToggleHandler = null;
+    }
+
+    // Destroy owned child instances
+    if (this.dataService) {
+      this.dataService.destroy();
+      this.dataService = null;
+    }
+    if (this.runSelector) {
+      this.runSelector.destroy();
+      this.runSelector = null;
+    }
+    // SSEStatusIndicator holds no event listeners or async resources,
+    // but null the reference for completeness.
+    this.sseIndicator = null;
+
+    // Destroy charts (delegates to Chart.destroy() for each)
+    for (const chart of this.charts.values()) {
+      if (chart.destroy) {
+        chart.destroy();
+      }
+    }
+
+    // Call parent cleanup (resize handlers, size buttons, charts map)
+    super.destroy();
+  }
 }
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-  new ProjectDetail();
+  const page = new ProjectDetail();
+  // Store for SPA cleanup / beforeunload
+  window.__asparaPage = page;
+  window.addEventListener('beforeunload', () => page.destroy());
 });
 
 export { ProjectDetail };

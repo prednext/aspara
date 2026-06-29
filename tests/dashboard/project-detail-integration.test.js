@@ -95,6 +95,7 @@ describe('ProjectMetrics Integration', () => {
   });
 
   afterEach(() => {
+    projectDetail?.destroy();
     cleanupTestContainer();
     fetch.mockClear();
   });

@@ -179,6 +179,47 @@ describe('ChartInteraction', () => {
     });
   });
 
+  describe('destroy', () => {
+    test('should remove all event listeners', () => {
+      interaction.setupEventListeners();
+      const canvas = chart.canvas;
+      const removeSpy = vi.spyOn(canvas, 'removeEventListener');
+      const { mousemoveHandler, mouseleaveHandler, mousedownHandler, mouseupHandler, dblclickHandler, contextmenuHandler } = interaction;
+      interaction.destroy();
+
+      expect(removeSpy).toHaveBeenCalledWith('mousemove', mousemoveHandler);
+      expect(removeSpy).toHaveBeenCalledWith('mouseleave', mouseleaveHandler);
+      expect(removeSpy).toHaveBeenCalledWith('mousedown', mousedownHandler);
+      expect(removeSpy).toHaveBeenCalledWith('mouseup', mouseupHandler);
+      expect(removeSpy).toHaveBeenCalledWith('dblclick', dblclickHandler);
+      expect(removeSpy).toHaveBeenCalledWith('contextmenu', contextmenuHandler);
+    });
+
+    test('should clear cached ranges', () => {
+      interaction._cachedRanges = { xMin: 0 };
+      interaction._lastDataRef = [];
+      interaction.destroy();
+      expect(interaction._cachedRanges).toBeNull();
+      expect(interaction._lastDataRef).toBeNull();
+    });
+
+    test('should null all handlers', () => {
+      interaction.setupEventListeners();
+      interaction.destroy();
+      expect(interaction.mousemoveHandler).toBeNull();
+      expect(interaction.mouseleaveHandler).toBeNull();
+      expect(interaction.mousedownHandler).toBeNull();
+      expect(interaction.mouseupHandler).toBeNull();
+      expect(interaction.dblclickHandler).toBeNull();
+      expect(interaction.contextmenuHandler).toBeNull();
+    });
+
+    test('should be idempotent', () => {
+      expect(() => interaction.destroy()).not.toThrow();
+      expect(() => interaction.destroy()).not.toThrow();
+    });
+  });
+
   describe('handleMouseMove', () => {
     test('should update zoom state when zoom is active', () => {
       chart.zoomState.active = true;

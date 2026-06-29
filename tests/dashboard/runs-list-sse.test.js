@@ -93,7 +93,7 @@ describe('RunsListSSE reconnection backoff', () => {
     vi.advanceTimersByTime(1);
     expect(setupSseSpy).toHaveBeenCalledTimes(1);
 
-    sse.close();
+    sse.destroy();
   });
 
   test('second reconnect should use 2s delay (exponential backoff)', () => {
@@ -122,7 +122,7 @@ describe('RunsListSSE reconnection backoff', () => {
     vi.advanceTimersByTime(1);
     expect(setupSseSpy).toHaveBeenCalledTimes(2);
 
-    sse.close();
+    sse.destroy();
   });
 
   test('should give up after maxReconnectAttempts', () => {
@@ -152,7 +152,7 @@ describe('RunsListSSE reconnection backoff', () => {
     expect(sse.reconnectManager.reconnectAttempts).toBe(3);
     expect(setupSseSpy).toHaveBeenCalledTimes(3);
 
-    sse.close();
+    sse.destroy();
   });
 
   test('should not start concurrent reconnections', () => {
@@ -166,17 +166,17 @@ describe('RunsListSSE reconnection backoff', () => {
     sse.reconnect();
     expect(sse.reconnectManager.reconnectAttempts).toBe(1);
 
-    sse.close();
+    sse.destroy();
   });
 
-  test('close should reset reconnection state', () => {
+  test('destroy should reset reconnection state', () => {
     const sse = createSSE();
 
     sse.reconnect();
     expect(sse.reconnectManager.isReconnecting).toBe(true);
     expect(sse.reconnectManager.reconnectAttempts).toBe(1);
 
-    sse.close();
+    sse.destroy();
     expect(sse.reconnectManager.isReconnecting).toBe(false);
     expect(sse.reconnectManager.reconnectAttempts).toBe(0);
   });

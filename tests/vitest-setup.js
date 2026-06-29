@@ -5,24 +5,28 @@ import { vi } from 'vitest';
 // Canvas API is now handled by vitest-canvas-setup.js with @napi-rs/canvas
 
 // EventSource Mock for SSE testing
-global.EventSource = vi.fn(class {
-  constructor(url) {
-    this.url = url;
-    this.readyState = 1; // OPEN
-    this.addEventListener = vi.fn();
-    this.removeEventListener = vi.fn();
-    this.close = vi.fn(() => {
-      this.readyState = 2; // CLOSED
-    });
+global.EventSource = vi.fn(
+  class {
+    constructor(url) {
+      this.url = url;
+      this.readyState = 1; // OPEN
+      this.addEventListener = vi.fn();
+      this.removeEventListener = vi.fn();
+      this.close = vi.fn(() => {
+        this.readyState = 2; // CLOSED
+      });
+    }
   }
-});
+);
 
 // ResizeObserver Mock
-global.ResizeObserver = vi.fn(class {
-  observe = vi.fn();
-  unobserve = vi.fn();
-  disconnect = vi.fn();
-});
+global.ResizeObserver = vi.fn(
+  class {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+);
 
 // matchMedia Mock
 Object.defineProperty(window, 'matchMedia', {

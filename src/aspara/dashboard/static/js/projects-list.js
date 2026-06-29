@@ -401,7 +401,9 @@ class ProjectsListSorter {
 
 document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('projects-container')) {
-    new ProjectsListSorter();
+    const page = new ProjectsListSorter();
+    window.__asparaPage = page;
+    window.addEventListener('beforeunload', () => page.destroy());
   }
 });
 

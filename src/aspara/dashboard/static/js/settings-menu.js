@@ -149,7 +149,9 @@ class SettingsMenu {
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-  new SettingsMenu();
+  const page = new SettingsMenu();
+  window.__asparaPage = page;
+  window.addEventListener('beforeunload', () => page.destroy());
 });
 
 export { SettingsMenu };

@@ -22,37 +22,39 @@ describe('MetricsDataService SSE Reconnection', () => {
     mockEventSourceInstances = [];
     eventListeners = [];
 
-    const mockEventSource = vi.fn(class {
-      constructor(url) {
-        const listeners = {};
-        this.url = url;
-        this.readyState = 0; // CONNECTING
-        this.addEventListener = vi.fn((event, handler) => {
-          if (!listeners[event]) {
-            listeners[event] = [];
-          }
-          listeners[event].push(handler);
-        });
-        this.removeEventListener = vi.fn();
-        this.close = vi.fn(() => {
-          this.readyState = 2; // CLOSED
-        });
-        // Helper to trigger events in tests
-        this._triggerEvent = (eventName, data) => {
-          if (listeners[eventName]) {
-            for (const handler of listeners[eventName]) {
-              handler(data);
+    const mockEventSource = vi.fn(
+      class {
+        constructor(url) {
+          const listeners = {};
+          this.url = url;
+          this.readyState = 0; // CONNECTING
+          this.addEventListener = vi.fn((event, handler) => {
+            if (!listeners[event]) {
+              listeners[event] = [];
             }
-          }
-        };
-        this._setReadyState = (state) => {
-          this.readyState = state;
-        };
-        this._listeners = listeners;
-        mockEventSourceInstances.push(this);
-        eventListeners.push(listeners);
+            listeners[event].push(handler);
+          });
+          this.removeEventListener = vi.fn();
+          this.close = vi.fn(() => {
+            this.readyState = 2; // CLOSED
+          });
+          // Helper to trigger events in tests
+          this._triggerEvent = (eventName, data) => {
+            if (listeners[eventName]) {
+              for (const handler of listeners[eventName]) {
+                handler(data);
+              }
+            }
+          };
+          this._setReadyState = (state) => {
+            this.readyState = state;
+          };
+          this._listeners = listeners;
+          mockEventSourceInstances.push(this);
+          eventListeners.push(listeners);
+        }
       }
-    });
+    );
 
     global.EventSource = mockEventSource;
     // Define EventSource constants

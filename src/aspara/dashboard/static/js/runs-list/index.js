@@ -206,7 +206,9 @@ class RunsListSorter {
 
 document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('runs-container')) {
-    new RunsListSorter();
+    const page = new RunsListSorter();
+    window.__asparaPage = page;
+    window.addEventListener('beforeunload', () => page.destroy());
   }
 });
 

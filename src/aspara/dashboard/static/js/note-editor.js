@@ -317,17 +317,18 @@ class NoteEditor {
  * - data-edit-btn-id: ID of the edit button container
  *
  * @param {string} elementId - ID of the note element
+ * @returns {Promise<NoteEditor|null>} The initialized NoteEditor instance, or null if the element was not found (for cleanup via destroy())
  */
 async function initNoteEditorFromDOM(elementId) {
   const noteElement = document.getElementById(elementId);
-  if (!noteElement) return;
+  if (!noteElement) return null;
 
   const apiEndpoint = noteElement.dataset.apiEndpoint;
   const editBtnId = noteElement.dataset.editBtnId;
 
   if (!apiEndpoint) {
     console.error(`Note editor: missing data-api-endpoint on #${elementId}`);
-    return;
+    return null;
   }
 
   const noteEditor = new NoteEditor();
@@ -343,6 +344,7 @@ async function initNoteEditorFromDOM(elementId) {
     console.error(`Error loading note for #${elementId}:`, error);
     noteEditor.init(noteElement, apiEndpoint, '', editBtnId);
   }
+  return noteEditor;
 }
 
 // Export for use in other scripts

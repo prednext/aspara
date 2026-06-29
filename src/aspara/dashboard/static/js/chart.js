@@ -411,7 +411,7 @@ export class Chart {
       this.fullscreenChangeHandler = null;
     }
     if (this.interaction) {
-      this.interaction.removeEventListeners();
+      this.interaction.destroy();
     }
     if (this.controls) {
       this.controls.destroy();
