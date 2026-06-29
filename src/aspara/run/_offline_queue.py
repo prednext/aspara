@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from aspara.config import get_data_dir
 from aspara.logger import logger
-from aspara.utils.file import atomic_write_text, datasync
+from aspara.utils.file import atomic_write_json, atomic_write_text, datasync
 from aspara.utils.validators import validate_project_name, validate_run_name
 
 if TYPE_CHECKING:
@@ -138,13 +138,7 @@ class OfflineQueueStorage:
 
         # Write metadata file if it doesn't exist, or validate it if it does.
         if not self._meta_file.exists():
-            metadata = QueueMetadata(
-                tracker_uri=self.tracker_uri,
-                project=self.project,
-                run_name=self.run_name,
-                run_id=self.run_id,
-            )
-            self._meta_file.write_text(metadata.model_dump_json(indent=2))
+            self._write_metadata()
         else:
             self._validate_metadata_file()
 
@@ -182,14 +176,17 @@ class OfflineQueueStorage:
             self._write_metadata()
 
     def _write_metadata(self) -> None:
-        """Write the metadata file with current queue identity."""
+        """Write the metadata file with current queue identity.
+
+        Uses atomic write to prevent corruption on crash.
+        """
         metadata = QueueMetadata(
             tracker_uri=self.tracker_uri,
             project=self.project,
             run_name=self.run_name,
             run_id=self.run_id,
         )
-        self._meta_file.write_text(metadata.model_dump_json(indent=2))
+        atomic_write_json(self._meta_file, metadata.model_dump())
 
     def enqueue(self, item: MetricsQueueItem) -> bool:
         """Add an item to the queue.

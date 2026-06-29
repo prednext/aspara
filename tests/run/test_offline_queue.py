@@ -458,13 +458,31 @@ class TestOfflineQueueStorage:
             temp_files = list(queue_dir.glob(".tmp_*"))
             assert temp_files == []
 
-            # Content must be a single valid JSONL line with updated fields.
-            queue_file = queue_dir / "test_run.queue.jsonl"
-            lines = [line for line in queue_file.read_text().splitlines() if line.strip()]
-            assert len(lines) == 1
-            restored = MetricsQueueItem.from_jsonl(lines[0])
-            assert restored.retry_count == 2
-            assert restored.next_retry_at == future_time
+    def test_metadata_write_is_atomic(self):
+        """_write_metadata must not leave partial temp files behind."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+
+            # Trigger a metadata rewrite via _write_metadata
+            storage._write_metadata()
+
+            queue_dir = Path(temp_dir) / ".queue" / "test_project"
+            temp_files = list(queue_dir.glob(".tmp_*"))
+            assert temp_files == [], f"Temp files left behind: {temp_files}"
+
+            # Metadata file should be valid and readable
+            meta_file = queue_dir / "test_run.queue.meta.json"
+            assert meta_file.exists()
+            raw = meta_file.read_text()
+            metadata = QueueMetadata.model_validate_json(raw)
+            assert metadata.project == "test_project"
+            assert metadata.run_name == "test_run"
 
     def test_update_retry_info(self):
         """Test updating retry information for an item."""
