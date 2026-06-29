@@ -9,6 +9,8 @@ __all__ = [
     "ResourceLimits",
     "get_data_dir",
     "get_resource_limits",
+    "get_sse_heartbeat_interval",
+    "get_sse_send_timeout",
     "get_storage_backend",
     "get_project_search_mode",
     "is_dev_mode",
@@ -212,3 +214,32 @@ def is_read_only() -> bool:
         True if ASPARA_READ_ONLY is set to "1", False otherwise.
     """
     return os.environ.get("ASPARA_READ_ONLY") == "1"
+
+
+# Default SSE heartbeat interval in seconds.
+# Sent to keep connections alive and detect dead clients.
+_SSE_DEFAULT_HEARTBEAT_INTERVAL = 15
+
+# Default SSE send timeout in seconds.
+# If a client stops reading, the server gives up after this many seconds.
+_SSE_DEFAULT_SEND_TIMEOUT = 30.0
+
+
+def get_sse_heartbeat_interval() -> int:
+    """Get the SSE heartbeat (ping) interval in seconds.
+
+    Environment variable:
+        ASPARA_SSE_HEARTBEAT_INTERVAL: override the ping interval (default: 15)
+    """
+    return int(
+        os.environ.get("ASPARA_SSE_HEARTBEAT_INTERVAL", _SSE_DEFAULT_HEARTBEAT_INTERVAL)
+    )
+
+
+def get_sse_send_timeout() -> float:
+    """Get the SSE send timeout in seconds.
+
+    Environment variable:
+        ASPARA_SSE_SEND_TIMEOUT: override the send timeout (default: 30.0)
+    """
+    return float(os.environ.get("ASPARA_SSE_SEND_TIMEOUT", _SSE_DEFAULT_SEND_TIMEOUT))
