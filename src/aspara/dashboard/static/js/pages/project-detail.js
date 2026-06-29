@@ -7,6 +7,7 @@ import { RunSelector } from '../components/run-selector.js';
 import { SSEStatusIndicator } from '../components/sse-status-indicator.js';
 import { MetricsDataService } from '../metrics/metrics-data-service.js';
 import { convertToChartFormat } from '../metrics/metrics-utils.js';
+import { initNoteEditorFromDOM } from '../note-editor.js';
 import { updateRunStatusIcon } from '../runs-list/sse-utils.js';
 import { BaseChartPage, CHART_SIZE_KEY } from './base-chart-page.js';
 
@@ -37,9 +38,17 @@ class ProjectDetail extends BaseChartPage {
     // superseded it.
     this._metricsRequestId = 0;
 
+    // Note editor instance (stored for cleanup in destroy())
+    this.noteEditor = null;
+
     this.init();
     this.setupProjectSpecificListeners();
+    this.initializeNoteEditor();
     this.loadInitialData();
+  }
+
+  async initializeNoteEditor() {
+    this.noteEditor = await initNoteEditorFromDOM('project-note');
   }
 
   initializeElements() {
@@ -364,6 +373,10 @@ class ProjectDetail extends BaseChartPage {
       this.runSelector.destroy();
       this.runSelector = null;
     }
+    if (this.noteEditor?.destroy) {
+      this.noteEditor.destroy();
+    }
+    this.noteEditor = null;
     // SSEStatusIndicator holds no event listeners or async resources,
     // but null the reference for completeness.
     this.sseIndicator = null;

@@ -3,7 +3,10 @@
  * Provides common layout calculation and grid management for chart pages.
  */
 
-/** Chart base width map for S/M/L sizes */
+/** Chart base width map for S/M/L sizes.
+ *  Single source of truth for the per-size target width. The
+ *  _chart_size_controls.mustache template references these values in its
+ *  button `title` attributes — keep them in sync. */
 export const CHART_BASE_WIDTH_MAP = {
   S: 300,
   M: 400,

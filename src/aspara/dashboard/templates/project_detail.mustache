@@ -115,7 +115,7 @@
           {{> _chart_size_controls}}
         </div>
         <div class="flex items-center gap-2">
-          <label class="flex items-center cursor-pointer">
+          <label class="flex items-center cursor-pointer" title="Link zoom across all charts — zooming one applies the same zoom range to the rest">
             <input type="checkbox" id="syncZoom" class="mr-2 accent-accent">
             <span class="text-sm text-text-secondary">Sync Zoom</span>
           </label>
@@ -170,20 +170,6 @@ aspara.finish()</code></pre>
   </div>
   {{/has_runs}}
 </div>
-
-<!-- Ensure run data is cleared -->
-<script>
-  window.runData = null;
-  window.projectData = {
-    project: "{{project}}",
-    runCount: {{run_count}}
-  };
-
-  // Initialize project note editor when DOM is loaded
-  document.addEventListener('DOMContentLoaded', function() {
-    initNoteEditorFromDOM('project-note');
-  });
-</script>
 
 <!-- Include the project detail JavaScript -->
 <script type="module" src="/static/dist/pages/project-detail.js"></script>

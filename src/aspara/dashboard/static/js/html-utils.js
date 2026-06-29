@@ -10,6 +10,7 @@ export const ICON_EDIT = `<svg class="w-4 h-4 inline"><use href="#icon-edit"></u
 export const ICON_RESET_ZOOM = `<svg class="w-4 h-4 inline"><use href="#icon-reset-zoom"></use></svg>`;
 export const ICON_FULLSCREEN = `<svg class="w-4 h-4 inline"><use href="#icon-fullscreen"></use></svg>`;
 export const ICON_DOWNLOAD = `<svg class="w-4 h-4 inline"><use href="#icon-download"></use></svg>`;
+export const ICON_HELP = `<svg class="w-4 h-4 inline"><use href="#icon-information-circle"></use></svg>`;
 
 /**
  * Escape HTML special characters to prevent XSS attacks
