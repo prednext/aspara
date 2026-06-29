@@ -246,8 +246,12 @@ async def get_project_metadata_api(
     Raises:
         HTTPException: 400 if project name is invalid.
     """
-    # Use ProjectCatalog metadata API (synchronous call inside async endpoint)
-    metadata = project_catalog.get_metadata(project)
+    # Use ProjectCatalog metadata API.
+    # Read-only catalog call: offload to a worker thread so the event loop
+    # is not blocked while waiting on file I/O. Write paths
+    # (update_metadata / delete) stay synchronous because they use a
+    # read-modify-write pattern that would race if run concurrently.
+    metadata = await asyncio.to_thread(project_catalog.get_metadata, project)
     return Metadata.model_validate(metadata)
 
 
@@ -271,7 +275,7 @@ async def update_project_metadata_api(
         HTTPException: 400 if project name is invalid.
     """
     if is_read_only():
-        existing = project_catalog.get_metadata(project)
+        existing = await asyncio.to_thread(project_catalog.get_metadata, project)
         return Metadata.model_validate(existing)
 
     update_data = metadata.model_dump(exclude_none=True)
@@ -336,8 +340,11 @@ async def get_run_metadata_api(
     Raises:
         HTTPException: 400 if project/run name is invalid.
     """
-    # Use RunCatalog metadata API
-    metadata = run_catalog.get_metadata(project, run)
+    # Read-only catalog call: offload to a worker thread so the event
+    # loop is not blocked on file I/O. Write paths stay synchronous to
+    # avoid read-modify-write races (see get_project_metadata_api for
+    # the rationale).
+    metadata = await asyncio.to_thread(run_catalog.get_metadata, project, run)
     return metadata
 
 
@@ -363,7 +370,7 @@ async def update_run_metadata_api(
         HTTPException: 400 if project/run name is invalid.
     """
     if is_read_only():
-        existing = run_catalog.get_metadata(project, run)
+        existing = await asyncio.to_thread(run_catalog.get_metadata, project, run)
         return existing
 
     update_data = metadata.model_dump(exclude_none=True)

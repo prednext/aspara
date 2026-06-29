@@ -70,12 +70,18 @@ async def home(
     project_catalog: ProjectCatalogDep,
 ) -> HTMLResponse:
     """Render the projects list page."""
-    projects = project_catalog.get_projects()
+    # Read-only catalog calls: offload to worker threads so the event
+    # loop is not blocked on file I/O. Write paths stay synchronous to
+    # avoid read-modify-write races (see api_routes.get_project_metadata_api).
+    projects = await asyncio.to_thread(project_catalog.get_projects)
 
-    # Format projects for template, including metadata tags
+    # Format projects for template, including metadata tags.
+    # Fetch each project's metadata in parallel via gather.
+    metadatas = await asyncio.gather(
+        *(asyncio.to_thread(project_catalog.get_metadata, p.name) for p in projects)
+    )
     formatted_projects = []
-    for project in projects:
-        metadata = project_catalog.get_metadata(project.name)
+    for project, metadata in zip(projects, metadatas, strict=True):
         tags = metadata.get("tags") or []
         formatted_projects.append(TemplateService.format_project_for_template(project, tags))
 
@@ -105,10 +111,10 @@ async def project_detail(
 ) -> HTMLResponse:
     """Project detail page - shows metrics charts."""
     # Check if project exists
-    if not project_catalog.exists(project):
+    if not await asyncio.to_thread(project_catalog.exists, project):
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
-    runs = run_catalog.get_runs(project)
+    runs = await asyncio.to_thread(run_catalog.get_runs, project)
 
     # Format runs for template (excluding corrupted runs)
     formatted_runs = []
@@ -151,10 +157,10 @@ async def list_project_runs(
 ) -> HTMLResponse:
     """List runs in a project."""
     # Check if project exists
-    if not project_catalog.exists(project):
+    if not await asyncio.to_thread(project_catalog.exists, project):
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
-    runs = run_catalog.get_runs(project)
+    runs = await asyncio.to_thread(run_catalog.get_runs, project)
 
     # Format runs for template
     formatted_runs = [TemplateService.format_run_for_list(run) for run in runs]
@@ -186,12 +192,12 @@ async def get_run(
 ) -> HTMLResponse:
     """Get run details including parameters and metrics."""
     # Check if project exists
-    if not project_catalog.exists(project):
+    if not await asyncio.to_thread(project_catalog.exists, project):
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
     # Get Run information and check if it's corrupted
     try:
-        current_run = run_catalog.get(project, run)
+        current_run = await asyncio.to_thread(run_catalog.get, project, run)
     except RunNotFoundError as e:
         raise HTTPException(status_code=404, detail=f"Run '{run}' not found in project '{project}'") from e
 
