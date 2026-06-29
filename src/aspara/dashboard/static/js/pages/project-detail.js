@@ -31,6 +31,12 @@ class ProjectDetail extends BaseChartPage {
     this.syncZoomHandler = null;
     this.sidebarToggleHandler = null;
 
+    // Monotonic ID used to discard stale showMetrics() results.
+    // Incremented on every showMetrics() invocation; the in-flight request
+    // captures the ID and bails out after `await` if a newer request has
+    // superseded it.
+    this._metricsRequestId = 0;
+
     this.init();
     this.setupProjectSpecificListeners();
     this.loadInitialData();
@@ -217,6 +223,11 @@ class ProjectDetail extends BaseChartPage {
       return;
     }
 
+    // Assign a fresh ID to this invocation so that any earlier in-flight
+    // showMetrics() call can detect it has been superseded and bail out
+    // before rendering or setting up SSE with stale data.
+    const requestId = ++this._metricsRequestId;
+
     const runsToFetch = this.dataService.getRunsToFetch(selectedRuns);
     this.dataService.adjustCacheSize(selectedRuns.size);
 
@@ -225,8 +236,18 @@ class ProjectDetail extends BaseChartPage {
       try {
         await this.dataService.fetchAndCacheMetrics(runsToFetch);
       } catch (error) {
-        console.error('Error loading metrics:', error);
-        this.showErrorState(error.message);
+        // Only surface the error if this is still the latest request;
+        // otherwise a newer selection change owns the UI state.
+        if (requestId === this._metricsRequestId) {
+          console.error('Error loading metrics:', error);
+          this.showErrorState(error.message);
+        }
+        return;
+      }
+
+      // A newer showMetrics() invocation has superseded this one; discard
+      // the stale result to avoid overwriting fresh UI state.
+      if (requestId !== this._metricsRequestId) {
         return;
       }
     }
@@ -320,6 +341,10 @@ class ProjectDetail extends BaseChartPage {
    * resources (dataService, runSelector, sseIndicator, event listeners).
    */
   destroy() {
+    // Invalidate any in-flight showMetrics() request so its post-await
+    // rendering/SSE setup is skipped after we tear down resources below.
+    this._metricsRequestId++;
+
     // Clean up project-specific event listeners
     if (this.syncZoomCheckbox && this.syncZoomHandler) {
       this.syncZoomCheckbox.removeEventListener('change', this.syncZoomHandler);

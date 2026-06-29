@@ -407,6 +407,54 @@ describe('ProjectMetrics Integration', () => {
     });
   });
 
+  describe('showMetrics() Race Condition', () => {
+    test('should discard stale fetch result when a newer request supersedes it', async () => {
+      // Clear cache so both calls need to fetch.
+      projectDetail.dataService.metricsCache = {};
+      projectDetail.dataService.cachedRuns.clear();
+
+      const makeResponse = (metrics) => {
+        const encoded = msgpackEncode({ project: 'test_project', metrics });
+        const arrayBuffer = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength);
+        return { ok: true, arrayBuffer: () => Promise.resolve(arrayBuffer) };
+      };
+
+      // Control getSelectedRuns directly to avoid checkbox-event auto-triggering
+      // of showMetrics(), which would make fetch mock sequencing ambiguous.
+      const selectedRunsSpy = vi.spyOn(projectDetail.runSelector, 'getSelectedRuns');
+      selectedRunsSpy.mockReturnValue(new Set(['run_1']));
+
+      // First fetch: slow (deferred). Second fetch: fast.
+      let resolveFirstFetch;
+      const firstFetchPromise = new Promise((resolve) => {
+        resolveFirstFetch = resolve;
+      });
+      fetch
+        .mockReturnValueOnce(firstFetchPromise.then(() => makeResponse({})))
+        .mockResolvedValueOnce(makeResponse({}));
+
+      const renderSpy = vi.spyOn(projectDetail, 'renderMetricsFromCache');
+
+      // First call: fetch hangs.
+      const firstCall = projectDetail.showMetrics();
+
+      // Second call: fetch resolves immediately, superseding the first.
+      const secondCall = projectDetail.showMetrics();
+      await secondCall;
+
+      // The fresh call should have rendered.
+      const renderCountAfterSecond = renderSpy.mock.calls.length;
+      expect(renderCountAfterSecond).toBeGreaterThanOrEqual(1);
+
+      // Now resolve the stale fetch and let the first call finish.
+      resolveFirstFetch();
+      await firstCall;
+
+      // The stale call must NOT have triggered an additional render.
+      expect(renderSpy.mock.calls.length).toBe(renderCountAfterSecond);
+    });
+  });
+
   describe('Initial State', () => {
     test('should auto-load metrics on page load if runs exist', () => {
       // This is tested by the constructor behavior
