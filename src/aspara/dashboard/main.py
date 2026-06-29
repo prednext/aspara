@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from aspara.config import is_dev_mode
+from aspara.config import get_sse_dev_shutdown_timeout, is_dev_mode
 
 from .router import router
 
@@ -99,17 +99,24 @@ async def lifespan(app: FastAPI):
             await queue.put(None)  # Sentinel value to signal shutdown
 
     if is_dev_mode():
-        # Development mode: forcefully cancel SSE tasks for fast restart
-        logger.info(f"[DEV MODE] Cancelling {len(app_state.active_sse_tasks)} active SSE tasks")
+        # Development mode: forcefully cancel SSE tasks for fast restart.
+        # The timeout must be >= SSE_METRICS_ITERATOR_CLOSE_TIMEOUT so each
+        # cancelled task can finish its `finally` cleanup (closing the
+        # metrics iterator / watcher unsubscribe) before we give up.
+        shutdown_timeout = get_sse_dev_shutdown_timeout()
+        logger.info(
+            f"[DEV MODE] Cancelling {len(app_state.active_sse_tasks)} active SSE tasks "
+            f"(timeout={shutdown_timeout}s)"
+        )
         for task in list(app_state.active_sse_tasks):
             task.cancel()
 
-        # Wait briefly for tasks to be cancelled
+        # Wait for tasks to be cancelled
         if app_state.active_sse_tasks:
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(
                     asyncio.gather(*app_state.active_sse_tasks, return_exceptions=True),
-                    timeout=0.1,
+                    timeout=shutdown_timeout,
                 )
         logger.info("[DEV MODE] SSE tasks cancelled, shutdown complete")
     else:

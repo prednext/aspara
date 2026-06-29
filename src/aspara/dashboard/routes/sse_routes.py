@@ -18,6 +18,7 @@ from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
 
 from aspara.config import (
+    SSE_METRICS_ITERATOR_CLOSE_TIMEOUT,
     get_sse_heartbeat_interval,
     get_sse_send_timeout,
     is_dev_mode,
@@ -208,7 +209,10 @@ async def stream_multiple_runs(
                     await pending_metric_task
             # Close the async generator to trigger watcher unsubscribe
             try:
-                await asyncio.wait_for(metrics_iterator.aclose(), timeout=1.0)
+                await asyncio.wait_for(
+                    metrics_iterator.aclose(),
+                    timeout=SSE_METRICS_ITERATOR_CLOSE_TIMEOUT,
+                )
             except asyncio.TimeoutError:
                 logger.warning("[SSE] Timeout closing metrics_iterator")
             except Exception as e:
