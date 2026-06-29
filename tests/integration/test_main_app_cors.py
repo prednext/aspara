@@ -35,11 +35,13 @@ class TestMainAppCORS:
     def test_wildcard_origin_allowed_without_credentials(self):
         """Wildcard origin should still be allowed (just without credentials)."""
         client = TestClient(app)
+        # Use a non-existent endpoint - CORS headers are added by middleware
+        # regardless of the response status, so a 404 is sufficient.
         response = client.get(
-            "/",
+            "/nonexistent-endpoint-for-cors-test",
             headers={"Origin": "https://evil.example.com"},
         )
-        # Even on a 404/redirect, the CORS header should be present for the wildcard
+        # CORS header should be present even on 404
         allow_origin = response.headers.get("access-control-allow-origin", "")
         assert allow_origin in ("*", "https://evil.example.com")
         assert response.headers.get("access-control-allow-credentials", "").lower() != "true"
