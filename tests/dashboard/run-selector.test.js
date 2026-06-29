@@ -200,6 +200,7 @@ describe('RunSelector', () => {
 
   describe('Filter Input Event Handling', () => {
     test('should filter runs on input event', () => {
+      vi.useFakeTimers();
       setupRunSelectorDOM(['test-1', 'test-2', 'other']);
       const selector = new RunSelector();
       const filterInput = document.getElementById('runFilter');
@@ -208,12 +209,18 @@ describe('RunSelector', () => {
       filterInput.value = '^test';
       filterInput.dispatchEvent(new Event('input'));
 
+      // filterRuns is debounced; flush the pending call.
+      vi.advanceTimersByTime(300);
+
       expect(isRunVisible('test-1')).toBe(true);
       expect(isRunVisible('test-2')).toBe(true);
       expect(isRunVisible('other')).toBe(false);
+
+      vi.useRealTimers();
     });
 
     test('should show error state on invalid input', () => {
+      vi.useFakeTimers();
       setupRunSelectorDOM(['run-1']);
       const selector = new RunSelector();
       const filterInput = document.getElementById('runFilter');
@@ -222,7 +229,12 @@ describe('RunSelector', () => {
       filterInput.value = '[';
       filterInput.dispatchEvent(new Event('input'));
 
+      // filterRuns is debounced; flush the pending call.
+      vi.advanceTimersByTime(300);
+
       expect(filterInput.classList.contains('border-status-error')).toBe(true);
+
+      vi.useRealTimers();
     });
   });
 });

@@ -1,6 +1,7 @@
 import { deleteProjectApi } from './api/delete-api.js';
 import { createSortComparator, matchesSearch, parseProjectElement } from './projects-list-utils.js';
 import { initializeTagEditorsForElements } from './tag-editor.js';
+import { debounce } from './timer-utils.js';
 
 class ProjectsListSorter {
   constructor() {
@@ -10,9 +11,9 @@ class ProjectsListSorter {
     this.sortKey = localStorage.getItem('projects_sort_key') || 'name';
     this.sortOrder = localStorage.getItem('projects_sort_order') || 'asc';
 
-    // Search input handler and timeout (stored for cleanup)
+    // Search input handler and debounced trigger (stored for cleanup)
     this.searchInputHandler = null;
-    this.searchTimeoutId = null;
+    this._searchDebounced = null;
     this._sortHeaderHandlers = [];
     this._cardHandlers = [];
     this._deleteContainerHandler = null;
@@ -104,16 +105,14 @@ class ProjectsListSorter {
         searchButton.style.display = 'none';
       }
 
-      // Store handler for cleanup
+      // Debounce re-rendering via the shared timer-utils (SSOT for
+      // search/filter debounce timing).
+      this._searchDebounced = debounce((value) => {
+        this.currentQuery = value.trim();
+        this.sortAndRender();
+      });
       this.searchInputHandler = (event) => {
-        const value = event.target.value;
-        if (this.searchTimeoutId) {
-          clearTimeout(this.searchTimeoutId);
-        }
-        this.searchTimeoutId = setTimeout(() => {
-          this.currentQuery = value.trim();
-          this.sortAndRender();
-        }, 300);
+        this._searchDebounced(event.target.value);
       };
       searchInput.addEventListener('input', this.searchInputHandler);
     } else {
@@ -367,9 +366,9 @@ class ProjectsListSorter {
    * Clean up event listeners and timeouts.
    */
   destroy() {
-    if (this.searchTimeoutId) {
-      clearTimeout(this.searchTimeoutId);
-      this.searchTimeoutId = null;
+    if (this._searchDebounced) {
+      this._searchDebounced.cancel();
+      this._searchDebounced = null;
     }
     if (this.searchInputHandler) {
       const searchInput = document.getElementById('projectSearchInput');

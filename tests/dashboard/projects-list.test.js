@@ -342,17 +342,17 @@ describe('ProjectsListSorter', () => {
       createProjectsDOM({ searchMode: 'realtime' });
       sorter = new ProjectsListSorter();
 
-      // Trigger a search to set timeout
+      // Trigger a search to schedule the debounced call
       const input = document.getElementById('projectSearchInput');
       input.value = 'x';
       input.dispatchEvent(new Event('input'));
 
-      expect(sorter.searchTimeoutId).not.toBeNull();
+      expect(sorter._searchDebounced).not.toBeNull();
       expect(sorter.searchInputHandler).not.toBeNull();
 
       sorter.destroy();
 
-      expect(sorter.searchTimeoutId).toBeNull();
+      expect(sorter._searchDebounced).toBeNull();
       expect(sorter.searchInputHandler).toBeNull();
 
       vi.useRealTimers();
