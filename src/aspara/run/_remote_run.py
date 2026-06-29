@@ -44,6 +44,16 @@ class TrackerClient:
         # Set X-Requested-With header for CSRF protection on all requests
         self.session.headers.update({"X-Requested-With": "XMLHttpRequest"})
 
+    def close(self) -> None:
+        """Close the HTTP session and release connection pool resources."""
+        self.session.close()
+
+    def __enter__(self) -> TrackerClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def create_run(
         self,
         name: str,
@@ -433,6 +443,8 @@ class RemoteRun(BaseRun):
             self.client.finish_run(self.project, self.name, exit_code)
         except requests.RequestException as e:
             logger.warning(f"Failed to finish run on tracker: {e}")
+        finally:
+            self.client.close()
 
         if not quiet:
             print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")

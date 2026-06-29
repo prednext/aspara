@@ -235,6 +235,42 @@ class TestRemoteRunOfflineQueue:
         assert not thread.is_alive()
         assert run._retry_worker._thread is None
 
+    def test_remote_run_finish_closes_client_session(self, mock_tracker_client, temp_data_dir):
+        """Test that finish() closes the TrackerClient HTTP session."""
+        from aspara.run._remote_run import RemoteRun
+
+        run = RemoteRun(
+            name="test_run",
+            project="test_project",
+            tracker_uri="http://localhost:3142",
+        )
+
+        run.finish(quiet=True)
+
+        # session.close() should have been called
+        mock_tracker_client.close.assert_called_once()
+
+    def test_tracker_client_close_and_context_manager(self):
+        """Test TrackerClient.close() and context manager protocol."""
+        from unittest.mock import patch
+
+        from aspara.run._remote_run import TrackerClient
+
+        # Patch requests.Session to track close() calls
+        with patch("aspara.run._remote_run.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+
+            client = TrackerClient("http://localhost:3142")
+            client.close()
+            mock_session.close.assert_called_once()
+
+            # Context manager should also close
+            mock_session.reset_mock()
+            with TrackerClient("http://localhost:3142") as ctx:
+                assert ctx is not None
+            mock_session.close.assert_called_once()
+
     def test_remote_run_queue_preserves_timestamp(self, mock_tracker_client, temp_data_dir):
         """Test that queued metrics preserve the timestamp."""
         from aspara.run._remote_run import RemoteRun
