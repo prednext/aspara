@@ -388,8 +388,12 @@ class RunCatalog:
         runs = []
         seen_run_names: set[str] = set()
 
-        # Process .jsonl files (including .wal.jsonl for Polars backend)
-        for run_file in list(project_dir.glob("*.jsonl")):
+        # Process .jsonl files (including .wal.jsonl for Polars backend).
+        # Iterate the glob generator directly without list() to avoid
+        # materialising all paths upfront. TOCTOU races (file deleted
+        # between discovery and read) are handled by _read_run_info,
+        # which catches FileNotFoundError on stat().
+        for run_file in project_dir.glob("*.jsonl"):
             # Determine run name from file
             if run_file.name.endswith(".wal.jsonl"):
                 # Skip WAL files - they're handled by metadata
