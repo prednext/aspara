@@ -104,18 +104,17 @@ class ProjectMetadataStorage(BaseMetadataStorage):
         Returns:
             True if deleted, False if it didn't exist
         """
-        if not self._metadata_path.exists():
-            return False
-
         try:
             self._metadata_path.unlink()
-            self._metadata = {
-                "notes": "",
-                "tags": [],
-                "created_at": None,
-                "updated_at": None,
-            }
-            return True
+        except FileNotFoundError:
+            return False
         except OSError as e:
             logger.warning(f"Failed to delete project metadata file {self._metadata_path}: {e}")
             return False
+        self._metadata = {
+            "notes": "",
+            "tags": [],
+            "created_at": None,
+            "updated_at": None,
+        }
+        return True

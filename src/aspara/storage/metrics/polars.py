@@ -85,7 +85,7 @@ class PolarsMetricsStorage(MetricsStorage):
     def _read_wal(self, wal_path: Path) -> list[dict[str, Any]]:
         """Read all records from WAL."""
         records = []
-        if wal_path.exists():
+        try:
             with open(wal_path) as f:
                 for line in f:
                     line = line.strip()
@@ -94,6 +94,8 @@ class PolarsMetricsStorage(MetricsStorage):
                             records.append(json.loads(line))
                         except json.JSONDecodeError:
                             continue
+        except FileNotFoundError:
+            pass
         return records
 
     def _parse_timestamp(self, ts: int | str) -> datetime:

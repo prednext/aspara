@@ -205,9 +205,10 @@ class RunMetadataStorage(BaseMetadataStorage):
         Returns:
             True if file was deleted, False if it didn't exist
         """
-        if not self._metadata_path.exists():
+        try:
+            self._metadata_path.unlink()
+        except FileNotFoundError:
             return False
-        self._metadata_path.unlink()
         self._metadata = {
             "run_id": None,
             "tags": [],
