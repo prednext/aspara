@@ -3,6 +3,7 @@
  * Orchestrates metric chart rendering for a single run with grid layout.
  */
 import { Chart } from '../chart.js';
+import { registerPageLifecycle } from '../lifecycle.js';
 import { MetricsDataService } from '../metrics/metrics-data-service.js';
 import { initNoteEditorFromDOM } from '../note-editor.js';
 import { initializeTagEditorsForElements } from '../tag-editor.js';
@@ -120,9 +121,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const page = new RunDetail(project, run);
-  // Store for SPA cleanup / beforeunload
+  // Store for SPA cleanup
   window.__asparaPage = page;
-  window.addEventListener('beforeunload', () => page.destroy());
+  registerPageLifecycle(page);
 });
 
 export { RunDetail };

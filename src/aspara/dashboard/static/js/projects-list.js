@@ -1,4 +1,5 @@
 import { deleteProjectApi } from './api/delete-api.js';
+import { registerPageLifecycle } from './lifecycle.js';
 import { createSortComparator, matchesSearch, parseProjectElement } from './projects-list-utils.js';
 import { initializeTagEditorsForElements } from './tag-editor.js';
 import { debounce } from './timer-utils.js';
@@ -402,7 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('projects-container')) {
     const page = new ProjectsListSorter();
     window.__asparaPage = page;
-    window.addEventListener('beforeunload', () => page.destroy());
+    registerPageLifecycle(page);
   }
 });
 

@@ -5,6 +5,7 @@
 import { Chart } from '../chart.js';
 import { RunSelector } from '../components/run-selector.js';
 import { SSEStatusIndicator } from '../components/sse-status-indicator.js';
+import { registerPageLifecycle } from '../lifecycle.js';
 import { MetricsDataService } from '../metrics/metrics-data-service.js';
 import { convertToChartFormat } from '../metrics/metrics-utils.js';
 import { initNoteEditorFromDOM } from '../note-editor.js';
@@ -396,9 +397,9 @@ class ProjectDetail extends BaseChartPage {
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   const page = new ProjectDetail();
-  // Store for SPA cleanup / beforeunload
+  // Store for SPA cleanup
   window.__asparaPage = page;
-  window.addEventListener('beforeunload', () => page.destroy());
+  registerPageLifecycle(page);
 });
 
 export { ProjectDetail };

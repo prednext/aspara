@@ -1,4 +1,5 @@
 import { deleteRunApi } from '../api/delete-api.js';
+import { registerPageLifecycle } from '../lifecycle.js';
 import { initializeTagEditorsForElements } from '../tag-editor.js';
 import { createRunSortComparator, parseRunElement } from './utils.js';
 
@@ -208,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('runs-container')) {
     const page = new RunsListSorter();
     window.__asparaPage = page;
-    window.addEventListener('beforeunload', () => page.destroy());
+    registerPageLifecycle(page);
   }
 });
 
