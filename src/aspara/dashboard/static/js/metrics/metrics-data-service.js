@@ -5,6 +5,7 @@
 import { decode as msgpackDecode } from '@msgpack/msgpack';
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl } from '../runs-list/sse-utils.js';
 import { decompressDeltaData, findLatestTimestamp, mergeDataPoint } from './metrics-utils.js';
+import { SSEReconnectManager } from '../sse-reconnect-manager.js';
 
 /**
  * MetricsDataService handles fetching, caching, and real-time updates for metrics data.
@@ -27,7 +28,6 @@ export class MetricsDataService {
     this.onMetricUpdate = options.onMetricUpdate || null;
     this.onStatusUpdate = options.onStatusUpdate || null;
     this.onCacheUpdated = options.onCacheUpdated || null;
-    this.onConnectionStateChange = options.onConnectionStateChange || null;
 
     // Cache mechanism: metric-first format {metric: {run: data}}
     this.metricsCache = {};
@@ -44,10 +44,12 @@ export class MetricsDataService {
     this.lastSSETimestamp = INITIAL_SINCE_TIMESTAMP;
     this.lastEventTime = 0;
     this.currentSSERuns = '';
-    this.isReconnecting = false;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
-    this.baseReconnectDelay = 1000;
+
+    // Reconnection state managed by SSEReconnectManager (SSOT for
+    // backoff constants, guard logic, and connection state notification).
+    this.reconnectManager = new SSEReconnectManager({
+      onConnectionStateChange: options.onConnectionStateChange || null,
+    });
 
     // SSE event handlers (stored for cleanup)
     this.sseOpenHandler = null;
@@ -229,9 +231,8 @@ export class MetricsDataService {
     this.sseOpenHandler = () => {
       console.log('[SSE] Connection opened with since:', this.lastSSETimestamp);
       // Reset reconnection state on successful connection
-      this.isReconnecting = false;
-      this.reconnectAttempts = 0;
-      this._notifyConnectionState('connected');
+      this.reconnectManager.resetReconnectState();
+      this.reconnectManager.notifyConnectionState('connected');
     };
 
     this.sseMetricHandler = (event) => {
@@ -291,29 +292,20 @@ export class MetricsDataService {
    * Uses exponential backoff and max retry limit to prevent infinite loops.
    */
   async reconnectSSE() {
-    if (this.isReconnecting) {
-      console.log('[SSE] Already reconnecting, skipping');
+    if (!this.reconnectManager.canReconnect()) {
+      // If max attempts reached (not just "already reconnecting"), notify disconnected
+      if (!this.reconnectManager.isReconnecting && this.reconnectManager.reconnectAttempts >= this.reconnectManager.maxReconnectAttempts) {
+        console.error('[SSE] Max reconnection attempts reached, giving up');
+        this.reconnectManager.notifyConnectionState('disconnected', { lastEventTime: this.lastEventTime });
+      }
       return;
     }
 
-    // Check max retry count
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[SSE] Max reconnection attempts reached, giving up');
-      this.isReconnecting = false;
-      this._notifyConnectionState('disconnected', { lastEventTime: this.lastEventTime });
-      return;
-    }
+    this.reconnectManager.beginReconnect();
 
-    this.isReconnecting = true;
-    this.reconnectAttempts++;
-    this._notifyConnectionState('reconnecting', {
-      attempt: this.reconnectAttempts,
-      max: this.maxReconnectAttempts,
-    });
-
-    // Exponential backoff: 1s, 2s, 4s, 8s... (max 30s)
-    const delay = Math.min(this.baseReconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
-    console.log(`[SSE] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}, waiting ${delay}ms`);
+    // Exponential backoff via SSEReconnectManager
+    const delay = this.reconnectManager.calculateBackoffDelay(this.reconnectManager.reconnectAttempts);
+    console.log(`[SSE] Reconnect attempt ${this.reconnectManager.reconnectAttempts}/${this.reconnectManager.maxReconnectAttempts}, waiting ${delay}ms`);
 
     try {
       if (this.eventSource) {
@@ -325,7 +317,7 @@ export class MetricsDataService {
 
       if (!this.currentSSERuns) {
         console.log('[SSE] No runs to reconnect');
-        this.isReconnecting = false;
+        this.reconnectManager.isReconnecting = false;
         return;
       }
 
@@ -341,10 +333,10 @@ export class MetricsDataService {
       this.setupSSE(this.currentSSERuns);
       // Reset isReconnecting after setupSSE() completes
       // This allows the next error event to trigger a new reconnection attempt
-      this.isReconnecting = false;
+      this.reconnectManager.isReconnecting = false;
     } catch (error) {
       console.error('[SSE] Reconnection failed:', error);
-      this.isReconnecting = false;
+      this.reconnectManager.isReconnecting = false;
     }
   }
 
@@ -461,17 +453,6 @@ export class MetricsDataService {
   }
 
   /**
-   * Notify connection state change callback.
-   * @param {string} state - 'connected' | 'reconnecting' | 'disconnected'
-   * @param {Object} [detail] - Additional context (attempt, max, lastEventTime)
-   */
-  _notifyConnectionState(state, detail = {}) {
-    if (this.onConnectionStateChange) {
-      this.onConnectionStateChange(state, detail);
-    }
-  }
-
-  /**
    * Close SSE connection.
    */
   closeSSE() {
@@ -508,6 +489,6 @@ export class MetricsDataService {
     this.cachedRuns.clear();
     this.cacheAccessOrder = [];
     this.cacheAccessSet.clear();
-    this.reconnectAttempts = 0;
+    this.reconnectManager.resetReconnectState();
   }
 }

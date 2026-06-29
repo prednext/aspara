@@ -4,6 +4,7 @@
  */
 
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl, extractRunNamesFromElements, isConnectionClosed, parseStatusUpdate, updateRunStatusIcon } from './sse-utils.js';
+import { SSEReconnectManager } from '../sse-reconnect-manager.js';
 
 class RunsListSSE {
   constructor(project, options = {}) {
@@ -12,21 +13,18 @@ class RunsListSSE {
     this.lastTimestamp = INITIAL_SINCE_TIMESTAMP;
     this.lastEventTime = 0;
     this.runs = [];
-    this.onConnectionStateChange = options.onConnectionStateChange || null;
+
+    // Reconnection state managed by SSEReconnectManager (SSOT for
+    // backoff constants, guard logic, and connection state notification).
+    this.reconnectManager = new SSEReconnectManager({
+      onConnectionStateChange: options.onConnectionStateChange || null,
+    });
 
     // SSE event handlers (stored for cleanup)
     this.sseOpenHandler = null;
     this.sseStatusHandler = null;
     this.sseMetricHandler = null;
     this.sseErrorHandler = null;
-
-    // Reconnection state — exponential backoff aligned with
-    // metrics-data-service.js to avoid reconnection storms when the
-    // server is down for an extended period.
-    this.isReconnecting = false;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
-    this.baseReconnectDelay = 1000;
 
     this.setupSSE();
   }
@@ -47,10 +45,8 @@ class RunsListSSE {
     // Store handlers as member variables for cleanup
     this.sseOpenHandler = () => {
       console.log('[RunsListSSE] SSE connection opened with since:', this.lastTimestamp);
-      this._notifyConnectionState('connected');
-      // Reset reconnection state on successful connection.
-      this.isReconnecting = false;
-      this.reconnectAttempts = 0;
+      this.reconnectManager.resetReconnectState();
+      this.reconnectManager.notifyConnectionState('connected');
       // Note: Don't update lastTimestamp here - it's updated when receiving events
       // This ensures we don't miss data between the last event and reconnection
     };
@@ -105,25 +101,18 @@ class RunsListSSE {
    * limit to prevent reconnection storms when the server is down.
    */
   reconnect() {
-    this._notifyConnectionState('reconnecting');
-    // Guard against concurrent reconnection attempts.
-    if (this.isReconnecting) {
-      console.log('[RunsListSSE] Already reconnecting, skipping');
+    if (!this.reconnectManager.canReconnect()) {
+      if (!this.reconnectManager.isReconnecting && this.reconnectManager.reconnectAttempts >= this.reconnectManager.maxReconnectAttempts) {
+        console.error('[RunsListSSE] Max reconnection attempts reached, giving up');
+      }
       return;
     }
 
-    // Check max retry count.
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[RunsListSSE] Max reconnection attempts reached, giving up');
-      return;
-    }
+    this.reconnectManager.beginReconnect();
 
-    this.isReconnecting = true;
-    this.reconnectAttempts++;
-
-    // Exponential backoff: 1s, 2s, 4s, 8s... (max 30s)
-    const delay = Math.min(this.baseReconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
-    console.log(`[RunsListSSE] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}, waiting ${delay}ms`);
+    // Exponential backoff via SSEReconnectManager
+    const delay = this.reconnectManager.calculateBackoffDelay(this.reconnectManager.reconnectAttempts);
+    console.log(`[RunsListSSE] Reconnect attempt ${this.reconnectManager.reconnectAttempts}/${this.reconnectManager.maxReconnectAttempts}, waiting ${delay}ms`);
 
     // Close existing connection if any.
     if (this.eventSource) {
@@ -139,24 +128,13 @@ class RunsListSSE {
       // isReconnecting is reset in the 'open' handler on successful
       // connection. If runs is empty, reset here to avoid getting stuck.
       if (this.runs.length === 0) {
-        this.isReconnecting = false;
+        this.reconnectManager.isReconnecting = false;
       }
     }, delay);
   }
 
   handleStatusUpdate(statusData) {
     updateRunStatusIcon(statusData, '[RunsListSSE]');
-  }
-
-  /**
-   * Notify connection state change callback.
-   * @param {string} state - 'connected' | 'reconnecting' | 'disconnected'
-   * @param {Object} [detail] - Additional context
-   */
-  _notifyConnectionState(state, detail = {}) {
-    if (this.onConnectionStateChange) {
-      this.onConnectionStateChange(state, detail);
-    }
   }
 
   close() {
@@ -183,8 +161,7 @@ class RunsListSSE {
     this.sseMetricHandler = null;
     this.sseErrorHandler = null;
     // Reset reconnection state so a future re-init starts fresh.
-    this.isReconnecting = false;
-    this.reconnectAttempts = 0;
+    this.reconnectManager.resetReconnectState();
   }
 }
 

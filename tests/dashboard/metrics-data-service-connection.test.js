@@ -67,7 +67,7 @@ describe('MetricsDataService connection state callbacks', () => {
   });
 
   test('notifies reconnecting when reconnect starts', async () => {
-    service.maxReconnectAttempts = 5;
+    service.reconnectManager.maxReconnectAttempts = 5;
     await service.fetchAndCacheMetrics(['run_1']);
 
     // Trigger error handler to start reconnection
@@ -88,8 +88,8 @@ describe('MetricsDataService connection state callbacks', () => {
   });
 
   test('notifies disconnected when max retries reached', async () => {
-    service.maxReconnectAttempts = 2;
-    service.reconnectAttempts = 2;
+    service.reconnectManager.maxReconnectAttempts = 2;
+    service.reconnectManager.reconnectAttempts = 2;
 
     // Calling reconnectSSE should hit the max retry check
     await service.reconnectSSE();

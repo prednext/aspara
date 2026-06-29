@@ -79,8 +79,8 @@ describe('RunsListSSE reconnection backoff', () => {
     const sse = createSSE();
 
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(1);
-    expect(sse.isReconnecting).toBe(true);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(1);
+    expect(sse.reconnectManager.isReconnecting).toBe(true);
 
     // setupSSE should NOT have been called yet (delay not elapsed).
     expect(setupSseSpy).not.toHaveBeenCalled();
@@ -101,18 +101,18 @@ describe('RunsListSSE reconnection backoff', () => {
 
     // First reconnect (1s delay).
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(1);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(1);
     vi.advanceTimersByTime(1000);
     expect(setupSseSpy).toHaveBeenCalledTimes(1);
 
     // Reset isReconnecting to simulate the 'open' handler not firing
     // (FakeEventSource doesn't auto-dispatch 'open'). This allows the
     // second reconnect() call to proceed.
-    sse.isReconnecting = false;
+    sse.reconnectManager.isReconnecting = false;
 
     // Second reconnect (2s delay).
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(2);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(2);
 
     // Advance just under 2s — setupSSE should NOT have been called again.
     vi.advanceTimersByTime(1999);
@@ -127,29 +127,29 @@ describe('RunsListSSE reconnection backoff', () => {
 
   test('should give up after maxReconnectAttempts', () => {
     const sse = createSSE();
-    sse.maxReconnectAttempts = 3;
+    sse.reconnectManager.maxReconnectAttempts = 3;
 
     // Attempt 1 (1s)
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(1);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(1);
     vi.advanceTimersByTime(1000);
-    sse.isReconnecting = false;
+    sse.reconnectManager.isReconnecting = false;
 
     // Attempt 2 (2s)
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(2);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(2);
     vi.advanceTimersByTime(2000);
-    sse.isReconnecting = false;
+    sse.reconnectManager.isReconnecting = false;
 
     // Attempt 3 (4s)
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(3);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(3);
     vi.advanceTimersByTime(4000);
-    sse.isReconnecting = false;
+    sse.reconnectManager.isReconnecting = false;
 
     // Should have given up — no attempt 4.
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(3);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(3);
     expect(setupSseSpy).toHaveBeenCalledTimes(3);
 
     sse.close();
@@ -159,12 +159,12 @@ describe('RunsListSSE reconnection backoff', () => {
     const sse = createSSE();
 
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(1);
-    expect(sse.isReconnecting).toBe(true);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(1);
+    expect(sse.reconnectManager.isReconnecting).toBe(true);
 
     // Manually call reconnect() again — should be skipped.
     sse.reconnect();
-    expect(sse.reconnectAttempts).toBe(1);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(1);
 
     sse.close();
   });
@@ -173,11 +173,11 @@ describe('RunsListSSE reconnection backoff', () => {
     const sse = createSSE();
 
     sse.reconnect();
-    expect(sse.isReconnecting).toBe(true);
-    expect(sse.reconnectAttempts).toBe(1);
+    expect(sse.reconnectManager.isReconnecting).toBe(true);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(1);
 
     sse.close();
-    expect(sse.isReconnecting).toBe(false);
-    expect(sse.reconnectAttempts).toBe(0);
+    expect(sse.reconnectManager.isReconnecting).toBe(false);
+    expect(sse.reconnectManager.reconnectAttempts).toBe(0);
   });
 });
