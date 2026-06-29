@@ -1,6 +1,6 @@
 """Utility modules for aspara."""
 
-from aspara.utils.file import atomic_write_json, datasync, secure_open_append
+from aspara.utils.file import atomic_write_json, atomic_write_text, datasync, secure_open_append
 from aspara.utils.metadata import update_project_metadata_tags
 from aspara.utils.timestamp import parse_to_datetime, parse_to_ms
 from aspara.utils.validators import (
@@ -12,6 +12,7 @@ from aspara.utils.validators import (
 
 __all__ = [
     "atomic_write_json",
+    "atomic_write_text",
     "datasync",
     "parse_to_datetime",
     "parse_to_ms",

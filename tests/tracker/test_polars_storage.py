@@ -393,3 +393,129 @@ def test_polars_storage_archive_before_write_order(temp_storage_dir):
     # Regardless of whether archive happened, all data should be readable
     df = storage.load()
     assert len(df) == 4, f"Expected 4 metrics, got {len(df)}. WAL size before: {wal_size_before}, Archive existed before: {archive_exists_before}"
+
+
+def test_polars_storage_marker_recovery_clears_wal(temp_storage_dir):
+    """Test that a stale archive marker triggers WAL clear on next archive.
+
+    Simulates a crash after Parquet write but before WAL clear:
+    1. Write data to WAL
+    2. Manually create a marker file (simulating completed Parquet write)
+    3. Create a new storage instance and trigger archive
+    4. The stale marker should cause WAL to be cleared (no duplication)
+    """
+    project_name = "test_project"
+    run_name = "test_run"
+
+    storage = PolarsMetricsStorage(
+        base_dir=str(temp_storage_dir),
+        project_name=project_name,
+        run_name=run_name,
+        archive_threshold_bytes=100,
+    )
+
+    # Write some data to WAL
+    storage.save({
+        "project_name": project_name,
+        "run_name": run_name,
+        "timestamp": "2025-01-01T00:00:00",
+        "step": 0,
+        "metrics": {"loss": 0.5},
+    })
+
+    wal_path = temp_storage_dir / project_name / f"{run_name}.wal.jsonl"
+    marker_path = temp_storage_dir / project_name / f"{run_name}.archive.marker"
+
+    # Simulate: Parquet was written (create archive dir + parquet),
+    # marker was written, but WAL was NOT cleared (crash happened)
+    archive_path = temp_storage_dir / project_name / f"{run_name}_archive"
+    archive_path.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text("archived", encoding="utf-8")
+
+    assert wal_path.exists() and wal_path.stat().st_size > 0
+    assert marker_path.exists()
+
+    # New storage instance (simulating restart) - trigger archive via finish()
+    storage2 = PolarsMetricsStorage(
+        base_dir=str(temp_storage_dir),
+        project_name=project_name,
+        run_name=run_name,
+        archive_threshold_bytes=100,
+    )
+    storage2.finish()
+
+    # Marker should be cleaned up
+    assert not marker_path.exists(), "Stale marker should be removed after recovery"
+
+    # WAL should be cleared (data was already in Parquet)
+    assert wal_path.stat().st_size == 0, "WAL should be cleared after marker recovery"
+
+
+def test_polars_storage_atomic_wal_clear(temp_storage_dir):
+    """Test that _clear_wal produces an empty file atomically.
+
+    The WAL file should exist and be empty after clear, not be deleted.
+    This ensures readers holding the file handle don't get EBADF.
+    """
+    project_name = "test_project"
+    run_name = "test_run"
+
+    storage = PolarsMetricsStorage(
+        base_dir=str(temp_storage_dir),
+        project_name=project_name,
+        run_name=run_name,
+    )
+
+    wal_path = temp_storage_dir / project_name / f"{run_name}.wal.jsonl"
+
+    # Write some data
+    storage.save({
+        "project_name": project_name,
+        "run_name": run_name,
+        "timestamp": "2025-01-01T00:00:00",
+        "step": 0,
+        "metrics": {"loss": 0.5},
+    })
+    assert wal_path.exists() and wal_path.stat().st_size > 0
+
+    # Clear WAL
+    storage._clear_wal(wal_path)
+
+    # File should still exist (not deleted) and be empty
+    assert wal_path.exists(), "WAL file should exist after clear (not deleted)"
+    assert wal_path.stat().st_size == 0, "WAL file should be empty after clear"
+
+    # No temp files should be left behind
+    tmp_files = list(wal_path.parent.glob(".tmp_*"))
+    assert len(tmp_files) == 0, f"Temp files left behind: {tmp_files}"
+
+
+def test_polars_storage_no_toctou_on_missing_wal(temp_storage_dir):
+    """Test that save() doesn't crash if WAL is deleted between check and write.
+
+    The TOCTOU fix uses try/except FileNotFoundError instead of exists()+stat().
+    """
+    project_name = "test_project"
+    run_name = "test_run"
+
+    storage = PolarsMetricsStorage(
+        base_dir=str(temp_storage_dir),
+        project_name=project_name,
+        run_name=run_name,
+        archive_threshold_bytes=100,
+    )
+
+    # save() should work even on first call when WAL doesn't exist yet
+    # (stat() raises FileNotFoundError, which is caught)
+    storage.save({
+        "project_name": project_name,
+        "run_name": run_name,
+        "timestamp": "2025-01-01T00:00:00",
+        "step": 0,
+        "metrics": {"loss": 0.5},
+    })
+
+    # finish() should also handle missing WAL gracefully
+    wal_path = temp_storage_dir / project_name / f"{run_name}.wal.jsonl"
+    wal_path.unlink()
+    storage.finish()  # Should not raise
