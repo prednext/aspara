@@ -152,6 +152,16 @@ class TestRunBasic:
             assert metadata["is_finished"] is True
             assert metadata["exit_code"] == 0
 
+    def test_run_finish_accepts_flush_timeout_local(self):
+        """LocalRun.finish() must accept flush_timeout for signature parity with RemoteRun."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run = Run(name="test_run", dir=temp_dir)
+            run.log({"loss": 0.5})
+            # Should not raise TypeError
+            run.finish(exit_code=0, quiet=True, flush_timeout=10.0)
+            metadata = read_metadata(temp_dir, "default", "test_run")
+            assert metadata["is_finished"] is True
+
     def test_run_log_after_finish_raises(self):
         """Test that logging after finish raises error."""
         with tempfile.TemporaryDirectory() as temp_dir:

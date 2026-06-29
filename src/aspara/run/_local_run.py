@@ -296,12 +296,15 @@ class LocalRun(BaseRun):
 
         self._metadata_storage.add_artifact(artifact_data)
 
-    def finish(self, exit_code: int = 0, quiet: bool = False) -> None:
+    def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
         """Finish the run and write final record.
 
         Args:
             exit_code: Exit code for the run (0 = success)
             quiet: If True, suppress output messages
+            flush_timeout: Unused — LocalRun writes synchronously so there is
+                no queue to flush. Accepted for signature compatibility with
+                RemoteRun.finish().
         """
         if not self._mark_finished():
             return

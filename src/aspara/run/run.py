@@ -145,14 +145,16 @@ class Run:
         """
         self._backend.log(data, step=step, commit=commit, timestamp=timestamp)
 
-    def finish(self, exit_code: int = 0, quiet: bool = False) -> None:
+    def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
         """Finish the run.
 
         Args:
             exit_code: Exit code for the run (0 = success)
             quiet: If True, suppress output messages
+            flush_timeout: Maximum time to wait for queue flush in seconds.
+                Only meaningful for remote runs; ignored by LocalRun.
         """
-        self._backend.finish(exit_code=exit_code, quiet=quiet)
+        self._backend.finish(exit_code=exit_code, quiet=quiet, flush_timeout=flush_timeout)
 
     def flush(self, timeout: float = 30.0) -> int:
         """Ensure all data is persisted.
