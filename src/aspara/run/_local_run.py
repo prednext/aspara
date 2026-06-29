@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from aspara.config import get_data_dir
+from aspara.exceptions import RunAlreadyExistsError
 from aspara.run._base_run import BaseRun
 from aspara.run._config import Config
 from aspara.run._summary import Summary
@@ -108,11 +109,13 @@ class LocalRun(BaseRun):
             self.id = self._generate_run_id()
             if existing_run_id is not None and not resume:
                 # A run with the same name already exists and the user did not
-                # request a resume. Warn that new metrics will be appended.
-                print(
-                    f"aspara: Warning: run '{self.name}' already exists in project "
-                    f"'{self.project}'. New metrics will be appended to the existing "
-                    f"file. Use resume=True to continue the existing run."
+                # request a resume. Appending would mix metrics from independent
+                # run instances and corrupt step numbering, so refuse rather
+                # than silently corrupting data.
+                raise RunAlreadyExistsError(
+                    f"Run '{self.name}' already exists in project '{self.project}'. "
+                    f"Use resume=True to continue the existing run, or choose a "
+                    f"different run name."
                 )
 
         self.config = Config(config, on_change=self._on_config_change)

@@ -92,3 +92,51 @@ class TestLocalResume:
         aspara.finish(quiet=True)
         meta_after = _read_metadata(isolated_data_dir, "p", "r")
         assert meta_after["start_time"] == start_before
+
+
+class TestLocalResumeCollision:
+    """resume=False with an existing same-name run must error, not append.
+
+    Previously the SDK printed a warning and appended new metrics to the
+    existing file, mixing data from independent run instances and
+    corrupting step numbering (the new run_id also mismatched the
+    existing metadata). This is now a hard error.
+    """
+
+    def test_resume_false_with_existing_run_raises(self, isolated_data_dir: Path) -> None:
+        from aspara.exceptions import RunAlreadyExistsError
+
+        aspara.init(project="p", name="r")
+        aspara.finish(quiet=True)
+
+        with pytest.raises(RunAlreadyExistsError):
+            aspara.init(project="p", name="r")
+
+    def test_resume_false_does_not_corrupt_existing_metrics(self, isolated_data_dir: Path) -> None:
+        """The error must be raised before any new data is written."""
+        aspara.init(project="p", name="r")
+        aspara.log({"loss": 0.5}, step=0)
+        aspara.finish(quiet=True)
+
+        steps_before = _read_metrics_steps(isolated_data_dir, "p", "r")
+        assert steps_before == [0]
+
+        with pytest.raises(Exception):
+            aspara.init(project="p", name="r")
+
+        # No new metrics should have been appended
+        steps_after = _read_metrics_steps(isolated_data_dir, "p", "r")
+        assert steps_after == [0]
+
+    def test_resume_true_still_works_after_collision_guard(self, isolated_data_dir: Path) -> None:
+        """resume=True should still bypass the collision guard."""
+        aspara.init(project="p", name="r")
+        aspara.log({"loss": 0.5}, step=0)
+        aspara.finish(quiet=True)
+
+        aspara.init(project="p", name="r", resume=True)
+        aspara.log({"loss": 0.3}, step=1)
+        aspara.finish(quiet=True)
+
+        steps = _read_metrics_steps(isolated_data_dir, "p", "r")
+        assert steps == [0, 1]
