@@ -18,13 +18,15 @@ app = FastAPI(
     redoc_url=None,  # Disable default /redoc
 )
 
-# CORS configuration
+# CORS configuration - credentials disabled for security with wildcard origins
+# Note: allow_credentials=True with allow_origins=["*"] is a security vulnerability
+# as it allows any site to make credentialed requests to our API
 app.add_middleware(
     CORSMiddleware,  # ty: ignore[invalid-argument-type]
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "X-Requested-With"],
 )
 
 
