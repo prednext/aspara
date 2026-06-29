@@ -15,7 +15,41 @@ describe('Chart SSE Update', () => {
   });
 
   afterEach(() => {
+    chart?.destroy();
     cleanupTestContainer();
+  });
+
+  describe('canvas accessibility', () => {
+    test('canvas has role=img', () => {
+      const canvas = container.querySelector('canvas');
+      expect(canvas.getAttribute('role')).toBe('img');
+    });
+
+    test('canvas falls back to aria-label when no titleId is stashed', () => {
+      const canvas = container.querySelector('canvas');
+      expect(canvas.getAttribute('aria-label')).toBe('Metrics line chart');
+      expect(canvas.hasAttribute('aria-labelledby')).toBe(false);
+    });
+
+    test('canvas uses aria-labelledby when container has data-aria-labelledby', () => {
+      // Simulate createMetricChartContainer wiring: stash the title id on
+      // the container div before Chart is constructed.
+      const titled = document.createElement('div');
+      titled.id = 'titled-container';
+      titled.style.width = '600px';
+      titled.style.height = '400px';
+      titled.getBoundingClientRect = () => ({ width: 600, height: 400, top: 0, left: 0, right: 600, bottom: 400, x: 0, y: 0 });
+      titled.dataset.ariaLabelledby = 'chart-loss-title';
+      document.body.appendChild(titled);
+
+      const c = new Chart('#titled-container');
+      const canvas = titled.querySelector('canvas');
+      expect(canvas.getAttribute('aria-labelledby')).toBe('chart-loss-title');
+      expect(canvas.hasAttribute('aria-label')).toBe(false);
+
+      c.destroy();
+      titled.remove();
+    });
   });
 
   describe('addDataPoint', () => {

@@ -82,6 +82,19 @@ export class Chart {
     this.canvas.style.display = 'block';
     this.canvas.style.maxWidth = '100%';
 
+    // Accessibility: expose the canvas as a decorative image whose
+    // accessible name is derived from the chart's <h3> title via
+    // aria-labelledby. The title id is stashed on the container div by
+    // createMetricChartContainer(); when absent (e.g. standalone Chart
+    // usage) fall back to a generic label.
+    this.canvas.setAttribute('role', 'img');
+    const titleId = this.container.dataset.ariaLabelledby;
+    if (titleId) {
+      this.canvas.setAttribute('aria-labelledby', titleId);
+    } else {
+      this.canvas.setAttribute('aria-label', 'Metrics line chart');
+    }
+
     this.container.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d');
 

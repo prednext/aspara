@@ -13,6 +13,19 @@ export const ICON_DOWNLOAD = `<svg class="w-4 h-4 inline"><use href="#icon-downl
 export const ICON_HELP = `<svg class="w-4 h-4 inline"><use href="#icon-information-circle"></use></svg>`;
 
 /**
+ * Accessible labels for chart control buttons (SSOT).
+ * Used as both the `aria-label` and the `title` attribute so the
+ * tooltip and the screen-reader name stay in sync.
+ */
+export const CHART_CONTROL_LABELS = Object.freeze({
+  resetZoom: 'Reset zoom',
+  enterFullscreen: 'Enter fullscreen',
+  exitFullscreen: 'Exit fullscreen',
+  download: 'Download data',
+  help: 'Chart interactions help',
+});
+
+/**
  * Escape HTML special characters to prevent XSS attacks
  * @param {string} text - Text to escape
  * @returns {string} Escaped HTML string

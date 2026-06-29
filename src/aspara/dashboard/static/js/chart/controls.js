@@ -1,4 +1,27 @@
-import { ICON_DOWNLOAD, ICON_FULLSCREEN, ICON_HELP, ICON_RESET_ZOOM } from '../html-utils.js';
+import { CHART_CONTROL_LABELS, ICON_DOWNLOAD, ICON_FULLSCREEN, ICON_HELP, ICON_RESET_ZOOM } from '../html-utils.js';
+
+/**
+ * Apply shared styling and ARIA attributes to a chart control button.
+ * @param {HTMLButtonElement} button
+ * @param {string} label - Accessible name (also used as tooltip)
+ */
+function styleControlButton(button, label) {
+  button.type = 'button';
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.style.cssText = `
+        width: 32px;
+        height: 32px;
+        border: 1px solid #ddd;
+        background: white;
+        cursor: pointer;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #555;
+    `;
+}
 
 export class ChartControls {
   constructor(chart, chartExport) {
@@ -16,6 +39,8 @@ export class ChartControls {
     this.documentClickHandler = null;
     // fullscreenchange handler (stored for cleanup)
     this.fullscreenChangeHandler = null;
+    // Keydown handler for Esc / arrow keys inside open menus (stored for cleanup)
+    this._menuKeydownHandler = null;
   }
 
   create() {
@@ -46,19 +71,7 @@ export class ChartControls {
   createResetButton() {
     this.resetButton = document.createElement('button');
     this.resetButton.innerHTML = ICON_RESET_ZOOM;
-    this.resetButton.title = 'Reset zoom';
-    this.resetButton.style.cssText = `
-            width: 32px;
-            height: 32px;
-            border: 1px solid #ddd;
-            background: white;
-            cursor: pointer;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #555;
-        `;
+    styleControlButton(this.resetButton, CHART_CONTROL_LABELS.resetZoom);
 
     this.attachButtonHover(this.resetButton);
     this.resetButton.addEventListener('click', () => this.chart.resetZoom());
@@ -67,29 +80,21 @@ export class ChartControls {
   createFullSizeButton() {
     this.fullSizeButton = document.createElement('button');
     this.fullSizeButton.innerHTML = ICON_FULLSCREEN;
-    this.fullSizeButton.title = 'Enter fullscreen';
-    this.fullSizeButton.style.cssText = `
-            width: 32px;
-            height: 32px;
-            border: 1px solid #ddd;
-            background: white;
-            cursor: pointer;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #555;
-        `;
+    styleControlButton(this.fullSizeButton, CHART_CONTROL_LABELS.enterFullscreen);
 
     this.attachButtonHover(this.fullSizeButton);
     this.fullSizeButton.addEventListener('click', () => this.fitToFullSize());
 
-    // Keep the title in sync with the actual fullscreen state so the
-    // tooltip reflects what clicking the button will do (e.g. after the
+    // Keep the title/aria-label in sync with the actual fullscreen state so
+    // the tooltip reflects what clicking the button will do (e.g. after the
     // user exits fullscreen via Esc).
     this.fullscreenChangeHandler = () => {
       if (!this.fullSizeButton) return;
-      this.fullSizeButton.title = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen';
+      const label = document.fullscreenElement
+        ? CHART_CONTROL_LABELS.exitFullscreen
+        : CHART_CONTROL_LABELS.enterFullscreen;
+      this.fullSizeButton.title = label;
+      this.fullSizeButton.setAttribute('aria-label', label);
     };
     document.addEventListener('fullscreenchange', this.fullscreenChangeHandler);
   }
@@ -97,22 +102,14 @@ export class ChartControls {
   createDownloadButton() {
     this.downloadButton = document.createElement('button');
     this.downloadButton.innerHTML = ICON_DOWNLOAD;
-    this.downloadButton.title = 'Download data';
-    this.downloadButton.style.cssText = `
-            width: 32px;
-            height: 32px;
-            border: 1px solid #ddd;
-            background: white;
-            cursor: pointer;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #555;
-            position: relative;
-        `;
+    styleControlButton(this.downloadButton, CHART_CONTROL_LABELS.download);
+    this.downloadButton.style.position = 'relative';
+    // Declare the popup menu relationship for AT users.
+    this.downloadButton.setAttribute('aria-haspopup', 'menu');
+    this.downloadButton.setAttribute('aria-expanded', 'false');
 
     this.downloadMenu = document.createElement('div');
+    this.downloadMenu.setAttribute('role', 'menu');
     this.downloadMenu.style.cssText = `
             position: absolute;
             top: 100%;
@@ -136,6 +133,7 @@ export class ChartControls {
     for (const option of downloadOptions) {
       const menuItem = document.createElement('button');
       menuItem.textContent = option.label;
+      menuItem.setAttribute('role', 'menuitem');
       menuItem.style.cssText = `
                 padding: 8px 12px;
                 text-align: left;
@@ -168,22 +166,14 @@ export class ChartControls {
   createHelpButton() {
     this.helpButton = document.createElement('button');
     this.helpButton.innerHTML = ICON_HELP;
-    this.helpButton.title = 'Chart interactions help';
-    this.helpButton.style.cssText = `
-            width: 32px;
-            height: 32px;
-            border: 1px solid #ddd;
-            background: white;
-            cursor: pointer;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #555;
-            position: relative;
-        `;
+    styleControlButton(this.helpButton, CHART_CONTROL_LABELS.help);
+    this.helpButton.style.position = 'relative';
+    // The help popover is informational, not a menu, but it is a popup.
+    this.helpButton.setAttribute('aria-haspopup', 'dialog');
+    this.helpButton.setAttribute('aria-expanded', 'false');
 
     this.helpPopover = document.createElement('div');
+    this.helpPopover.setAttribute('role', 'dialog');
     this.helpPopover.style.cssText = `
             position: absolute;
             top: 100%;
@@ -221,6 +211,7 @@ export class ChartControls {
             `;
       const iconSpan = document.createElement('span');
       iconSpan.textContent = item.icon;
+      iconSpan.setAttribute('aria-hidden', 'true');
       iconSpan.style.cssText = 'width: 18px; text-align: center; flex-shrink: 0;';
       const textSpan = document.createElement('span');
       textSpan.textContent = item.text;
@@ -253,6 +244,56 @@ export class ChartControls {
       document.removeEventListener('click', existingHandler);
     }
     document.addEventListener('click', this.documentClickHandler);
+
+    // Global keydown handler: Esc closes the open popup and returns focus
+    // to the triggering button; arrow keys move between menu items of the
+    // download menu (ARIA Authoring Practices menu pattern).
+    this._menuKeydownHandler = (e) => this._handleMenuKeydown(e);
+    document.addEventListener('keydown', this._menuKeydownHandler);
+  }
+
+  /**
+   * Handle keyboard navigation for open popups (Esc / Arrow / Home / End).
+   * Follows the ARIA Authoring Practices Guide menu pattern.
+   */
+  _handleMenuKeydown(e) {
+    const downloadOpen = this.downloadMenu?.style.display === 'flex';
+    const helpOpen = this.helpPopover?.style.display === 'flex';
+    if (!downloadOpen && !helpOpen) return;
+
+    // Esc closes whichever popup is open and returns focus to its trigger.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (downloadOpen) {
+        this.toggleDownloadMenu(false);
+        this.downloadButton?.focus();
+      } else if (helpOpen) {
+        this.toggleHelpPopover(false);
+        this.helpButton?.focus();
+      }
+      return;
+    }
+
+    // Arrow / Home / End only apply to the download menu (role=menu).
+    if (!downloadOpen) return;
+
+    const items = Array.from(this.downloadMenu.querySelectorAll('[role="menuitem"]'));
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement);
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(currentIndex + 1) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(currentIndex - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    }
   }
 
   toggleHelpPopover(forceState) {
@@ -260,6 +301,13 @@ export class ChartControls {
     const isVisible = this.helpPopover.style.display === 'flex';
     const newState = forceState !== undefined ? forceState : !isVisible;
     this.helpPopover.style.display = newState ? 'flex' : 'none';
+    if (this.helpButton) {
+      this.helpButton.setAttribute('aria-expanded', newState ? 'true' : 'false');
+    }
+    if (newState) {
+      // Move focus into the dialog so AT users perceive the context switch.
+      this.helpPopover.focus?.();
+    }
   }
 
   fitToFullSize() {
@@ -273,7 +321,8 @@ export class ChartControls {
       } else if (this.chart.container.msRequestFullscreen) {
         this.chart.container.msRequestFullscreen();
       }
-      this.fullSizeButton.title = 'Exit fullscreen';
+      this.fullSizeButton.title = CHART_CONTROL_LABELS.exitFullscreen;
+      this.fullSizeButton.setAttribute('aria-label', CHART_CONTROL_LABELS.exitFullscreen);
     } else {
       if (document.exitFullscreen) {
         document.exitFullscreen();
@@ -284,7 +333,8 @@ export class ChartControls {
       } else if (document.msExitFullscreen) {
         document.msExitFullscreen();
       }
-      this.fullSizeButton.title = 'Enter fullscreen';
+      this.fullSizeButton.title = CHART_CONTROL_LABELS.enterFullscreen;
+      this.fullSizeButton.setAttribute('aria-label', CHART_CONTROL_LABELS.enterFullscreen);
     }
   }
 
@@ -293,6 +343,15 @@ export class ChartControls {
     const newState = forceState !== undefined ? forceState : !isVisible;
 
     this.downloadMenu.style.display = newState ? 'flex' : 'none';
+    if (this.downloadButton) {
+      this.downloadButton.setAttribute('aria-expanded', newState ? 'true' : 'false');
+    }
+    if (newState) {
+      // Move focus to the first menu item so keyboard users can
+      // immediately navigate with arrows (ARIA APG menu pattern).
+      const firstItem = this.downloadMenu.querySelector('[role="menuitem"]');
+      firstItem?.focus();
+    }
   }
 
   /**
@@ -321,6 +380,10 @@ export class ChartControls {
     if (this.fullscreenChangeHandler) {
       document.removeEventListener('fullscreenchange', this.fullscreenChangeHandler);
       this.fullscreenChangeHandler = null;
+    }
+    if (this._menuKeydownHandler) {
+      document.removeEventListener('keydown', this._menuKeydownHandler);
+      this._menuKeydownHandler = null;
     }
     if (this.buttonContainer?.parentNode) {
       this.buttonContainer.parentNode.removeChild(this.buttonContainer);

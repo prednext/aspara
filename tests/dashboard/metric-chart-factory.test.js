@@ -31,6 +31,18 @@ describe('createMetricChartContainer', () => {
     const { chartDiv } = createMetricChartContainer('accuracy', 450);
     expect(chartDiv.style.height).toBe('450px');
   });
+
+  test('should assign a stable id to the <h3> title for aria-labelledby', () => {
+    const { container, chartId, titleId } = createMetricChartContainer('loss', 300);
+    const title = container.querySelector('h3');
+    expect(title.id).toBe(titleId);
+    expect(titleId).toBe(`${chartId}-title`);
+  });
+
+  test('should stash the title id on the chart div for Chart to wire up', () => {
+    const { chartDiv, titleId } = createMetricChartContainer('loss', 300);
+    expect(chartDiv.dataset.ariaLabelledby).toBe(titleId);
+  });
 });
 
 describe('createChartErrorDisplay', () => {
