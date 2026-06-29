@@ -36,6 +36,23 @@ def test_project_catalog_list(temp_catalog_dir):
     assert "not_a_project.txt" not in project_names
 
 
+def test_project_catalog_ignores_hidden_dirs(temp_catalog_dir):
+    """Hidden/reserved directories (e.g. .queue) must not be listed as projects.
+
+    Such names fail validate_name() and would crash the dashboard home page if
+    returned by get_projects().
+    """
+    catalog = ProjectCatalog(str(temp_catalog_dir))
+
+    (temp_catalog_dir / "project1").mkdir()
+    (temp_catalog_dir / ".queue").mkdir()
+    (temp_catalog_dir / ".hidden").mkdir()
+
+    projects = catalog.get_projects()
+    project_names = [p.name for p in projects]
+    assert project_names == ["project1"]
+
+
 def test_project_last_update_is_timezone_aware(temp_catalog_dir):
     """last_update must be timezone-aware UTC, not naive local time.
 

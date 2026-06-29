@@ -65,6 +65,10 @@ class ProjectCatalog:
                     if not project_entry.is_dir():
                         continue
 
+                    # Skip hidden/reserved directories (e.g. .queue)
+                    if project_entry.name.startswith("."):
+                        continue
+
                     # Collect run files with stat info in single pass
                     run_files_mtime: list[float] = []
                     with os.scandir(project_entry.path) as file_entries:
