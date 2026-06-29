@@ -11,11 +11,13 @@ import argparse
 import os
 import socket
 import sys
+import tempfile
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 
 import uvicorn
 
-from aspara.config import get_data_dir, get_storage_backend
+from aspara.config import _validate_data_dir, get_data_dir, get_storage_backend
 
 
 def _get_version() -> str:
@@ -33,6 +35,64 @@ def _get_version() -> str:
         from aspara import __version__
 
         return __version__
+
+
+def _resolve_and_validate_data_dir(data_dir: str | None, *, require_writable: bool = True) -> str:
+    """Resolve *data_dir* to an absolute path and validate it.
+
+    Performs the following checks (in order):
+
+    1.  Forbidden system-path check (delegates to ``config._validate_data_dir``).
+    2.  Parent directory exists (so the path is creatable).
+    3.  If *require_writable* is ``True``, the directory (or its parent when
+        it does not yet exist) is writable.
+
+    On any failure an error message is printed to stdout and ``sys.exit(1)``
+    is called.
+
+    Args:
+        data_dir: Raw ``--data-dir`` value. ``None`` falls back to
+            ``get_data_dir()``.
+        require_writable: When ``True`` (server commands), verify write
+            access. Read-only commands (``projects``, ``runs``) pass
+            ``False``.
+
+    Returns:
+        The resolved absolute path as a ``str``.
+    """
+    if data_dir is None:
+        return str(get_data_dir())
+
+    raw_path = Path(data_dir).expanduser()
+    resolved = raw_path.resolve()
+
+    # 1. Forbidden system-path check
+    try:
+        _validate_data_dir(resolved)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    # 2. Parent directory must exist (so the path is creatable)
+    parent = resolved if resolved.exists() else resolved.parent
+    if not parent.exists():
+        print(f"Error: data directory parent does not exist: {parent}")
+        print("Hint: create the parent directory first, e.g.:")
+        print(f"  mkdir -p {parent}")
+        sys.exit(1)
+
+    # 3. Writable check (for server commands that write data)
+    if require_writable:
+        test_dir = resolved if resolved.exists() else parent
+        try:
+            with tempfile.TemporaryFile(dir=str(test_dir), prefix=".aspara_write_test_"):
+                pass
+        except (PermissionError, OSError) as exc:
+            print(f"Error: data directory is not writable: {test_dir}")
+            print(f"  {exc}")
+            sys.exit(1)
+
+    return str(resolved)
 
 
 def parse_serve_components(components: list[str]) -> tuple[bool, bool]:
@@ -140,8 +200,7 @@ def run_dashboard(
     if dev:
         os.environ["ASPARA_DEV_MODE"] = "1"
 
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
@@ -175,8 +234,7 @@ def run_tui(data_dir: str | None = None) -> None:
     Args:
         data_dir: Data directory. Defaults to XDG-based default (~/.local/share/aspara)
     """
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     print("Starting Aspara TUI...")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -218,8 +276,7 @@ def run_tracker(
     if storage_backend is not None:
         os.environ["ASPARA_STORAGE_BACKEND"] = storage_backend
 
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
@@ -281,8 +338,7 @@ def run_serve(
         port = get_default_port(enable_dashboard, enable_tracker)
 
     # Configure data directory
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
@@ -322,7 +378,7 @@ def _list_projects(data_dir: str | None) -> None:
     """Print all projects and their run counts."""
     from aspara.catalog import ProjectCatalog
 
-    resolved_dir = data_dir or str(get_data_dir())
+    resolved_dir = _resolve_and_validate_data_dir(data_dir, require_writable=False)
     catalog = ProjectCatalog(resolved_dir)
     projects = catalog.get_projects()
 
@@ -346,7 +402,7 @@ def _list_runs(project: str, data_dir: str | None) -> int:
     """
     from aspara.catalog import ProjectCatalog, RunCatalog
 
-    resolved_dir = data_dir or str(get_data_dir())
+    resolved_dir = _resolve_and_validate_data_dir(data_dir, require_writable=False)
     project_catalog = ProjectCatalog(resolved_dir)
     if not project_catalog.exists(project):
         print(f"Project '{project}' not found in {resolved_dir}")

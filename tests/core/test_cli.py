@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aspara.cli import _get_version, find_available_port, get_default_port, main, parse_serve_components
+from aspara.cli import _get_version, _resolve_and_validate_data_dir, find_available_port, get_default_port, main, parse_serve_components
 
 
 class TestParseServeComponents:
@@ -284,3 +284,89 @@ class TestRunsList:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code != 0
+
+
+class TestResolveAndValidateDataDir:
+    """Tests for _resolve_and_validate_data_dir()."""
+
+    def test_none_falls_back_to_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When data_dir is None, falls back to get_data_dir()."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        result = _resolve_and_validate_data_dir(None, require_writable=True)
+        assert result == str(tmp_path)
+
+    def test_existing_writable_dir(self, tmp_path: Path) -> None:
+        """An existing writable directory passes all checks."""
+        result = _resolve_and_validate_data_dir(str(tmp_path), require_writable=True)
+        assert result == str(tmp_path.resolve())
+
+    def test_nonexistent_dir_with_existing_parent(self, tmp_path: Path) -> None:
+        """A nonexistent dir under an existing parent is accepted (will be created)."""
+        target = tmp_path / "new_data_dir"
+        result = _resolve_and_validate_data_dir(str(target), require_writable=True)
+        assert result == str(target.resolve())
+
+    def test_nonexistent_parent_exits_nonzero(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A path whose parent does not exist causes sys.exit(1)."""
+        target = tmp_path / "nonexistent_parent" / "data_dir"
+        with pytest.raises(SystemExit) as exc_info:
+            _resolve_and_validate_data_dir(str(target), require_writable=False)
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "parent does not exist" in captured.out
+
+    def test_unwritable_dir_exits_nonzero(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A directory without write permission causes sys.exit(1)."""
+        import os
+
+        read_only = tmp_path / "readonly"
+        read_only.mkdir()
+        os.chmod(str(read_only), 0o555)  # r-xr-xr-x
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                _resolve_and_validate_data_dir(str(read_only), require_writable=True)
+            assert exc_info.value.code == 1
+            captured = capsys.readouterr()
+            assert "not writable" in captured.out
+        finally:
+            os.chmod(str(read_only), 0o755)  # restore for cleanup
+
+    def test_forbidden_system_path_exits_nonzero(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A forbidden system path causes sys.exit(1)."""
+        with pytest.raises(SystemExit) as exc_info:
+            _resolve_and_validate_data_dir("/etc", require_writable=False)
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "system directory" in captured.out
+
+    def test_require_writable_false_skips_write_test(self, tmp_path: Path) -> None:
+        """require_writable=False skips the write test (read-only commands)."""
+        import os
+
+        read_only = tmp_path / "readonly"
+        read_only.mkdir()
+        os.chmod(str(read_only), 0o555)
+        try:
+            # Should not raise — write test is skipped
+            result = _resolve_and_validate_data_dir(str(read_only), require_writable=False)
+            assert result == str(read_only.resolve())
+        finally:
+            os.chmod(str(read_only), 0o755)
+
+    def test_expands_user_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """~ in the path is expanded."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        target = "~/aspara_data"
+        result = _resolve_and_validate_data_dir(target, require_writable=False)
+        assert result == str((tmp_path / "aspara_data").resolve())
