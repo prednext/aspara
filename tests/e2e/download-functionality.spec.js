@@ -1,16 +1,16 @@
 /**
- * チャートダウンロード機能のE2Eテスト
- * 実ブラウザでの実際のユーザー操作をテスト
+ * E2E tests for chart download functionality
+ * Tests actual user operations in a real browser
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
-// TODO: E2Eテストを実際のUI構造に合わせて書き直す必要がある
+// TODO: E2E tests need to be rewritten to match the actual UI structure
 test.describe.skip('Chart Download E2E Tests', () => {
   test.beforeEach(async ({ page }) => {
-    // ダウンロードフォルダをクリア
+    // Clear the download folder
     const downloadPath = path.join(process.cwd(), 'test-downloads');
     if (fs.existsSync(downloadPath)) {
       fs.rmSync(downloadPath, { recursive: true });
@@ -20,38 +20,38 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
   test.describe('Run Detail Chart Downloads', () => {
     test('should download CSV data from run detail chart', async ({ page }) => {
-      // run detail画面に移動
+      // Navigate to the run detail page
       await page.goto('/projects/default/runs/test_run');
 
-      // チャートが読み込まれるまで待機
+      // Wait for the chart to load
       await page.waitForSelector('.metric-chart', { timeout: 10000 });
 
-      // 最初のチャートのダウンロードボタンを探す
+      // Find the download button on the first chart
       const firstChart = page.locator('.metric-chart').first();
       const downloadButton = firstChart.locator('button[title="Download data"]');
 
-      // ダウンロードボタンが表示されることを確認
+      // Verify the download button is visible
       await expect(downloadButton).toBeVisible();
 
-      // ダウンロードメニューを開く
+      // Open the download menu
       await downloadButton.click();
 
-      // CSV形式を選択
+      // Select CSV format
       const downloadPromise = page.waitForDownload();
       await page.click('text=CSV形式');
 
       const download = await downloadPromise;
 
-      // ダウンロードファイルの確認
+      // Verify the downloaded file
       expect(download.suggestedFilename()).toMatch(/\.csv$/);
 
-      // ダウンロードファイルの内容を確認
+      // Verify the contents of the downloaded file
       const downloadPath = path.join(process.cwd(), 'test-downloads', download.suggestedFilename());
       await download.saveAs(downloadPath);
 
       const csvContent = fs.readFileSync(downloadPath, 'utf8');
       expect(csvContent).toContain('series,step,value');
-      expect(csvContent.split('\n').length).toBeGreaterThan(1); // ヘッダー以外のデータがある
+      expect(csvContent.split('\n').length).toBeGreaterThan(1); // has data beyond the header
     });
 
     test('should download SVG image from run detail chart', async ({ page }) => {
@@ -70,7 +70,7 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
       expect(download.suggestedFilename()).toMatch(/\.svg$/);
 
-      // SVGファイルの内容確認
+      // Verify the SVG file contents
       const downloadPath = path.join(process.cwd(), 'test-downloads', download.suggestedFilename());
       await download.saveAs(downloadPath);
 
@@ -95,7 +95,7 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
       expect(download.suggestedFilename()).toMatch(/\.png$/);
 
-      // PNGファイルのサイズ確認（0バイトでないことを確認）
+      // Verify the PNG file size (confirm it is not 0 bytes)
       const downloadPath = path.join(process.cwd(), 'test-downloads', download.suggestedFilename());
       await download.saveAs(downloadPath);
 
@@ -108,17 +108,17 @@ test.describe.skip('Chart Download E2E Tests', () => {
     test('should download multi-run comparison as CSV', async ({ page }) => {
       await page.goto('/projects/default');
 
-      // ランを選択
+      // Select runs
       await page.check('[data-run-name="run_1"]');
       await page.check('[data-run-name="run_2"]');
 
-      // 比較ボタンをクリック
+      // Click the compare button
       await page.click('#compareButton');
 
-      // 比較チャートが表示されるまで待機
+      // Wait for the comparison chart to appear
       await page.waitForSelector('.chart-container');
 
-      // 最初の比較チャートのダウンロードボタン
+      // Download button on the first comparison chart
       const firstChart = page.locator('.chart-container').first();
       const downloadButton = firstChart.locator('button[title="Download data"]');
 
@@ -131,7 +131,7 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
       expect(download.suggestedFilename()).toMatch(/\.csv$/);
 
-      // マルチランデータの確認
+      // Verify multi-run data
       const downloadPath = path.join(process.cwd(), 'test-downloads', download.suggestedFilename());
       await download.saveAs(downloadPath);
 
@@ -172,14 +172,14 @@ test.describe.skip('Chart Download E2E Tests', () => {
       const firstChart = page.locator('.metric-chart').first();
       const canvas = firstChart.locator('canvas');
 
-      // チャートをズーム（ドラッグ操作をシミュレート）
+      // Zoom the chart (simulate a drag operation)
       const canvasBox = await canvas.boundingBox();
       await page.mouse.move(canvasBox.x + 50, canvasBox.y + 50);
       await page.mouse.down();
       await page.mouse.move(canvasBox.x + 200, canvasBox.y + 150);
       await page.mouse.up();
 
-      // ズーム後にダウンロード
+      // Download after zooming
       const downloadButton = firstChart.locator('button[title="Download data"]');
       await downloadButton.click();
 
@@ -188,7 +188,7 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
       const download = await downloadPromise;
 
-      // ファイル名に"_zoomed"が含まれることを確認
+      // Verify the filename contains "_zoomed"
       expect(download.suggestedFilename()).toContain('_zoomed');
       expect(download.suggestedFilename()).toMatch(/\.svg$/);
     });
@@ -196,22 +196,22 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
   test.describe('Download Error Handling', () => {
     test('should handle download when no data is available', async ({ page }) => {
-      // データのないrun detail画面をシミュレート
+      // Simulate a run detail page with no data
       await page.goto('/projects/default/runs/empty_run');
 
-      // エラーメッセージまたは"データなし"メッセージが表示されることを確認
+      // Verify an error message or "no data" message is shown
       await expect(page.locator('text=メトリクスが記録されていません')).toBeVisible({ timeout: 10000 });
     });
 
     test('should handle network errors gracefully', async ({ page }) => {
-      // ネットワークエラーをシミュレート
+      // Simulate a network error
       await page.route('/api/dashboard/**', (route) => {
         route.abort('failed');
       });
 
       await page.goto('/projects/default/runs/test_run');
 
-      // エラーメッセージが表示されることを確認
+      // Verify an error message is shown
       await expect(page.locator('text=エラーが発生しました')).toBeVisible({ timeout: 10000 });
     });
   });
@@ -224,15 +224,15 @@ test.describe.skip('Chart Download E2E Tests', () => {
       const firstChart = page.locator('.metric-chart').first();
       const downloadButton = firstChart.locator('button[title="Download data"]');
 
-      // メニューが初期状態では非表示
+      // Menu is hidden in the initial state
       const downloadMenu = firstChart.locator('.download-menu');
       await expect(downloadMenu).toBeHidden();
 
-      // ボタンクリックでメニューが表示
+      // Clicking the button shows the menu
       await downloadButton.click();
       await expect(downloadMenu).toBeVisible();
 
-      // メニュー外クリックで非表示
+      // Clicking outside the menu hides it
       await page.click('body');
       await expect(downloadMenu).toBeHidden();
     });
@@ -246,7 +246,7 @@ test.describe.skip('Chart Download E2E Tests', () => {
 
       await downloadButton.click();
 
-      // メニューオプションの確認
+      // Verify menu options
       await expect(page.locator('text=CSV形式')).toBeVisible();
       await expect(page.locator('text=SVG画像')).toBeVisible();
       await expect(page.locator('text=PNG画像')).toBeVisible();

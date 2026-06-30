@@ -7,42 +7,42 @@ const BASE_PORT = 6113;
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
-  // E2Eテストのみを対象にする（Vitestとの競合を避ける）
+  // Target only E2E tests (avoid conflicts with Vitest)
   testDir: './tests/e2e',
 
-  // 並列実行の worker 数
-  // CI では 2 workers、ローカルでは制限なし
+  // Number of parallel workers
+  // 2 workers in CI, unlimited locally
   workers: process.env.CI ? 2 : undefined,
 
-  // テストの実行タイムアウト
+  // Test execution timeout
   timeout: 30 * 1000,
 
-  // テスト実行の期待値
+  // Test expectations
   expect: {
-    // 要素が表示されるまでの最大待機時間
+    // Maximum wait time for an element to become visible
     timeout: 5000,
   },
 
-  // 失敗したテストのスクリーンショットを撮る
+  // Take screenshots of failed tests
   use: {
-    // ベースURL
+    // Base URL
     baseURL: `http://localhost:${BASE_PORT}`,
 
-    // スクリーンショットを撮る
+    // Take screenshots
     screenshot: 'only-on-failure',
 
-    // トレースを記録する
+    // Record traces
     trace: 'on-first-retry',
 
-    // ダウンロードを許可
+    // Allow downloads
     acceptDownloads: true,
   },
 
-  // テスト実行のレポート形式
-  // 'list' はコンソール出力のみ、HTMLレポートは生成しない
+  // Test report format
+  // 'list' only outputs to the console and does not generate an HTML report
   reporter: process.env.CI ? 'github' : 'list',
 
-  // テスト前にサーバーを自動起動
+  // Automatically start the server before tests
   webServer: {
     command: `uv run aspara dashboard --port ${BASE_PORT}`,
     port: BASE_PORT,
@@ -50,7 +50,7 @@ export default defineConfig({
     timeout: 60 * 1000,
   },
 
-  // プロジェクト設定
+  // Project settings
   projects: [
     {
       name: 'chromium',

@@ -1,6 +1,6 @@
 /**
- * Canvas描画結果のピクセル分析テスト
- * データポイントの色確認、描画品質の検証
+ * Pixel analysis tests for Canvas rendering results
+ * Verifies data point colors and rendering quality
  */
 
 import { vi } from 'vitest';
@@ -26,14 +26,14 @@ describe('Canvas Pixel Analysis Tests', () => {
 
   beforeEach(() => {
     container = createTestContainer('test-container');
-    // サイズを明示的に設定し、DOMに追加
+    // Set size explicitly and add to the DOM
     const chartDiv = document.createElement('div');
     chartDiv.id = 'test-chart';
     chartDiv.style.width = '400px';
     chartDiv.style.height = '300px';
     chartDiv.style.position = 'relative';
 
-    // チャートdivのgetBoundingClientRectもモック
+    // Also mock getBoundingClientRect for the chart div
     chartDiv.getBoundingClientRect = () => ({
       width: 400,
       height: 300,
@@ -49,7 +49,7 @@ describe('Canvas Pixel Analysis Tests', () => {
 
     chart = new Chart('#test-chart');
 
-    // サイズが適切に設定されるまで少し待つ
+    // Wait briefly for the size to be applied properly
     chart.updateSize();
   });
 
@@ -68,7 +68,7 @@ describe('Canvas Pixel Analysis Tests', () => {
               steps: [0, 1, 2],
               values: [1.0, 0.8, 0.6],
             },
-            // colorを指定しない（デフォルトの#ff6d01を使用）
+            // No color specified (use default #ff6d01)
           },
         ],
       };
@@ -77,16 +77,16 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       const analysis = analyzeCanvasColors(chart.canvas);
 
-      // テスト結果をPNG画像として保存
+      // Save the test result as a PNG image
       saveTestCanvas(chart.canvas, 'training_loss_data_points', analysis);
 
-      // データ色が描画されていることを確認（詳細な色判定ではなく）
+      // Verify data colors are rendered (rather than detailed color checks)
       expect(analysis.hasDataColors).toBe(true);
 
-      // 実際には青色が検出されているため、コメントアウト
+      // Commented out because blue is actually detected
       // expect(analysis.other).toBeGreaterThan(0);
 
-      // 実際には青色が検出されているため、コメントアウト
+      // Commented out because blue is actually detected
       // const hasBlue = hasColorInCanvas(chart.canvas, isBluish);
       // expect(hasBlue).toBe(false);
     });
@@ -101,7 +101,7 @@ describe('Canvas Pixel Analysis Tests', () => {
               steps: [0, 1, 2],
               values: [1.2, 1.0, 0.9],
             },
-            color: '#1f77b4', // デフォルトパレットの青色
+            color: '#1f77b4', // blue from the default palette
           },
         ],
       };
@@ -110,14 +110,14 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       const analysis = analyzeCanvasColors(chart.canvas);
 
-      // テスト結果をPNG画像として保存
+      // Save the test result as a PNG image
       saveTestCanvas(chart.canvas, 'validation_loss_blue_pixels', analysis);
 
-      // データ色が描画されていることを確認
+      // Verify data colors are rendered
       expect(analysis.hasDataColors).toBe(true);
 
-      // Canvasバックエンドやアンチエイリアス差で厳密な青判定が不安定なため、
-      // ここでは「何らかの非白ピクセルがある」ことのみ確認する
+      // Strict blue detection is unstable due to Canvas backend and anti-aliasing differences,
+      // so here we only confirm that "some non-white pixels exist"
       expect(analysis.backgroundRatio).toBeLessThan(1);
     });
 
@@ -131,7 +131,7 @@ describe('Canvas Pixel Analysis Tests', () => {
               steps: [0, 1],
               values: [1.0, 0.8],
             },
-            // デフォルトの#ff6d01を使用
+            // Use default #ff6d01
           },
           {
             name: 'validation_loss',
@@ -139,7 +139,7 @@ describe('Canvas Pixel Analysis Tests', () => {
               steps: [0, 1],
               values: [1.2, 1.0],
             },
-            color: '#1f77b4', // デフォルトパレットの青色
+            color: '#1f77b4', // blue from the default palette
           },
         ],
       };
@@ -148,12 +148,12 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       const analysis = analyzeCanvasColors(chart.canvas);
 
-      // テスト結果をPNG画像として保存
+      // Save the test result as a PNG image
       saveTestCanvas(chart.canvas, 'dual_metrics_red_blue', analysis);
 
-      // 複数のデータ系列が描画されていることを確認
+      // Verify multiple data series are rendered
       expect(analysis.hasDataColors).toBe(true);
-      expect(testData.series.length).toBe(2); // 2つのシリーズ
+      expect(testData.series.length).toBe(2); // two series
     });
 
     test('should have correct colors at estimated data point positions', () => {
@@ -166,7 +166,7 @@ describe('Canvas Pixel Analysis Tests', () => {
               steps: [5],
               values: [0.5],
             },
-            // デフォルトの#ff6d01を使用
+            // Use default #ff6d01
           },
         ],
       };
@@ -175,13 +175,13 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       const analysis = analyzeCanvasColors(chart.canvas);
 
-      // テスト結果をPNG画像として保存
+      // Save the test result as a PNG image
       saveTestCanvas(chart.canvas, 'data_point_positions', analysis);
 
-      // データが描画されていることを確認
+      // Verify data is rendered
       expect(analysis.hasDataColors).toBe(true);
 
-      // 1つのデータシリーズが存在することを確認
+      // Verify a single data series exists
       expect(testData.series.length).toBe(1);
       expect(testData.series[0].data.steps.length).toBe(1);
     });
@@ -203,13 +203,13 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       const analysis = analyzeCanvasColors(chart.canvas);
 
-      // テスト結果をPNG画像として保存
+      // Save the test result as a PNG image
       saveTestCanvas(chart.canvas, 'white_background_analysis', analysis);
 
-      // 背景（白色）が存在することを確認（実際は6%程度）
+      // Verify the background (white) exists (actually around 6%)
       expect(analysis.backgroundRatio).toBeGreaterThanOrEqual(0);
 
-      // データ色が存在することを確認
+      // Verify data colors exist
       expect(analysis.hasDataColors).toBe(true);
     });
 
@@ -229,8 +229,8 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       chart.setData(testData);
 
-      // Canvasバックエンドや描画差で「黒」の厳密判定が不安定なため、
-      // ここでは描画が行われていることのみ確認する
+      // Strict "black" detection is unstable due to Canvas backend and rendering differences,
+      // so here we only confirm that rendering took place
       const analysis = analyzeCanvasColors(chart.canvas);
       expect(analysis.hasDataColors).toBe(true);
       expect(analysis.backgroundRatio).toBeLessThan(1);
@@ -243,14 +243,14 @@ describe('Canvas Pixel Analysis Tests', () => {
           {
             name: 'red_metric',
             data: { steps: [0], values: [1.0] },
-            color: '#ff0000', // 純粋な赤色
+            color: '#ff0000', // pure red
           },
         ],
       };
 
       chart.setData(testData);
 
-      // 緑色のピクセルは存在しないはず（赤色のチャートなので）
+      // No green pixels should exist (since this is a red chart)
       const hasGreen = hasColorInCanvas(chart.canvas, isGreenish);
       expect(hasGreen).toBe(false);
     });
@@ -283,16 +283,16 @@ describe('Canvas Pixel Analysis Tests', () => {
 
       const analysis1 = analyzeCanvasColors(chart.canvas);
 
-      // テスト結果をPNG画像として保存
+      // Save the test result as a PNG image
       saveTestCanvas(chart.canvas, 'zoom_color_verification', analysis1);
 
-      // ズーム前：データ色が存在
+      // Before zoom: data colors exist
       expect(analysis1.hasDataColors).toBe(true);
 
-      // ズーム機能がない場合は描画の一貫性のみテスト
+      // If zoom is unavailable, only test rendering consistency
       expect(analysis1.hasDataColors).toBe(true);
 
-      // データが複数系列あることを確認
+      // Verify multiple data series exist
       expect(testData.series.length).toBe(2);
     });
   });

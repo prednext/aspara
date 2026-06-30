@@ -294,7 +294,7 @@ describe('Performance: Binary search', () => {
       console.log('Scalability test (binary search):');
       console.log(`  Both ${smallCount} and ${largeCount} points are too fast to measure - excellent!`);
     } else {
-      expect(timeRatio).toBeLessThan(20); // CI環境での変動を許容 (O(log n)なので100xにはならない)
+      expect(timeRatio).toBeLessThan(20); // Allow for CI environment variance (won't be 100x since it's O(log n))
 
       console.log('Scalability test (binary search):');
       console.log(`  ${smallCount} points: ${smallTime.toFixed(4)}ms`);

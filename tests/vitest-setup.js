@@ -87,7 +87,7 @@ export const createTestContainer = (id = 'test-container') => {
   container.style.top = '0px';
   container.style.left = '0px';
 
-  // getBoundingClientRectをモック
+  // Mock getBoundingClientRect
   container.getBoundingClientRect = () => ({
     width: 600,
     height: 400,
@@ -119,7 +119,7 @@ export const generateTestMetricsData = (seriesCount = 2, pointsPerSeries = 10) =
     for (let i = 0; i < pointsPerSeries; i++) {
       data.push({
         step: i,
-        value: Math.random() * 0.5 + 0.25, // 0.25-0.75の範囲
+        value: Math.random() * 0.5 + 0.25, // range 0.25-0.75
         timestamp: new Date(Date.now() + i * 1000).toISOString(),
       });
     }

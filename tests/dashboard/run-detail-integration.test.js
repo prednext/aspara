@@ -1,6 +1,6 @@
 /**
- * run-detail.js の統合テスト
- * RunDetailクラスのメソッドをテスト
+ * Integration tests for run-detail.js
+ * Tests methods of the RunDetail class
  */
 
 import { vi } from 'vitest';

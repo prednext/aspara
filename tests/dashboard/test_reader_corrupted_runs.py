@@ -19,7 +19,7 @@ class TestMetricsReaderCorruptedRuns:
             project_dir = logs_dir / "test_project"
             project_dir.mkdir(parents=True)
 
-            # 空のRunファイルを作成
+            # Create an empty Run file
             empty_run_file = project_dir / "empty_run.jsonl"
             empty_run_file.touch()
 

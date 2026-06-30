@@ -1,6 +1,6 @@
 /**
- * project-detail.js の統合テスト
- * 実際のChartインスタンス作成と連携をテスト
+ * Integration tests for project-detail.js
+ * Tests interaction with actual Chart instance creation
  */
 
 import { encode as msgpackEncode } from '@msgpack/msgpack';
@@ -9,7 +9,7 @@ import { convertToChartFormat } from '../../src/aspara/dashboard/static/js/metri
 import { ProjectDetail } from '../../src/aspara/dashboard/static/js/pages/project-detail.js';
 import { cleanupTestContainer, createTestContainer } from '../vitest-setup.js';
 
-// 外部依存のみをモック
+// Mock only external dependencies
 global.fetch = vi.fn();
 
 describe('ProjectMetrics Integration', () => {
@@ -44,7 +44,7 @@ describe('ProjectMetrics Integration', () => {
       <div id="chartControls" class="hidden"></div>
     `;
 
-    // fetchのモック設定 (metric-first delta-compressed array format)
+    // fetch mock setup (metric-first delta-compressed array format)
     const responseData = {
       project: 'test_project',
       metrics: {
@@ -83,7 +83,7 @@ describe('ProjectMetrics Integration', () => {
       arrayBuffer: () => Promise.resolve(arrayBuffer),
     });
 
-    // URL mockを設定
+    // Set up URL mock
     Object.defineProperty(window, 'location', {
       value: {
         pathname: '/projects/test_project',
@@ -102,7 +102,7 @@ describe('ProjectMetrics Integration', () => {
 
   describe('Chart Instance Creation', () => {
     test('ProjectDetail should create Chart instances for each metric', async () => {
-      // ランを選択
+      // Select runs
       const checkbox1 = document.querySelector('.run-checkbox[data-run-name="run_1"]');
       const checkbox2 = document.querySelector('.run-checkbox[data-run-name="run_2"]');
 
@@ -113,10 +113,10 @@ describe('ProjectMetrics Integration', () => {
 
       await projectDetail.showMetrics();
 
-      // API呼び出しが正しく行われることを確認
+      // Verify the API call is made correctly
       expect(fetch).toHaveBeenCalledWith('/api/projects/test_project/runs/metrics?runs=run_1%2Crun_2&format=msgpack');
 
-      // チャートが実際に作成されることを確認
+      // Verify charts are actually created
       const chartsContainer = document.getElementById('chartsContainer');
       const chartContainers = chartsContainer.querySelectorAll('.bg-base-surface');
       expect(chartContainers.length).toBe(2); // training_loss, accuracy
@@ -357,7 +357,7 @@ describe('ProjectMetrics Integration', () => {
       const chartsContainer = document.getElementById('chartsContainer');
       const chartContainers = chartsContainer.querySelectorAll('.bg-base-surface');
 
-      // チャートコンテナが作成されることを確認
+      // Verify chart containers are created
       expect(chartContainers.length).toBe(2);
 
       const chartTitles = Array.from(chartsContainer.querySelectorAll('h3')).map((h) => h.textContent);
@@ -370,7 +370,7 @@ describe('ProjectMetrics Integration', () => {
       projectDetail.dataService.metricsCache = {};
       projectDetail.dataService.cachedRuns.clear();
 
-      // APIエラーをシミュレート
+      // Simulate an API error
       const errorResponse = { error: 'API Error occurred' };
       const encoded = msgpackEncode(errorResponse);
       const arrayBuffer = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength);
@@ -383,7 +383,7 @@ describe('ProjectMetrics Integration', () => {
       await projectDetail.showMetrics();
 
       const noDataState = document.getElementById('noDataState');
-      // エラー時には noDataState が表示されることを確認
+      // Verify noDataState is shown on error
       expect(noDataState.classList.contains('hidden')).toBe(false);
     });
 

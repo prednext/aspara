@@ -1,12 +1,12 @@
 /**
- * Chart ビジネスロジックの単体テスト
- * Canvas描画やDOM操作を除いた純粋なロジックをテスト
+ * Unit tests for Chart business logic
+ * Tests pure logic excluding Canvas rendering and DOM manipulation
  */
 
 import { vi } from 'vitest';
 import { Chart } from '../../src/aspara/dashboard/static/js/chart.js';
 
-// ブラウザAPIのモック（ロジックテストに必要な最小限）
+// Mock browser APIs (minimum required for logic tests)
 let mockBlob;
 let mockURL;
 let mockLink;
@@ -65,10 +65,10 @@ describe('Chart Business Logic', () => {
         ],
       };
 
-      // モック環境でChartのCSV生成ロジックを直接テスト
+      // Directly test the Chart CSV generation logic in a mock environment
       const chart = { data: testData };
 
-      // CSV生成の実際のロジック（BasicChartから抽出）
+      // Actual CSV generation logic (extracted from BasicChart)
       let csvContent = 'series,step,value\n';
       for (const series of chart.data.series) {
         for (const point of series.data) {
@@ -125,7 +125,7 @@ describe('Chart Business Logic', () => {
     test('should generate filename from chart title', () => {
       const testData = { title: 'Training Metrics' };
 
-      // ファイル名生成ロジック（Chartから抽出）
+      // Filename generation logic (extracted from Chart)
       const generateFilename = (data, extension = 'csv') => {
         if (data.title) {
           return `${data.title.toLowerCase().replace(/[^a-z0-9]/g, '_')}.${extension}`;
@@ -220,7 +220,7 @@ describe('Chart Business Logic', () => {
         PNG: vi.fn(),
       };
 
-      // フォーマット分岐ロジック（Chartから抽出）
+      // Format routing logic (extracted from Chart)
       const routeDownload = (format) => {
         switch (format) {
           case 'CSV':

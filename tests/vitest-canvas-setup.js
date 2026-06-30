@@ -1,6 +1,6 @@
 /**
- * Vitest用のCanvas設定
- * @napi-rs/canvasを使ってテスト環境でCanvas APIを利用可能にする
+ * Canvas setup for Vitest
+ * Uses @napi-rs/canvas to enable the Canvas API in the test environment
  */
 
 import { vi } from 'vitest';
@@ -8,12 +8,12 @@ import { vi } from 'vitest';
 let createCanvas;
 let createImageData;
 try {
-  // ESMでの動的インポート（Vitestでサポート）
+  // Dynamic import for ESM (supported by Vitest)
   const canvas = await import('canvas');
   createCanvas = canvas.createCanvas;
   createImageData = canvas.createImageData;
 
-  // グローバルなCanvas APIを設定
+  // Configure the global Canvas API
   global.HTMLCanvasElement = class HTMLCanvasElement {
     constructor() {
       this.width = 300;
@@ -64,7 +64,7 @@ try {
 } catch (e) {
   console.warn('Failed to load @napi-rs/canvas, falling back to mock Canvas');
 
-  // フォールバック用のモック（軽量版）
+  // Fallback mock (lightweight version)
   global.HTMLCanvasElement = class HTMLCanvasElement {
     constructor() {
       this.width = 300;
