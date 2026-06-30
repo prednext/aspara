@@ -127,8 +127,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Aspara Dashboard",
     description="Real-time metrics visualization for machine learning experiments",
-    docs_url="/docs/dashboard",  # /docs/dashboard としてアクセスできるようにする
-    redoc_url=None,  # ReDocは使わない
+    docs_url="/docs/dashboard" if is_dev_mode() else None,
+    redoc_url=None,
     lifespan=lifespan,
 )
 

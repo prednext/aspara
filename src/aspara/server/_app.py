@@ -10,6 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+from aspara.config import is_dev_mode
+
 app = FastAPI(
     title="Aspara",
     description="A metrics tracker system for computer based experiments",
@@ -66,107 +68,112 @@ def should_mount_dashboard() -> bool:
     return True  # Backward compat: mount if available
 
 
-@app.get("/docs", response_class=HTMLResponse)
-async def docs_page(request: Request) -> HTMLResponse:
-    """Root endpoint - displays links to documentation
+if is_dev_mode():
 
-    Args:
-        request: Request object
+    @app.get("/docs", response_class=HTMLResponse)
+    async def docs_page(request: Request) -> HTMLResponse:
+        """Root endpoint - displays links to documentation
 
-    Returns:
-        HTMLResponse: HTML containing links to documentation
-    """
-    tracker_available = is_module_available("aspara.tracker.main")
-    dashboard_available = is_module_available("aspara.dashboard.main")
+        Only available in development mode to avoid leaking endpoint
+        information in production deployments.
 
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Aspara - Documentation</title>
-        <style>
-            body {
-                font-family: 'Inter', 'Noto Sans JP', sans-serif;
-                background-color: #f5f5f5;
-                color: #212121;
-                line-height: 1.6;
-                padding: 2rem;
-                max-width: 800px;
-                margin: 0 auto;
-            }
-            h1 {
-                color: #2e639f;
-                margin-bottom: 1.5rem;
-            }
-            .card {
-                background-color: white;
-                padding: 1.5rem;
-                margin-bottom: 1.5rem;
-            }
-            .card h2 {
-                margin-top: 0;
-                color: #2e639f;
-            }
-            a {
-                color: #2e639f;
-                text-decoration: none;
-            }
-            a:hover {
-                text-decoration: underline;
-            }
-            .not-available {
-                color: #9e9e9e;
-                font-style: italic;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Aspara Documentation</h1>
+        Args:
+            request: Request object
 
-        <div class="card">
-            <h2>Aspara Tracker API</h2>
-    """
-
-    if tracker_available:
-        html_content += """
-            <p>Web API for recording and managing experiment metrics</p>
-            <p><a href="/docs/tracker">Tracker API Documentation</a> - API documentation based on OpenAPI specification</p>
-            <p><a href="/tracker/redoc">Tracker API ReDoc</a> - Alternative API documentation</p>
+        Returns:
+            HTMLResponse: HTML containing links to documentation
         """
-    else:
-        html_content += """
-            <p class="not-available">Tracker API is not installed</p>
-            <p>To install: <code>uv pip install "aspara[tracker]"</code></p>
+        tracker_available = is_module_available("aspara.tracker.main")
+        dashboard_available = is_module_available("aspara.dashboard.main")
+
+        html_content = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Aspara - Documentation</title>
+            <style>
+                body {
+                    font-family: 'Inter', 'Noto Sans JP', sans-serif;
+                    background-color: #f5f5f5;
+                    color: #212121;
+                    line-height: 1.6;
+                    padding: 2rem;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+                h1 {
+                    color: #2e639f;
+                    margin-bottom: 1.5rem;
+                }
+                .card {
+                    background-color: white;
+                    padding: 1.5rem;
+                    margin-bottom: 1.5rem;
+                }
+                .card h2 {
+                    margin-top: 0;
+                    color: #2e639f;
+                }
+                a {
+                    color: #2e639f;
+                    text-decoration: none;
+                }
+                a:hover {
+                    text-decoration: underline;
+                }
+                .not-available {
+                    color: #9e9e9e;
+                    font-style: italic;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Aspara Documentation</h1>
+
+            <div class="card">
+                <h2>Aspara Tracker API</h2>
         """
 
-    html_content += """
-        </div>
+        if tracker_available:
+            html_content += """
+                <p>Web API for recording and managing experiment metrics</p>
+                <p><a href="/docs/tracker">Tracker API Documentation</a> - API documentation based on OpenAPI specification</p>
+                <p><a href="/tracker/redoc">Tracker API ReDoc</a> - Alternative API documentation</p>
+            """
+        else:
+            html_content += """
+                <p class="not-available">Tracker API is not installed</p>
+                <p>To install: <code>uv pip install "aspara[tracker]"</code></p>
+            """
 
-        <div class="card">
-            <h2>Aspara Dashboard</h2>
-    """
-
-    if dashboard_available:
         html_content += """
-            <p>Web dashboard for visualizing experiment metrics</p>
-            <p><a href="/">Open Dashboard</a> - Metrics visualization interface</p>
-            <p><a href="/docs/dashboard">Dashboard API Documentation</a> - Dashboard API documentation</p>
+            </div>
+
+            <div class="card">
+                <h2>Aspara Dashboard</h2>
         """
-    else:
+
+        if dashboard_available:
+            html_content += """
+                <p>Web dashboard for visualizing experiment metrics</p>
+                <p><a href="/">Open Dashboard</a> - Metrics visualization interface</p>
+                <p><a href="/docs/dashboard">Dashboard API Documentation</a> - Dashboard API documentation</p>
+            """
+        else:
+            html_content += """
+                <p class="not-available">Dashboard is not installed</p>
+                <p>To install: <code>uv pip install "aspara[dashboard]"</code></p>
+            """
+
         html_content += """
-            <p class="not-available">Dashboard is not installed</p>
-            <p>To install: <code>uv pip install "aspara[dashboard]"</code></p>
+            </div>
+        </body>
+        </html>
         """
 
-    html_content += """
-        </div>
-    </body>
-    </html>
-    """
-
-    return HTMLResponse(content=html_content)
+        return HTMLResponse(content=html_content)
 
 
 if should_mount_tracker() and is_module_available("aspara.tracker.main"):
