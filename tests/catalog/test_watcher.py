@@ -621,3 +621,62 @@ class TestRunCatalogSubscribe:
         status_records = [r for r in records if isinstance(r, StatusRecord)]
         assert len(status_records) >= 1
         assert any(r.status == "completed" for r in status_records)
+
+
+class TestParseFilePathValidation:
+    """Tests for _parse_file_path() name validation in DataDirWatcher."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self):
+        """Reset singleton instance before and after each test."""
+        DataDirWatcher.reset_instance()
+        yield
+        DataDirWatcher.reset_instance()
+
+    def test_valid_metrics_file_parsed(self, tmp_path):
+        """Valid project/run names are parsed correctly."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / "project_a" / "run1.jsonl"
+        assert watcher._parse_file_path(path) == ("project_a", "run1", "metrics")
+
+    def test_valid_meta_file_parsed(self, tmp_path):
+        """Valid .meta.json file is parsed correctly."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / "project_a" / "run1.meta.json"
+        assert watcher._parse_file_path(path) == ("project_a", "run1", "meta")
+
+    def test_valid_wal_file_parsed(self, tmp_path):
+        """Valid .wal.jsonl file is parsed correctly."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / "project_a" / "run1.wal.jsonl"
+        assert watcher._parse_file_path(path) == ("project_a", "run1", "wal")
+
+    def test_hidden_project_dir_rejected(self, tmp_path):
+        """Hidden/reserved directories (e.g. .queue) must be rejected."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / ".queue" / "run1.jsonl"
+        assert watcher._parse_file_path(path) is None
+
+    def test_hidden_run_name_rejected(self, tmp_path):
+        """Run names starting with '.' must be rejected."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / "project_a" / ".hidden.jsonl"
+        assert watcher._parse_file_path(path) is None
+
+    def test_project_name_with_dot_rejected(self, tmp_path):
+        """Project names containing '.' must be rejected by validate_name."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / "proj.ect" / "run1.jsonl"
+        assert watcher._parse_file_path(path) is None
+
+    def test_run_name_with_dot_rejected(self, tmp_path):
+        """Run names containing '.' must be rejected by validate_name."""
+        watcher = DataDirWatcher(tmp_path)
+        path = tmp_path / "project_a" / "run..1.jsonl"
+        assert watcher._parse_file_path(path) is None
+
+    def test_path_outside_data_dir_rejected(self, tmp_path):
+        """Paths outside data_dir must be rejected."""
+        watcher = DataDirWatcher(tmp_path)
+        path = Path("/other/path/run1.jsonl")
+        assert watcher._parse_file_path(path) is None

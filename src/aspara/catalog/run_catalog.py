@@ -255,7 +255,7 @@ class RunCatalog:
 
         Returns:
             (project, run_name, file_type) where file_type is 'metrics', 'wal', or 'meta'
-            None if path doesn't match expected pattern
+            None if path doesn't match expected pattern or names are invalid
         """
         try:
             relative = file_path.relative_to(self.data_dir)
@@ -270,13 +270,27 @@ class RunCatalog:
         filename = parts[1]
 
         if filename.endswith(".wal.jsonl"):
-            return (project, filename[:-10], "wal")
+            run_name = filename[:-10]
+            file_type = "wal"
         elif filename.endswith(".meta.json"):
-            return (project, filename[:-10], "meta")
+            run_name = filename[:-10]
+            file_type = "meta"
         elif filename.endswith(".jsonl"):
-            return (project, filename[:-6], "metrics")
+            run_name = filename[:-6]
+            file_type = "metrics"
+        else:
+            return None
 
-        return None
+        # Validate project and run names so that reserved/hidden directories
+        # (e.g. .queue) or names with path-traversal characters are rejected
+        # at parse time rather than leaking into downstream consumers.
+        try:
+            validate_name(project, "project name")
+            validate_name(run_name, "run name")
+        except ValueError:
+            return None
+
+        return (project, run_name, file_type)
 
     def _read_run_info(self, project: str, run_name: str, run_file: Path) -> RunInfo:
         """Read run information from JSONL metrics file and metadata file.
