@@ -6,14 +6,13 @@ RESTful API endpoints using FastAPI APIRouter.
 import json
 import logging
 import os
-import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, UploadFile
 
-from aspara.config import get_data_dir, is_read_only
+from aspara.config import get_data_dir, get_resource_limits, is_read_only
 from aspara.models import MetricRecord
 from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.utils import validators
@@ -33,9 +32,6 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Maximum artifact file size (100MB)
-MAX_ARTIFACT_SIZE = 100 * 1024 * 1024
 
 router = APIRouter()
 
@@ -299,13 +295,6 @@ async def upload_artifact(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
 
-        # Check file size limit
-        if file.size and file.size > MAX_ARTIFACT_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large: {file.size} bytes (max: {MAX_ARTIFACT_SIZE} bytes)",
-            )
-
         # Set up artifacts directory
         data_dir = get_data_dir()
         base_dir = Path(data_dir)
@@ -319,14 +308,43 @@ async def upload_artifact(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
 
-        # Save uploaded file
-        with open(dest_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+        # Save uploaded file with streaming size enforcement.
+        # UploadFile.size may be None under chunked transfer encoding, so
+        # we cannot rely on it alone. Read in fixed-size chunks and track
+        # the cumulative bytes written; abort (and clean up the partial
+        # file) as soon as the limit is exceeded. The limit is the SSOT
+        # value from ResourceLimits.max_file_size (env-configurable via
+        # ASPARA_MAX_FILE_SIZE).
+        max_file_size = get_resource_limits().max_file_size
+        written = 0
+        chunk_size = 1 << 20  # 1 MiB
+        try:
+            with open(dest_path, "wb") as f:
+                while True:
+                    chunk = file.file.read(chunk_size)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_file_size:
+                        f.close()
+                        dest_path.unlink(missing_ok=True)
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File too large: exceeds limit of {max_file_size} bytes",
+                        )
+                    f.write(chunk)
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Clean up partial file on any write error
+            dest_path.unlink(missing_ok=True)
+            logger.error(f"Error writing artifact {artifact_name}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to write artifact") from e
 
         logger.info(f"Uploaded artifact: {artifact_name} to {project_name}/{run_name}")
 
         # Get file size
-        file_size = os.path.getsize(dest_path)
+        file_size = written
 
         # Prepare artifact metadata
         artifact_data = {

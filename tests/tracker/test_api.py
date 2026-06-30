@@ -485,6 +485,92 @@ class TestTrackerAPIIntegration:
         assert response.status_code == 400
         assert "Invalid category" in response.json()["detail"]
 
+    def test_upload_artifact_exceeds_size_limit(self, tmp_path, monkeypatch):
+        """Test that uploading an artifact exceeding the size limit returns 413."""
+        import sys
+
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        # Set a very small max file size for testing (10 bytes)
+        monkeypatch.setenv("ASPARA_MAX_FILE_SIZE", "10")
+        # Force reload of config by clearing cached limits
+        config_module = sys.modules["aspara.config"]
+        config_module._resource_limits = None
+
+        client = TestClient(app)
+
+        project = "test_project"
+        run_name = "test_run"
+
+        # Create run first
+        client.post(
+            f"/api/v1/projects/{project}/runs",
+            json={"name": run_name, "config": {}, "tags": [], "notes": ""},
+            headers=CSRF_HEADER,
+        )
+
+        # Upload artifact that exceeds the 10-byte limit
+        test_content = b"a" * 100
+        files = {"file": ("big_artifact.txt", io.BytesIO(test_content), "text/plain")}
+
+        response = client.post(
+            f"/api/v1/projects/{project}/runs/{run_name}/artifacts",
+            files=files,
+            headers=CSRF_HEADER,
+        )
+
+        assert response.status_code == 413
+        assert "too large" in response.json()["detail"].lower()
+
+        # Verify the partial file was cleaned up
+        artifact_path = tmp_path / project / run_name / "artifacts" / "big_artifact.txt"
+        assert not artifact_path.exists()
+
+        # Reset config cache so other tests get the default limits
+        config_module._resource_limits = None
+
+    def test_upload_artifact_within_size_limit(self, tmp_path, monkeypatch):
+        """Test that uploading an artifact within the size limit succeeds."""
+        import sys
+
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        # Set a small but sufficient max file size (100 bytes)
+        monkeypatch.setenv("ASPARA_MAX_FILE_SIZE", "100")
+        config_module = sys.modules["aspara.config"]
+        config_module._resource_limits = None
+
+        client = TestClient(app)
+
+        project = "test_project"
+        run_name = "test_run"
+
+        # Create run first
+        client.post(
+            f"/api/v1/projects/{project}/runs",
+            json={"name": run_name, "config": {}, "tags": [], "notes": ""},
+            headers=CSRF_HEADER,
+        )
+
+        # Upload artifact within the 100-byte limit
+        test_content = b"a" * 50
+        files = {"file": ("small_artifact.txt", io.BytesIO(test_content), "text/plain")}
+
+        response = client.post(
+            f"/api/v1/projects/{project}/runs/{run_name}/artifacts",
+            files=files,
+            headers=CSRF_HEADER,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["file_size"] == 50
+
+        # Verify file was saved
+        artifact_path = tmp_path / project / run_name / "artifacts" / "small_artifact.txt"
+        assert artifact_path.exists()
+        assert artifact_path.read_bytes() == test_content
+
+        # Reset config cache
+        config_module._resource_limits = None
+
     def test_update_config(self, tmp_path, monkeypatch):
         """Test updating config for an existing run."""
         monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
