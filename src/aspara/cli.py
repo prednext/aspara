@@ -171,6 +171,29 @@ def find_available_port(start_port: int = 3141, max_attempts: int = 100) -> int 
     return None
 
 
+def _warn_wildcard_host(host: str) -> None:
+    """Warn when binding to a wildcard address without read-only mode.
+
+    Binding to ``0.0.0.0`` or ``::`` exposes the server to the entire
+    network. Since Aspara has no authentication, anyone on the network
+    can read, modify, or delete all data. This helper prints a warning
+    recommending read-only mode in that case.
+
+    Args:
+        host: Host string passed via ``--host``
+    """
+    if host not in ("0.0.0.0", "::", ""):
+        return
+
+    print("WARNING: binding to a wildcard address exposes the server")
+    print("to the entire network. Aspara has no authentication, so")
+    print("anyone on the network can read, modify, or delete all data.")
+    if os.environ.get("ASPARA_READ_ONLY") != "1":
+        print("Consider enabling read-only mode:")
+        print("  ASPARA_READ_ONLY=1 aspara dashboard --host 0.0.0.0")
+    print()
+
+
 def run_dashboard(
     host: str = "127.0.0.1",
     port: int = 3141,
@@ -211,6 +234,7 @@ def run_dashboard(
 
     configure_data_dir(data_dir)
 
+    _warn_wildcard_host(host)
     print("Starting Aspara Dashboard server...")
     print(f"Access http://{host}:{port} in your browser!")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -280,6 +304,7 @@ def run_tracker(
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
+    _warn_wildcard_host(host)
     print("Starting Aspara Tracker API server...")
     print(f"Endpoint: http://{host}:{port}/tracker/api/v1")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -359,6 +384,7 @@ def run_serve(
     else:
         component_desc = "Tracker"
 
+    _warn_wildcard_host(host)
     print(f"Starting Aspara {component_desc} server...")
     print(f"Access http://{host}:{port} in your browser!")
     print(f"Data directory: {os.path.abspath(data_dir)}")

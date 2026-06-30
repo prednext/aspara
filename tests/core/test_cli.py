@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aspara.cli import _get_version, _resolve_and_validate_data_dir, find_available_port, get_default_port, main, parse_serve_components
+from aspara.cli import _get_version, _resolve_and_validate_data_dir, _warn_wildcard_host, find_available_port, get_default_port, main, parse_serve_components
 
 
 class TestParseServeComponents:
@@ -71,6 +71,70 @@ class TestGetDefaultPort:
 
     def test_neither_returns_3141(self) -> None:
         assert get_default_port(False, False) == 3141
+
+
+class TestWarnWildcardHost:
+    """Tests for _warn_wildcard_host()."""
+
+    def test_localhost_no_warning(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """127.0.0.1 should not produce any warning."""
+        _warn_wildcard_host("127.0.0.1")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_wildcard_ipv4_warns(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """0.0.0.0 should produce a security warning."""
+        _warn_wildcard_host("0.0.0.0")
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "wildcard" in captured.out
+
+    def test_wildcard_ipv6_warns(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """:: should produce a security warning."""
+        _warn_wildcard_host("::")
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+
+    def test_empty_string_warns(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Empty host string should produce a security warning."""
+        _warn_wildcard_host("")
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+
+    def test_readonly_mode_no_readonly_hint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When ASPARA_READ_ONLY=1, the read-only hint is omitted."""
+        monkeypatch.setenv("ASPARA_READ_ONLY", "1")
+        _warn_wildcard_host("0.0.0.0")
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "read-only" not in captured.out.lower()
+
+    def test_write_mode_shows_readonly_hint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """When not read-only, the hint to enable read-only is shown."""
+        monkeypatch.delenv("ASPARA_READ_ONLY", raising=False)
+        _warn_wildcard_host("0.0.0.0")
+        captured = capsys.readouterr()
+        assert "ASPARA_READ_ONLY=1" in captured.out
 
 
 class TestFindAvailablePort:
