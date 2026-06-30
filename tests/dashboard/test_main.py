@@ -91,6 +91,23 @@ class TestCompareEndpoint:
         assert data["project"] == "test_project"
 
 
+class TestSecurityHeaders:
+    """Tests for security headers added by SecurityHeadersMiddleware."""
+
+    def test_hsts_header_present(self, test_client, setup_test_data):
+        """HSTS header should be set on all responses unconditionally.
+
+        Browsers ignore it on HTTP responses and from localhost, so it is
+        safe to always include. See SecurityHeadersMiddleware for rationale.
+        """
+        response = test_client.get("/")
+
+        assert response.status_code == 200
+        hsts = response.headers.get("strict-transport-security", "")
+        assert "max-age=31536000" in hsts
+        assert "includeSubDomains" in hsts
+
+
 class TestStaticFiles:
     """Tests for static file serving."""
 

@@ -50,6 +50,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Enable XSS filter in browsers (legacy but still useful)
         response.headers["X-XSS-Protection"] = "1; mode=block"
 
+        # HSTS - set unconditionally because:
+        # - Browsers ignore it on HTTP responses, so HTTP deployments are unaffected
+        # - Browsers ignore it from localhost (Chrome 132+, Firefox, Brave),
+        #   so local development is never locked out
+        # - It only takes effect on HTTPS responses from non-localhost hosts,
+        #   which is exactly the production case (HF Spaces, internal LAN TLS)
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+
         # Content Security Policy - basic policy
         # Allows self-origin scripts/styles, inline styles for chart libraries,
         # and data: URIs for images (used by chart exports)
