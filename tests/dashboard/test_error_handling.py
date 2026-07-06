@@ -150,8 +150,7 @@ class TestPerformance:
             for i in range(100)
         ]
 
-        mock_catalog.get_projects.return_value = large_projects
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(project, {}) for project in large_projects]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:
@@ -179,8 +178,7 @@ class TestTemplateRendering:
             last_update=pytest.importorskip("datetime").datetime.now(),
         )
 
-        mock_catalog.get_projects.return_value = [special_project]
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(special_project, {})]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:
@@ -203,8 +201,7 @@ class TestTemplateRendering:
             last_update=pytest.importorskip("datetime").datetime.now(),
         )
 
-        mock_catalog.get_projects.return_value = [unicode_project]
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(unicode_project, {})]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:
@@ -227,8 +224,7 @@ class TestTemplateRendering:
             last_update=pytest.importorskip("datetime").datetime.now(),
         )
 
-        mock_catalog.get_projects.return_value = [incomplete_project]
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(incomplete_project, {})]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:

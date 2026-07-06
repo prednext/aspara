@@ -34,7 +34,7 @@ def _write_project_metadata(base_dir: Path, project: str, tags: list[str]) -> No
 
 def test_projects_list_includes_project_tags_in_html():
     """Home page should render project tags from metadata.json next to project name."""
-    from aspara.catalog.project_catalog import ProjectCatalog, ProjectInfo
+    from aspara.catalog.project_catalog import ProjectCatalog
     from aspara.dashboard.dependencies import configure_data_dir
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -44,18 +44,8 @@ def test_projects_list_includes_project_tags_in_html():
         project_name = "test_project"
         _write_project_metadata(data_dir, project_name, ["dog", "cat"])
 
-        # ProjectCatalog.get_projects() will be overridden to return a single project
-        mock_projects = [
-            ProjectInfo(
-                name=project_name,
-                run_count=3,
-                last_update=Path(temp_dir).stat().st_mtime_ns and Path(temp_dir).stat().st_mtime,
-            )
-        ]
-
-        # Use a real ProjectCatalog so that get_metadata() is exercised; only get_projects() is overridden.
+        # Use a real ProjectCatalog so that get_projects_with_metadata() is exercised.
         catalog = ProjectCatalog(data_dir)
-        catalog.get_projects = lambda: mock_projects
 
         # Configure the data directory
         configure_data_dir(str(data_dir))
@@ -89,7 +79,7 @@ def test_projects_list_search_uses_project_tags():
     what the JS search implementation reads. JS behaviour itself is covered
     by frontend tests.
     """
-    from aspara.catalog.project_catalog import ProjectCatalog, ProjectInfo
+    from aspara.catalog.project_catalog import ProjectCatalog
     from aspara.dashboard.dependencies import configure_data_dir
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -98,18 +88,8 @@ def test_projects_list_search_uses_project_tags():
         project_name = "tagged_project"
         _write_project_metadata(data_dir, project_name, ["bear", "goat"])
 
-        # ProjectCatalog.get_projects() will be overridden to return a single project
-        mock_projects = [
-            ProjectInfo(
-                name=project_name,
-                run_count=1,
-                last_update=Path(temp_dir).stat().st_mtime_ns and Path(temp_dir).stat().st_mtime,
-            )
-        ]
-
-        # Use a real ProjectCatalog so that get_metadata() is exercised; only get_projects() is overridden.
+        # Use a real ProjectCatalog so that get_projects_with_metadata() is exercised.
         catalog = ProjectCatalog(data_dir)
-        catalog.get_projects = lambda: mock_projects
 
         # Configure the data directory
         configure_data_dir(str(data_dir))

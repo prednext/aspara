@@ -70,18 +70,15 @@ async def home(
     project_catalog: ProjectCatalogDep,
 ) -> HTMLResponse:
     """Render the projects list page."""
-    # Read-only catalog calls: offload to worker threads so the event
+    # Read-only catalog call: offload to worker threads so the event
     # loop is not blocked on file I/O. Write paths stay synchronous to
     # avoid read-modify-write races (see api_routes.get_project_metadata_api).
-    projects = await asyncio.to_thread(project_catalog.get_projects)
+    # Project metadata is loaded together with the directory scan in one pass
+    # to avoid the N+1 pattern of per-project file opens.
+    projects_with_metadata = await asyncio.to_thread(project_catalog.get_projects_with_metadata)
 
-    # Format projects for template, including metadata tags.
-    # Fetch each project's metadata in parallel via gather.
-    metadatas = await asyncio.gather(
-        *(asyncio.to_thread(project_catalog.get_metadata, p.name) for p in projects)
-    )
     formatted_projects = []
-    for project, metadata in zip(projects, metadatas, strict=True):
+    for project, metadata in projects_with_metadata:
         tags = metadata.get("tags") or []
         formatted_projects.append(TemplateService.format_project_for_template(project, tags))
 

@@ -6,6 +6,7 @@ in the data directory.
 """
 
 import logging
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,19 +45,19 @@ class ProjectCatalog:
         """
         self.data_dir = Path(data_dir)
 
-    def get_projects(self) -> list[ProjectInfo]:
-        """List all projects in the data directory.
+    def _scan_projects(self, *, include_metadata: bool = False) -> list[tuple[ProjectInfo, dict[str, Any] | None]]:
+        """Scan the data directory and build project information.
 
-        Uses os.scandir() for efficient directory iteration with cached stat info.
+        Args:
+            include_metadata: Whether to load project metadata.json during the scan.
 
         Returns:
-            List of ProjectInfo objects sorted by name
+            List of (ProjectInfo, metadata) tuples. ``metadata`` is ``None`` when
+            ``include_metadata`` is ``False``.
         """
-        import os
-
-        projects: list[ProjectInfo] = []
+        results: list[tuple[ProjectInfo, dict[str, Any] | None]] = []
         if not self.data_dir.exists():
-            return projects
+            return results
 
         try:
             # Use scandir for efficient iteration with cached stat info
@@ -69,17 +70,23 @@ class ProjectCatalog:
                     if project_entry.name.startswith("."):
                         continue
 
-                    # Collect run files with stat info in single pass
+                    # Collect run files and optionally metadata in a single pass
                     run_files_mtime: list[float] = []
+                    metadata: dict[str, Any] | None = None
                     with os.scandir(project_entry.path) as file_entries:
                         for file_entry in file_entries:
-                            if (
+                            if include_metadata and file_entry.name == "metadata.json":
+                                metadata = ProjectMetadataStorage.load_metadata_file(Path(file_entry.path))
+                            elif (
                                 file_entry.name.endswith(".jsonl")
                                 and not file_entry.name.endswith(".wal.jsonl")
                                 and not file_entry.name.endswith(".meta.jsonl")
                             ):
                                 # stat() result is cached by scandir
                                 run_files_mtime.append(file_entry.stat().st_mtime)
+
+                    if include_metadata and metadata is None:
+                        metadata = ProjectMetadataStorage.default_metadata()
 
                     run_count = len(run_files_mtime)
 
@@ -89,17 +96,36 @@ class ProjectCatalog:
                     else:
                         last_update = datetime.fromtimestamp(project_entry.stat().st_mtime, tz=timezone.utc)
 
-                    projects.append(
+                    results.append((
                         ProjectInfo(
                             name=project_entry.name,
                             run_count=run_count,
                             last_update=last_update,
-                        )
-                    )
+                        ),
+                        metadata,
+                    ))
         except (OSError, PermissionError):
             pass
 
-        return sorted(projects, key=lambda p: p.name)
+        return sorted(results, key=lambda item: item[0].name)
+
+    def get_projects(self) -> list[ProjectInfo]:
+        """List all projects in the data directory.
+
+        Uses os.scandir() for efficient directory iteration with cached stat info.
+
+        Returns:
+            List of ProjectInfo objects sorted by name
+        """
+        return [project for project, _ in self._scan_projects(include_metadata=False)]
+
+    def get_projects_with_metadata(self) -> list[tuple[ProjectInfo, dict[str, Any]]]:
+        """List all projects with their metadata in a single directory pass.
+
+        Returns:
+            List of (ProjectInfo, metadata) tuples sorted by project name.
+        """
+        return [(project, metadata) for project, metadata in self._scan_projects(include_metadata=True) if metadata is not None]
 
     def get(self, name: str) -> ProjectInfo:
         """Get a specific project by name.
