@@ -242,6 +242,15 @@ class OfflineQueueStorage:
         except OSError as e:
             logger.warning(f"Failed to drop oldest items from queue: {e}")
 
+    @staticmethod
+    def _parse_queue_item(line: str) -> MetricsQueueItem | None:
+        """Parse a JSONL queue item, logging and returning None on failure."""
+        try:
+            return MetricsQueueItem.from_jsonl(line)
+        except (ValueError, ValidationError) as e:
+            logger.debug(f"Skipping invalid queue item: {e}")
+            return None
+
     def get_ready_items(self, limit: int = 100) -> list[MetricsQueueItem]:
         """Get items ready for retry, sorted by step.
 
@@ -270,10 +279,8 @@ class OfflineQueueStorage:
                         stripped = line.strip()
                         if not stripped:
                             continue
-                        try:
-                            item = MetricsQueueItem.from_jsonl(stripped)
-                        except (ValueError, ValidationError) as e:
-                            logger.debug(f"Skipping invalid queue item: {e}")
+                        item = self._parse_queue_item(stripped)
+                        if item is None:
                             continue
 
                         if item.next_retry_at > now_ms:
@@ -323,13 +330,10 @@ class OfflineQueueStorage:
                 for line in lines:
                     if not line.strip():
                         continue
-                    try:
-                        item = MetricsQueueItem.from_jsonl(line.strip())
-                        if item.id in ids_set:
-                            removed += 1
-                            continue
-                    except (ValueError, ValidationError) as e:
-                        logger.debug(f"Skipping invalid queue item during dequeue: {e}")
+                    item = self._parse_queue_item(line.strip())
+                    if item is not None and item.id in ids_set:
+                        removed += 1
+                        continue
                     remaining_lines.append(line if line.endswith("\n") else line + "\n")
 
                 atomic_write_text(self._queue_file, lambda f: f.writelines(remaining_lines), suffix=".jsonl")
@@ -364,16 +368,13 @@ class OfflineQueueStorage:
                 for line in lines:
                     if not line.strip():
                         continue
-                    try:
-                        item = MetricsQueueItem.from_jsonl(line.strip())
-                        if item.id == item_id:
-                            item.retry_count = retry_count
-                            item.next_retry_at = next_retry_at
-                            new_lines.append(item.to_jsonl() + "\n")
-                            updated = True
-                            continue
-                    except (ValueError, ValidationError) as e:
-                        logger.debug(f"Skipping invalid queue item during retry update: {e}")
+                    item = self._parse_queue_item(line.strip())
+                    if item is not None and item.id == item_id:
+                        item.retry_count = retry_count
+                        item.next_retry_at = next_retry_at
+                        new_lines.append(item.to_jsonl() + "\n")
+                        updated = True
+                        continue
                     new_lines.append(line if line.endswith("\n") else line + "\n")
 
                 if updated:

@@ -6,7 +6,6 @@ import contextlib
 import json
 import os
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,7 @@ from aspara.run._config import Config
 from aspara.run._summary import Summary
 from aspara.storage.metrics import create_metrics_storage, resolve_metrics_storage_backend
 from aspara.utils.metadata import update_project_metadata_tags
-from aspara.utils.timestamp import parse_to_ms
+from aspara.utils.timestamp import now_ms, parse_to_ms
 
 
 class LocalRun(BaseRun):
@@ -164,7 +163,7 @@ class LocalRun(BaseRun):
 
     def _write_init_record(self) -> None:
         """Write initial run record with metadata."""
-        timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+        timestamp = now_ms()
         self._metadata_storage.set_init(
             run_id=self.id,
             tags=self.tags,
@@ -220,7 +219,7 @@ class LocalRun(BaseRun):
         if metrics:
             # Generate current time if timestamp is None, otherwise parse
             if timestamp is None:
-                timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                timestamp_ms = now_ms()
             else:
                 timestamp_ms = parse_to_ms(timestamp)
             metrics_data = {
@@ -288,7 +287,7 @@ class LocalRun(BaseRun):
             "original_path": abs_file_path,
             "stored_path": os.path.join("artifacts", artifact_name),
             "file_size": file_size,
-            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "timestamp": now_ms(),
         }
 
         if description:
@@ -312,7 +311,7 @@ class LocalRun(BaseRun):
         if not self._mark_finished():
             return
 
-        timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+        timestamp = now_ms()
         self._metadata_storage.set_finish(exit_code=exit_code, timestamp=timestamp)
 
         # Finalize metrics storage (e.g., flush WAL to Parquet)

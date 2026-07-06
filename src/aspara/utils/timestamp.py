@@ -9,6 +9,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 
+def now_ms() -> int:
+    """Return the current UNIX timestamp in milliseconds.
+
+    This is the single source of truth for "current time as ms" in the codebase.
+    """
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
 def parse_to_datetime(ts_value: str | int | float | datetime) -> datetime:
     """Parse various timestamp formats to UTC datetime.
 

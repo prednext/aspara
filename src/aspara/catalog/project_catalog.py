@@ -29,6 +29,11 @@ class ProjectInfo(BaseModel):
     last_update: datetime
 
 
+# Run data file suffixes used when discovering and counting runs.
+_RUN_DATA_SUFFIXES = (".jsonl", ".db", ".wal")
+_RUN_EXCLUDED_SUFFIXES = (".wal.jsonl", ".meta.jsonl")
+
+
 class ProjectCatalog:
     """Catalog for discovering and managing projects.
 
@@ -77,11 +82,7 @@ class ProjectCatalog:
                         for file_entry in file_entries:
                             if include_metadata and file_entry.name == "metadata.json":
                                 metadata = ProjectMetadataStorage.load_metadata_file(Path(file_entry.path))
-                            elif (
-                                file_entry.name.endswith(".jsonl")
-                                and not file_entry.name.endswith(".wal.jsonl")
-                                and not file_entry.name.endswith(".meta.jsonl")
-                            ):
+                            elif file_entry.name.endswith(_RUN_DATA_SUFFIXES) and not file_entry.name.endswith(_RUN_EXCLUDED_SUFFIXES):
                                 # stat() result is cached by scandir
                                 run_files_mtime.append(file_entry.stat().st_mtime)
 
@@ -148,14 +149,23 @@ class ProjectCatalog:
         if not project_dir.exists() or not project_dir.is_dir():
             raise ProjectNotFoundError(f"Project '{name}' not found")
 
-        # Count runs
-        run_files = [f for f in project_dir.iterdir() if f.suffix in [".jsonl", ".db", ".wal"]]
-        run_count = len(run_files)
+        # Count runs and collect mtimes in a single scandir pass, using the same
+        # suffix logic as get_projects() for consistency and reduced I/O.
+        run_files_mtime: list[float] = []
+        try:
+            with os.scandir(project_dir) as file_entries:
+                for file_entry in file_entries:
+                    if file_entry.name.endswith(_RUN_DATA_SUFFIXES) and not file_entry.name.endswith(_RUN_EXCLUDED_SUFFIXES):
+                        run_files_mtime.append(file_entry.stat().st_mtime)
+        except (OSError, PermissionError):
+            pass
+
+        run_count = len(run_files_mtime)
 
         # Get last update time from run files
         last_update = datetime.fromtimestamp(project_dir.stat().st_mtime, tz=timezone.utc)
-        if run_files:
-            last_update = max(datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc) for f in run_files)
+        if run_files_mtime:
+            last_update = datetime.fromtimestamp(max(run_files_mtime), tz=timezone.utc)
 
         return ProjectInfo(
             name=name,

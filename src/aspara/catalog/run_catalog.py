@@ -737,8 +737,7 @@ class RunCatalog:
         Returns:
             Dictionary containing run config (params, config, status, etc.)
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_run_config, project, run)
+        return await asyncio.to_thread(self.get_run_config, project, run)
 
     async def get_metadata_async(self, project: str, run: str) -> dict[str, Any]:
         """Get run metadata asynchronously using run_in_executor.
@@ -750,8 +749,7 @@ class RunCatalog:
         Returns:
             Dictionary containing run metadata (tags, notes, params, etc.)
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_metadata, project, run)
+        return await asyncio.to_thread(self.get_metadata, project, run)
 
     async def get_artifacts_async(self, project: str, run: str) -> list[dict[str, Any]]:
         """Get artifacts for a run asynchronously using run_in_executor.
@@ -763,5 +761,4 @@ class RunCatalog:
         Returns:
             List of artifact dictionaries
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_artifacts, project, run)
+        return await asyncio.to_thread(self.get_artifacts, project, run)
