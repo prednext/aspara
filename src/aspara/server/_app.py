@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from aspara.config import is_dev_mode
@@ -20,16 +19,11 @@ app = FastAPI(
     redoc_url=None,  # Disable default /redoc
 )
 
-# CORS configuration - credentials disabled for security with wildcard origins
-# Note: allow_credentials=True with allow_origins=["*"] is a security vulnerability
-# as it allows any site to make credentialed requests to our API
-app.add_middleware(
-    CORSMiddleware,  # ty: ignore[invalid-argument-type]
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "X-Requested-With"],
-)
+# No CORS middleware is configured intentionally. The dashboard static JS and API
+# are served from the same origin, and the tracker API is consumed by the Python
+# SDK rather than browsers, so CORS is unnecessary. A wildcard CORS policy would
+# allow cross-origin sites to pass the X-Requested-With CSRF header check via
+# preflight, defeating that protection.
 
 
 def is_module_available(module_name: str) -> bool:

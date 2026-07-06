@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -145,16 +144,10 @@ app = FastAPI(
 # Security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)  # ty: ignore[invalid-argument-type]
 
-# CORS middleware - credentials disabled for security with wildcard origins
-# Note: allow_credentials=True with allow_origins=["*"] is a security vulnerability
-# as it allows any site to make credentialed requests to our API
-app.add_middleware(
-    CORSMiddleware,  # ty: ignore[invalid-argument-type]
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "X-Requested-With"],
-)
+# No CORS middleware is configured intentionally. The dashboard static JS and API
+# are served from the same origin, so CORS is unnecessary. Keeping a wildcard
+# CORS policy would allow cross-origin sites to pass the X-Requested-With CSRF
+# header check via preflight, defeating that protection.
 
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")

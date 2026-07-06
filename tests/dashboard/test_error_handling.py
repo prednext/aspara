@@ -72,13 +72,13 @@ class TestResponseHeaders:
         assert response.status_code == 200
         assert "application/json" in response.headers["content-type"]
 
-    def test_cors_headers(self, test_client):
-        """Test CORS headers are present."""
+    def test_no_cors_headers(self, test_client):
+        """CORS middleware is not installed; no CORS headers should be returned."""
         # OPTIONS requests need Origin header, so add it
         response = test_client.options("/", headers={"Origin": "http://testserver"})
 
-        # Check if CORS middleware adds appropriate headers
-        assert "access-control-allow-origin" in response.headers
+        # The dashboard API is same-origin only; CORS headers must not be present
+        assert "access-control-allow-origin" not in response.headers
 
 
 class TestDataValidation:
