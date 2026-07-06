@@ -28,6 +28,18 @@
       "trailingCommas": "es5"
     }
   },
+  "overrides": [
+    {
+      "include": ["tests/fixtures.js"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noEmptyPattern": "off"
+          }
+        }
+      }
+    }
+  ],
   "files": {
     "include": ["src/**/*.js", "tests/**/*.js", "*.js"],
     "ignore": ["node_modules/**", "dist/**", "build/**", "docs/**", "site/**", "site.old/**", "playwright-report/**", ".venv", "coverage/**"]
