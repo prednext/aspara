@@ -1,9 +1,11 @@
+import { YScale, generateLogTicks, isLogScale, valueToChartY } from './scale.js';
+
 export class ChartRenderer {
   constructor(chart) {
     this.chart = chart;
   }
 
-  drawGrid(margin, plotWidth, plotHeight, xMin, xMax, yMin, yMax) {
+  drawGrid(margin, plotWidth, plotHeight, xMin, xMax, yMin, yMax, yScale = YScale.LINEAR) {
     this.chart.ctx.strokeStyle = '#e0e0e0';
     this.chart.ctx.lineWidth = this.chart.constructor.GRID_LINE_WIDTH;
 
@@ -16,17 +18,28 @@ export class ChartRenderer {
       this.chart.ctx.stroke();
     }
 
-    const yGridCount = this.chart.constructor.Y_GRID_COUNT;
-    for (let i = 0; i <= yGridCount; i++) {
-      const y = margin + (i / yGridCount) * plotHeight;
-      this.chart.ctx.beginPath();
-      this.chart.ctx.moveTo(margin, y);
-      this.chart.ctx.lineTo(margin + plotWidth, y);
-      this.chart.ctx.stroke();
+    if (isLogScale(yScale)) {
+      const ticks = generateLogTicks(yMin, yMax, this.chart.constructor.Y_GRID_COUNT);
+      for (const { value } of ticks) {
+        const y = valueToChartY(value, yScale, plotHeight, margin, yMin, yMax);
+        this.chart.ctx.beginPath();
+        this.chart.ctx.moveTo(margin, y);
+        this.chart.ctx.lineTo(margin + plotWidth, y);
+        this.chart.ctx.stroke();
+      }
+    } else {
+      const yGridCount = this.chart.constructor.Y_GRID_COUNT;
+      for (let i = 0; i <= yGridCount; i++) {
+        const y = margin + (i / yGridCount) * plotHeight;
+        this.chart.ctx.beginPath();
+        this.chart.ctx.moveTo(margin, y);
+        this.chart.ctx.lineTo(margin + plotWidth, y);
+        this.chart.ctx.stroke();
+      }
     }
   }
 
-  drawAxisLabels(margin, plotWidth, plotHeight, xMin, xMax, yMin, yMax) {
+  drawAxisLabels(margin, plotWidth, plotHeight, xMin, xMax, yMin, yMax, yScale = YScale.LINEAR) {
     this.chart.ctx.fillStyle = '#666';
     this.chart.ctx.font = '11px Arial';
     this.chart.ctx.textAlign = 'center';
@@ -50,23 +63,46 @@ export class ChartRenderer {
     }
 
     this.chart.ctx.textAlign = 'right';
-    const yGridCount = this.chart.constructor.Y_GRID_COUNT;
-    for (let i = 0; i <= yGridCount; i++) {
-      const value = yMax - (i / yGridCount) * (yMax - yMin);
-      const x = margin - 8;
-      const y = margin + (i / yGridCount) * plotHeight + 4;
+    if (isLogScale(yScale)) {
+      const ticks = generateLogTicks(yMin, yMax, this.chart.constructor.Y_GRID_COUNT);
+      for (const { value, label } of ticks) {
+        const y = valueToChartY(value, yScale, plotHeight, margin, yMin, yMax);
+        this.chart.ctx.fillText(label, margin - 8, y + 4);
+      }
+    } else {
+      const yGridCount = this.chart.constructor.Y_GRID_COUNT;
+      for (let i = 0; i <= yGridCount; i++) {
+        const value = yMax - (i / yGridCount) * (yMax - yMin);
+        const x = margin - 8;
+        const y = margin + (i / yGridCount) * plotHeight + 4;
 
-      if (i % 2 === 0) {
-        let label;
-        if (Math.abs(value) >= 1) {
-          label = value.toFixed(1);
-        } else {
-          label = value.toFixed(3);
+        if (i % 2 === 0) {
+          let label;
+          if (Math.abs(value) >= 1) {
+            label = value.toFixed(1);
+          } else {
+            label = value.toFixed(3);
+          }
+
+          this.chart.ctx.fillText(label, x, y);
         }
-
-        this.chart.ctx.fillText(label, x, y);
       }
     }
+  }
+
+  /**
+   * Draw a centered message on the canvas (e.g. when log scale cannot be used).
+   * @param {string} message
+   */
+  drawMessage(message) {
+    const ctx = this.chart.ctx;
+    ctx.save();
+    ctx.fillStyle = '#666';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(message, this.chart.width / 2, this.chart.height / 2);
+    ctx.restore();
   }
 
   drawLegend() {

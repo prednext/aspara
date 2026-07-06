@@ -8,7 +8,25 @@ import { ChartInteraction } from '../../src/aspara/dashboard/static/js/chart/int
 // Mock interaction-utils
 vi.mock('../../src/aspara/dashboard/static/js/chart/interaction-utils.js', () => ({
   binarySearchByStep: vi.fn(),
-  calculateDataRanges: vi.fn(),
+  calculateDataRanges: vi.fn((series, scale = 'linear') => {
+    // Simple default implementation that respects the scale parameter shape
+    if (!series?.length) return null;
+    let xMin = Number.POSITIVE_INFINITY;
+    let xMax = Number.NEGATIVE_INFINITY;
+    let yMin = Number.POSITIVE_INFINITY;
+    let yMax = Number.NEGATIVE_INFINITY;
+    for (const s of series) {
+      if (!s.data?.steps?.length) continue;
+      xMin = Math.min(xMin, s.data.steps[0]);
+      xMax = Math.max(xMax, s.data.steps[s.data.steps.length - 1]);
+      for (const v of s.data.values) {
+        if (scale === 'log' && v <= 0) continue;
+        yMin = Math.min(yMin, v);
+        yMax = Math.max(yMax, v);
+      }
+    }
+    return xMin === Number.POSITIVE_INFINITY ? null : { xMin, xMax, yMin, yMax };
+  }),
   findNearestStepBinary: vi.fn(),
 }));
 
@@ -51,6 +69,7 @@ function createMockChart() {
     draw: vi.fn(),
     resetZoom: vi.fn(),
     onZoomChange: null,
+    yScale: 'linear',
     constructor: { MARGIN: 60, MIN_DRAG_DISTANCE: 5, Y_PADDING_RATIO: 0.1 },
     colorPalette: {
       getRunStyle: vi.fn(() => ({ borderColor: '#ff0000', borderDash: [] })),
@@ -85,12 +104,14 @@ describe('ChartInteraction', () => {
   });
 
   describe('invalidateRangesCache', () => {
-    test('should clear cached ranges', () => {
+    test('should clear cached ranges and scale', () => {
       interaction._cachedRanges = { xMin: 0 };
       interaction._lastDataRef = [];
+      interaction._lastScale = 'log';
       interaction.invalidateRangesCache();
       expect(interaction._cachedRanges).toBeNull();
       expect(interaction._lastDataRef).toBeNull();
+      expect(interaction._lastScale).toBeNull();
     });
   });
 
@@ -98,18 +119,20 @@ describe('ChartInteraction', () => {
     test('should calculate and cache ranges on first call', () => {
       const series = [{ data: { steps: [0, 1], values: [10, 20] } }];
       chart.data = { series };
+      chart.yScale = 'linear';
       const ranges = { xMin: 0, xMax: 1, yMin: 10, yMax: 20 };
       calculateDataRanges.mockReturnValue(ranges);
 
       const result = interaction._getDataRanges();
 
-      expect(calculateDataRanges).toHaveBeenCalledWith(series);
+      expect(calculateDataRanges).toHaveBeenCalledWith(series, 'linear');
       expect(result).toBe(ranges);
     });
 
-    test('should return cached ranges when data reference unchanged', () => {
+    test('should return cached ranges when data and scale unchanged', () => {
       const series = [{ data: { steps: [0, 1], values: [10, 20] } }];
       chart.data = { series };
+      chart.yScale = 'linear';
       const ranges = { xMin: 0, xMax: 1, yMin: 10, yMax: 20 };
       calculateDataRanges.mockReturnValue(ranges);
 
@@ -123,6 +146,7 @@ describe('ChartInteraction', () => {
 
     test('should recalculate when data reference changes', () => {
       chart.data = { series: [{ data: { steps: [0], values: [1] } }] };
+      chart.yScale = 'linear';
       calculateDataRanges.mockReturnValue({ xMin: 0, xMax: 0, yMin: 1, yMax: 1 });
       interaction._getDataRanges();
 
@@ -132,15 +156,31 @@ describe('ChartInteraction', () => {
       calculateDataRanges.mockReturnValue(newRanges);
 
       const result = interaction._getDataRanges();
-      expect(calculateDataRanges).toHaveBeenCalledWith(newSeries);
+      expect(calculateDataRanges).toHaveBeenCalledWith(newSeries, 'linear');
       expect(result).toBe(newRanges);
+    });
+
+    test('should recalculate when scale changes', () => {
+      const series = [{ data: { steps: [0, 1], values: [0.1, 10] } }];
+      chart.data = { series };
+      chart.yScale = 'linear';
+      calculateDataRanges.mockReturnValue({ xMin: 0, xMax: 1, yMin: 0.1, yMax: 10 });
+      interaction._getDataRanges();
+
+      chart.yScale = 'log';
+      calculateDataRanges.mockReturnValue({ xMin: 0, xMax: 1, yMin: 0.1, yMax: 10 });
+      const result = interaction._getDataRanges();
+
+      expect(calculateDataRanges).toHaveBeenCalledWith(series, 'log');
+      expect(result).not.toBeNull();
     });
 
     test('should handle null data', () => {
       chart.data = null;
+      chart.yScale = 'linear';
       calculateDataRanges.mockReturnValue(null);
       const result = interaction._getDataRanges();
-      expect(calculateDataRanges).toHaveBeenCalledWith([]);
+      expect(calculateDataRanges).toHaveBeenCalledWith([], 'linear');
       expect(result).toBeNull();
     });
   });
@@ -195,12 +235,14 @@ describe('ChartInteraction', () => {
       expect(removeSpy).toHaveBeenCalledWith('contextmenu', contextmenuHandler);
     });
 
-    test('should clear cached ranges', () => {
+    test('should clear cached ranges and scale', () => {
       interaction._cachedRanges = { xMin: 0 };
       interaction._lastDataRef = [];
+      interaction._lastScale = 'log';
       interaction.destroy();
       expect(interaction._cachedRanges).toBeNull();
       expect(interaction._lastDataRef).toBeNull();
+      expect(interaction._lastScale).toBeNull();
     });
 
     test('should null all handlers', () => {

@@ -11,6 +11,8 @@ function createMockChart() {
   return {
     container,
     resetZoom: () => {},
+    toggleYScale: () => {},
+    yScale: 'linear',
   };
 }
 
@@ -75,13 +77,14 @@ describe('ChartControls', () => {
       expect(controls.helpPopover.style.display).toBe('none');
     });
 
-    test('popover lists all four chart interactions', () => {
+    test('popover lists all five chart interactions', () => {
       const rows = controls.helpPopover.querySelectorAll('div');
       const texts = Array.from(rows).map((r) => r.textContent.trim());
       expect(texts.some((t) => t.includes('Drag on chart to zoom'))).toBe(true);
       expect(texts.some((t) => t.includes('Click reset to restore view'))).toBe(true);
       expect(texts.some((t) => t.includes('Click fullscreen to expand'))).toBe(true);
       expect(texts.some((t) => t.includes('Click download to export data'))).toBe(true);
+      expect(texts.some((t) => t.includes('Click log to toggle y-axis scale'))).toBe(true);
     });
 
     test('clicking outside the help button closes the popover', () => {
@@ -90,6 +93,26 @@ describe('ChartControls', () => {
 
       document.body.click();
       expect(controls.helpPopover.style.display).toBe('none');
+    });
+  });
+
+  describe('log scale button', () => {
+    test('starts with Linear label and aria-pressed=false', () => {
+      expect(controls.logScaleButton.textContent).toBe('Linear');
+      expect(controls.logScaleButton.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    test('clicking toggles chart scale and updates label', () => {
+      const toggleSpy = vi.spyOn(chart, 'toggleYScale');
+      controls.logScaleButton.click();
+      expect(toggleSpy).toHaveBeenCalled();
+    });
+
+    test('updateLogScaleButton reflects log scale state', () => {
+      chart.yScale = 'log';
+      controls.updateLogScaleButton();
+      expect(controls.logScaleButton.textContent).toBe('Log');
+      expect(controls.logScaleButton.getAttribute('aria-pressed')).toBe('true');
     });
   });
 
@@ -110,11 +133,16 @@ describe('ChartControls', () => {
       expect(controls.helpButton).toBeNull();
       expect(controls.helpPopover).toBeNull();
     });
+
+    test('nulls out log scale button reference', () => {
+      controls.destroy();
+      expect(controls.logScaleButton).toBeNull();
+    });
   });
 
   describe('accessibility', () => {
     test('every control button has an aria-label matching its title', () => {
-      for (const btn of [controls.resetButton, controls.fullSizeButton, controls.downloadButton, controls.helpButton]) {
+      for (const btn of [controls.resetButton, controls.fullSizeButton, controls.downloadButton, controls.logScaleButton, controls.helpButton]) {
         expect(btn.getAttribute('aria-label')).toBe(btn.title);
         expect(btn.getAttribute('aria-label')).not.toBe('');
       }
