@@ -95,6 +95,29 @@ class DataDirWatcher:
         cls._instance = None
         cls._lock = None
 
+    @classmethod
+    async def shutdown(cls) -> None:
+        """Properly shut down the singleton instance.
+
+        Cancels the running dispatch task (which closes the underlying
+        awatch/inotify file descriptor) and then clears the singleton
+        state via reset_instance(). Call this from the application
+        lifespan shutdown so that a subsequent reload does not reuse a
+        stale watcher — which would leak inotify FDs and deliver
+        duplicate events.
+        """
+        instance = cls._instance
+        if (
+            instance is not None
+            and instance._task is not None
+            and not instance._task.done()
+        ):
+            logger.info("[Watcher] Shutting down dispatch task")
+            instance._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(instance._task, timeout=2.0)
+        cls.reset_instance()
+
     def _parse_file_path(self, file_path: Path) -> tuple[str, str, str] | None:
         """Parse file path to extract project, run name, and file type.
 
