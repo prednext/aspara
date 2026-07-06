@@ -23,6 +23,7 @@ export const CHART_CONTROL_LABELS = Object.freeze({
   exitFullscreen: 'Exit fullscreen',
   download: 'Download data',
   help: 'Chart interactions help',
+  toggleLogScale: 'Toggle log scale',
 });
 
 /**
@@ -34,4 +35,22 @@ export function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Remove a set of event listeners from a target in one call.
+ *
+ * Guards against null targets and null handlers so callers can pass the
+ * current handler map without extra if-checks.
+ *
+ * @param {EventTarget|null} target - Event target to remove listeners from
+ * @param {Object<string, function|null>} handlers - Map of event names to handlers
+ */
+export function removeEventListeners(target, handlers) {
+  if (!target) return;
+  for (const [event, handler] of Object.entries(handlers)) {
+    if (handler) {
+      target.removeEventListener(event, handler);
+    }
+  }
 }

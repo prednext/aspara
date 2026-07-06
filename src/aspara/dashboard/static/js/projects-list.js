@@ -2,6 +2,7 @@ import { deleteProjectApi } from './api/delete-api.js';
 import { registerPageLifecycle } from './lifecycle.js';
 import { createSortComparator, matchesSearch, parseProjectElement } from './projects-list-utils.js';
 import { initializeTagEditorsForElements } from './tag-editor.js';
+import { attachSortHeaders } from './sort-utils.js';
 import { debounce } from './timer-utils.js';
 
 class ProjectsListSorter {
@@ -135,24 +136,7 @@ class ProjectsListSorter {
   }
 
   attachEventListeners() {
-    const headers = document.querySelectorAll('[data-sort]');
-    for (const header of headers) {
-      const handler = () => {
-        const key = header.dataset.sort;
-        if (this.sortKey === key) {
-          this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-        } else {
-          this.sortKey = key;
-          this.sortOrder = 'asc';
-        }
-        localStorage.setItem('projects_sort_key', this.sortKey);
-        localStorage.setItem('projects_sort_order', this.sortOrder);
-        this.updateSortIndicators();
-        this.sortAndRender();
-      };
-      header.addEventListener('click', handler);
-      this._sortHeaderHandlers.push({ element: header, handler });
-    }
+    this._sortHeaderHandlers = attachSortHeaders(this, 'projects');
   }
 
   updateSortIndicators() {

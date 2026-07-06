@@ -177,22 +177,12 @@ export class RunSelector {
       for (const checkbox of this.runCheckboxes) {
         const runName = checkbox.dataset.runName;
         const runItem = checkbox.closest('.run-item');
+        const matches = !pattern || regex.test(runName);
 
-        if (!pattern || regex.test(runName)) {
-          runItem.style.display = '';
-          if (pattern) {
-            if (!this.manuallyDeselectedRuns.has(runName)) {
-              checkbox.checked = true;
-              this.selectedRuns.add(runName);
-            }
-          } else {
-            if (!this.manuallyDeselectedRuns.has(runName)) {
-              checkbox.checked = true;
-              this.selectedRuns.add(runName);
-            }
-          }
-        } else {
-          runItem.style.display = 'none';
+        runItem.style.display = matches ? '' : 'none';
+        if (matches && !this.manuallyDeselectedRuns.has(runName)) {
+          checkbox.checked = true;
+          this.selectedRuns.add(runName);
         }
       }
 

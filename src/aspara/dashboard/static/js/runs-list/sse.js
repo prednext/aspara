@@ -3,6 +3,7 @@
  * Handles real-time status updates for runs displayed in the runs list
  */
 
+import { removeEventListeners } from '../html-utils.js';
 import { SSEReconnectManager } from '../sse-reconnect-manager.js';
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl, extractRunNamesFromElements, isConnectionClosed, parseStatusUpdate, updateRunStatusIcon } from './sse-utils.js';
 
@@ -143,19 +144,12 @@ class RunsListSSE {
    */
   destroy() {
     if (this.eventSource) {
-      // Remove event listeners before closing to prevent memory leaks
-      if (this.sseOpenHandler) {
-        this.eventSource.removeEventListener('open', this.sseOpenHandler);
-      }
-      if (this.sseStatusHandler) {
-        this.eventSource.removeEventListener('status', this.sseStatusHandler);
-      }
-      if (this.sseMetricHandler) {
-        this.eventSource.removeEventListener('metric', this.sseMetricHandler);
-      }
-      if (this.sseErrorHandler) {
-        this.eventSource.removeEventListener('error', this.sseErrorHandler);
-      }
+      removeEventListeners(this.eventSource, {
+        open: this.sseOpenHandler,
+        status: this.sseStatusHandler,
+        metric: this.sseMetricHandler,
+        error: this.sseErrorHandler,
+      });
       this.eventSource.close();
       this.eventSource = null;
       console.log('[RunsListSSE] SSE connection closed');

@@ -1,4 +1,6 @@
+import { removeEventListeners } from '../html-utils.js';
 import { binarySearchByStep, calculateDataRanges, findNearestStepBinary } from './interaction-utils.js';
+import { YScale, chartYToValue, computePaddedYRange, isLogScale, toLogDomain, valueToChartY } from './scale.js';
 
 export class ChartInteraction {
   constructor(chart, renderer) {
@@ -75,26 +77,14 @@ export class ChartInteraction {
    * Remove event listeners from canvas.
    */
   removeEventListeners() {
-    if (this.chart.canvas) {
-      if (this.mousemoveHandler) {
-        this.chart.canvas.removeEventListener('mousemove', this.mousemoveHandler);
-      }
-      if (this.mouseleaveHandler) {
-        this.chart.canvas.removeEventListener('mouseleave', this.mouseleaveHandler);
-      }
-      if (this.mousedownHandler) {
-        this.chart.canvas.removeEventListener('mousedown', this.mousedownHandler);
-      }
-      if (this.mouseupHandler) {
-        this.chart.canvas.removeEventListener('mouseup', this.mouseupHandler);
-      }
-      if (this.dblclickHandler) {
-        this.chart.canvas.removeEventListener('dblclick', this.dblclickHandler);
-      }
-      if (this.contextmenuHandler) {
-        this.chart.canvas.removeEventListener('contextmenu', this.contextmenuHandler);
-      }
-    }
+    removeEventListeners(this.chart.canvas, {
+      mousemove: this.mousemoveHandler,
+      mouseleave: this.mouseleaveHandler,
+      mousedown: this.mousedownHandler,
+      mouseup: this.mouseupHandler,
+      dblclick: this.dblclickHandler,
+      contextmenu: this.contextmenuHandler,
+    });
     this.mousemoveHandler = null;
     this.mouseleaveHandler = null;
     this.mousedownHandler = null;

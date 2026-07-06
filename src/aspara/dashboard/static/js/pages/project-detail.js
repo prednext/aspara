@@ -107,38 +107,47 @@ class ProjectDetail extends BaseChartPage {
     this.toggleSidebarBtn.addEventListener('click', this.sidebarToggleHandler);
   }
 
-  collapseSidebar() {
+  _setSidebarCollapsed(collapsed) {
     if (!this.sidebar) return;
 
-    this.sidebar.dataset.collapsed = 'true';
-    this.sidebar.classList.remove('w-80');
-    this.sidebar.classList.add('w-16');
+    this.sidebar.dataset.collapsed = String(collapsed);
+    this.sidebar.classList.toggle('w-80', !collapsed);
+    this.sidebar.classList.toggle('w-16', collapsed);
 
-    if (this.sidebarCollapseIcon) this.sidebarCollapseIcon.classList.add('hidden');
-    if (this.sidebarExpandIcon) this.sidebarExpandIcon.classList.remove('hidden');
-    if (this.sidebarExpandedContent) this.sidebarExpandedContent.classList.add('hidden');
-    if (this.sidebarCollapsedContent) this.sidebarCollapsedContent.classList.remove('hidden');
-    if (this.sidebarTitle) this.sidebarTitle.classList.add('hidden');
+    this.sidebarCollapseIcon?.classList.toggle('hidden', collapsed);
+    this.sidebarExpandIcon?.classList.toggle('hidden', !collapsed);
+    this.sidebarExpandedContent?.classList.toggle('hidden', collapsed);
+    this.sidebarCollapsedContent?.classList.toggle('hidden', !collapsed);
+    this.sidebarTitle?.classList.toggle('hidden', collapsed);
 
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, 'true');
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
     this.resizeChartsAfterTransition();
   }
 
+  collapseSidebar() {
+    this._setSidebarCollapsed(true);
+  }
+
   expandSidebar() {
-    if (!this.sidebar) return;
+    this._setSidebarCollapsed(false);
+  }
 
-    this.sidebar.dataset.collapsed = 'false';
-    this.sidebar.classList.remove('w-16');
-    this.sidebar.classList.add('w-80');
-
-    if (this.sidebarCollapseIcon) this.sidebarCollapseIcon.classList.remove('hidden');
-    if (this.sidebarExpandIcon) this.sidebarExpandIcon.classList.add('hidden');
-    if (this.sidebarExpandedContent) this.sidebarExpandedContent.classList.remove('hidden');
-    if (this.sidebarCollapsedContent) this.sidebarCollapsedContent.classList.add('hidden');
-    if (this.sidebarTitle) this.sidebarTitle.classList.remove('hidden');
-
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, 'false');
-    this.resizeChartsAfterTransition();
+  /**
+   * Toggle the visibility of the four main UI sections by page state.
+   * @param {'initial'|'loading'|'noData'|'metrics'} state - Page state name
+   */
+  _setPageState(state) {
+    const hidden = {
+      initial: { loading: true, charts: true, noData: true, initial: false },
+      loading: { loading: false, charts: true, noData: true, initial: true },
+      noData: { loading: true, charts: true, noData: false, initial: true },
+      metrics: { loading: true, charts: false, noData: true, initial: true },
+    }[state];
+    if (!hidden) return;
+    this.loadingState.classList.toggle('hidden', hidden.loading);
+    this.chartsContainer.classList.toggle('hidden', hidden.charts);
+    this.noDataState.classList.toggle('hidden', hidden.noData);
+    this.initialState.classList.toggle('hidden', hidden.initial);
   }
 
   resizeChartsAfterTransition() {
@@ -208,20 +217,14 @@ class ProjectDetail extends BaseChartPage {
   }
 
   showInitialState() {
-    this.loadingState.classList.add('hidden');
+    this._setPageState('initial');
     this.clearAndRenderCharts({});
-    this.chartsContainer.classList.add('hidden');
-    this.noDataState.classList.add('hidden');
-    this.initialState.classList.remove('hidden');
     this.runSelector.hideAllLegends();
     this.hideChartControls();
   }
 
   showLoadingState() {
-    this.loadingState.classList.remove('hidden');
-    this.chartsContainer.classList.add('hidden');
-    this.noDataState.classList.add('hidden');
-    this.initialState.classList.add('hidden');
+    this._setPageState('loading');
   }
 
   async showMetrics() {
@@ -274,18 +277,13 @@ class ProjectDetail extends BaseChartPage {
 
     const metricsData = this.dataService.getCachedMetrics(selectedRuns);
 
-    this.loadingState.classList.add('hidden');
-    this.initialState.classList.add('hidden');
-
     if (!this.clearAndRenderCharts(metricsData)) {
-      this.noDataState.classList.remove('hidden');
-      this.chartsContainer.classList.add('hidden');
+      this._setPageState('noData');
       this.hideChartControls();
       return;
     }
 
-    this.noDataState.classList.add('hidden');
-    this.chartsContainer.classList.remove('hidden');
+    this._setPageState('metrics');
     this.updateRunColorLegends();
   }
 
@@ -320,10 +318,7 @@ class ProjectDetail extends BaseChartPage {
   }
 
   showErrorState(message) {
-    this.loadingState.classList.add('hidden');
-    this.chartsContainer.classList.add('hidden');
-    this.initialState.classList.add('hidden');
-    this.noDataState.classList.remove('hidden');
+    this._setPageState('noData');
 
     const errorElement = this.noDataState.querySelector('p');
     if (errorElement) {

@@ -4,6 +4,7 @@
  */
 import { decode as msgpackDecode } from '@msgpack/msgpack';
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl } from '../runs-list/sse-utils.js';
+import { removeEventListeners } from '../html-utils.js';
 import { SSEReconnectManager } from '../sse-reconnect-manager.js';
 import { decompressDeltaData, findLatestTimestamp, mergeDataPoint } from './metrics-utils.js';
 
@@ -82,6 +83,30 @@ export class MetricsDataService {
   }
 
   /**
+   * Build the metrics API URL for a comma-separated run list.
+   * @param {string} runsList - Comma-separated run names
+   * @param {number|null} since - Optional SSE timestamp to fetch deltas from
+   * @returns {string} Metrics API URL
+   */
+  _buildMetricsUrl(runsList, since = null) {
+    const sinceParam = since !== null ? `&since=${since}` : '';
+    return `/api/projects/${encodeURIComponent(this.project)}/runs/metrics?runs=${encodeURIComponent(runsList)}&format=msgpack${sinceParam}`;
+  }
+
+  /**
+   * Update lastSSETimestamp from a data object that may contain a timestamp.
+   * @param {Object} data - Object with an optional timestamp field
+   */
+  _updateLastSSETimestamp(data) {
+    if (data.timestamp) {
+      const ts = new Date(data.timestamp).getTime();
+      if (!Number.isNaN(ts) && ts > this.lastSSETimestamp) {
+        this.lastSSETimestamp = ts;
+      }
+    }
+  }
+
+  /**
    * Fetch metrics for specific runs and add to cache.
    * @param {Array<string>} runNames - Array of run names to fetch
    * @returns {Promise<void>}
@@ -90,7 +115,7 @@ export class MetricsDataService {
     const runsList = runNames.join(',');
 
     const fetchStart = performance.now();
-    const response = await fetch(`/api/projects/${encodeURIComponent(this.project)}/runs/metrics?runs=${encodeURIComponent(runsList)}&format=msgpack`);
+    const response = await fetch(this._buildMetricsUrl(runsList));
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -238,12 +263,7 @@ export class MetricsDataService {
     this.sseMetricHandler = (event) => {
       try {
         const metric = JSON.parse(event.data);
-        if (metric.timestamp) {
-          const ts = new Date(metric.timestamp).getTime();
-          if (!Number.isNaN(ts) && ts > this.lastSSETimestamp) {
-            this.lastSSETimestamp = ts;
-          }
-        }
+        this._updateLastSSETimestamp(metric);
         this.lastEventTime = Date.now();
         this.handleMetricUpdate(metric);
       } catch (error) {
@@ -254,12 +274,7 @@ export class MetricsDataService {
     this.sseStatusHandler = (event) => {
       try {
         const statusData = JSON.parse(event.data);
-        if (statusData.timestamp) {
-          const ts = new Date(statusData.timestamp).getTime();
-          if (!Number.isNaN(ts) && ts > this.lastSSETimestamp) {
-            this.lastSSETimestamp = ts;
-          }
-        }
+        this._updateLastSSETimestamp(statusData);
         if (this.onStatusUpdate) {
           this.onStatusUpdate(statusData);
         }
@@ -346,7 +361,7 @@ export class MetricsDataService {
    */
   async fetchDeltaViaMsgPack(runsList) {
     const fetchStart = performance.now();
-    const url = `/api/projects/${encodeURIComponent(this.project)}/runs/metrics?runs=${encodeURIComponent(runsList)}&format=msgpack&since=${this.lastSSETimestamp}`;
+    const url = this._buildMetricsUrl(runsList, this.lastSSETimestamp);
 
     console.log('[SSE] Fetching delta from:', url);
 
@@ -457,19 +472,12 @@ export class MetricsDataService {
    */
   closeSSE() {
     if (this.eventSource) {
-      // Remove event listeners before closing to prevent memory leaks
-      if (this.sseOpenHandler) {
-        this.eventSource.removeEventListener('open', this.sseOpenHandler);
-      }
-      if (this.sseMetricHandler) {
-        this.eventSource.removeEventListener('metric', this.sseMetricHandler);
-      }
-      if (this.sseStatusHandler) {
-        this.eventSource.removeEventListener('status', this.sseStatusHandler);
-      }
-      if (this.sseErrorHandler) {
-        this.eventSource.removeEventListener('error', this.sseErrorHandler);
-      }
+      removeEventListeners(this.eventSource, {
+        open: this.sseOpenHandler,
+        metric: this.sseMetricHandler,
+        status: this.sseStatusHandler,
+        error: this.sseErrorHandler,
+      });
       this.eventSource.close();
       this.eventSource = null;
     }
