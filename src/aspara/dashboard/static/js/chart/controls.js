@@ -34,7 +34,8 @@ export class ChartControls {
     this.downloadMenu = null;
     this.helpButton = null;
     this.helpPopover = null;
-    this.logScaleButton = null;
+    this.logScaleControl = null;
+    this.logScaleCheckbox = null;
 
     // Document click handler (stored for cleanup)
     this.documentClickHandler = null;
@@ -57,26 +58,26 @@ export class ChartControls {
             z-index: 10;
         `;
 
+    this.createLogScaleControl();
     this.createResetButton();
     this.createFullSizeButton();
     this.createDownloadButton();
     this.createHelpButton();
-    this.createLogScaleButton();
 
+    this.buttonContainer.appendChild(this.logScaleControl);
     this.buttonContainer.appendChild(this.resetButton);
     this.buttonContainer.appendChild(this.fullSizeButton);
     this.buttonContainer.appendChild(this.downloadButton);
-    this.buttonContainer.appendChild(this.logScaleButton);
     this.buttonContainer.appendChild(this.helpButton);
     this.chart.container.appendChild(this.buttonContainer);
 
-    this.updateLogScaleButton();
-    // Wire up callback so the button reflects scale changes from other sources
+    this.updateLogScaleControl();
+    // Wire up callback so the checkbox reflects scale changes from other sources
     // (e.g. keyboard shortcuts) without coupling Chart to ChartControls.
     const existingYScaleCallback = this.chart.onYScaleChange;
     this.chart.onYScaleChange = (scale) => {
       if (existingYScaleCallback) existingYScaleCallback(scale);
-      this.updateLogScaleButton();
+      this.updateLogScaleControl();
     };
   }
 
@@ -175,27 +176,56 @@ export class ChartControls {
     this.downloadButton.addEventListener('click', () => this.toggleDownloadMenu());
   }
 
-  createLogScaleButton() {
-    this.logScaleButton = document.createElement('button');
-    styleControlButton(this.logScaleButton, CHART_CONTROL_LABELS.toggleLogScale);
-    this.logScaleButton.style.width = 'auto';
-    this.logScaleButton.style.padding = '0 10px';
-    this.logScaleButton.style.fontSize = '12px';
-    this.logScaleButton.style.fontWeight = '500';
-    this.logScaleButton.setAttribute('aria-pressed', 'false');
+  createLogScaleControl() {
+    const controlId = `logscale-${Math.random().toString(36).slice(2, 9)}`;
 
-    this.attachButtonHover(this.logScaleButton);
-    this.logScaleButton.addEventListener('click', () => this.chart.toggleYScale());
+    this.logScaleControl = document.createElement('label');
+    this.logScaleControl.htmlFor = controlId;
+    this.logScaleControl.style.cssText = `
+            height: 32px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            gap: 6px;
+            font-size: 12px;
+            color: #555;
+            cursor: pointer;
+            user-select: none;
+        `;
+
+    this.logScaleCheckbox = document.createElement('input');
+    this.logScaleCheckbox.type = 'checkbox';
+    this.logScaleCheckbox.id = controlId;
+    this.logScaleCheckbox.setAttribute('aria-label', CHART_CONTROL_LABELS.toggleLogScale);
+    this.logScaleCheckbox.style.cursor = 'pointer';
+
+    const labelText = document.createElement('span');
+    labelText.textContent = 'logscale';
+
+    this.logScaleControl.appendChild(this.logScaleCheckbox);
+    this.logScaleControl.appendChild(labelText);
+
+    this.logScaleControl.addEventListener('mouseenter', () => {
+      this.logScaleControl.style.background = '#f5f5f5';
+      this.logScaleControl.style.borderColor = '#bbb';
+    });
+    this.logScaleControl.addEventListener('mouseleave', () => {
+      this.logScaleControl.style.background = 'white';
+      this.logScaleControl.style.borderColor = '#ddd';
+    });
+
+    this.logScaleCheckbox.addEventListener('change', () => {
+      this.chart.toggleYScale();
+    });
   }
 
-  updateLogScaleButton() {
-    if (!this.logScaleButton) return;
+  updateLogScaleControl() {
+    if (!this.logScaleCheckbox) return;
     const isLog = this.chart.yScale === 'log';
-    this.logScaleButton.textContent = isLog ? 'Log' : 'Linear';
-    this.logScaleButton.setAttribute('aria-pressed', isLog ? 'true' : 'false');
-    this.logScaleButton.style.background = isLog ? '#e8f0fe' : 'white';
-    this.logScaleButton.style.color = isLog ? '#1a73e8' : '#555';
-    this.logScaleButton.style.borderColor = isLog ? '#1a73e8' : '#ddd';
+    this.logScaleCheckbox.checked = isLog;
   }
 
   createHelpButton() {
@@ -232,7 +262,7 @@ export class ChartControls {
       { icon: '↺', text: 'Click reset to restore view' },
       { icon: '⛶', text: 'Click fullscreen to expand' },
       { icon: '⤓', text: 'Click download to export data' },
-      { icon: 'log', text: 'Click log to toggle y-axis scale' },
+      { icon: 'log', text: 'Check logscale to toggle y-axis scale' },
     ];
 
     for (const item of items) {
@@ -431,6 +461,7 @@ export class ChartControls {
     this.downloadMenu = null;
     this.helpButton = null;
     this.helpPopover = null;
-    this.logScaleButton = null;
+    this.logScaleControl = null;
+    this.logScaleCheckbox = null;
   }
 }

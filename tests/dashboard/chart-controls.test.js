@@ -84,7 +84,7 @@ describe('ChartControls', () => {
       expect(texts.some((t) => t.includes('Click reset to restore view'))).toBe(true);
       expect(texts.some((t) => t.includes('Click fullscreen to expand'))).toBe(true);
       expect(texts.some((t) => t.includes('Click download to export data'))).toBe(true);
-      expect(texts.some((t) => t.includes('Click log to toggle y-axis scale'))).toBe(true);
+      expect(texts.some((t) => t.includes('Check logscale to toggle y-axis scale'))).toBe(true);
     });
 
     test('clicking outside the help button closes the popover', () => {
@@ -96,23 +96,31 @@ describe('ChartControls', () => {
     });
   });
 
-  describe('log scale button', () => {
-    test('starts with Linear label and aria-pressed=false', () => {
-      expect(controls.logScaleButton.textContent).toBe('Linear');
-      expect(controls.logScaleButton.getAttribute('aria-pressed')).toBe('false');
+  describe('log scale control', () => {
+    test('renders a checkbox with logscale label at the left', () => {
+      expect(controls.logScaleControl).toBeTruthy();
+      expect(controls.logScaleCheckbox).toBeTruthy();
+      expect(controls.logScaleCheckbox.type).toBe('checkbox');
+      expect(controls.logScaleControl.textContent).toContain('logscale');
+      // It should be the first child of the button container (leftmost).
+      expect(controls.buttonContainer.firstChild).toBe(controls.logScaleControl);
     });
 
-    test('clicking toggles chart scale and updates label', () => {
+    test('starts unchecked for linear scale', () => {
+      expect(controls.logScaleCheckbox.checked).toBe(false);
+    });
+
+    test('checking the checkbox toggles chart scale', () => {
       const toggleSpy = vi.spyOn(chart, 'toggleYScale');
-      controls.logScaleButton.click();
+      controls.logScaleCheckbox.checked = true;
+      controls.logScaleCheckbox.dispatchEvent(new Event('change'));
       expect(toggleSpy).toHaveBeenCalled();
     });
 
-    test('updateLogScaleButton reflects log scale state', () => {
+    test('updateLogScaleControl checks the box for log scale', () => {
       chart.yScale = 'log';
-      controls.updateLogScaleButton();
-      expect(controls.logScaleButton.textContent).toBe('Log');
-      expect(controls.logScaleButton.getAttribute('aria-pressed')).toBe('true');
+      controls.updateLogScaleControl();
+      expect(controls.logScaleCheckbox.checked).toBe(true);
     });
   });
 
@@ -134,18 +142,23 @@ describe('ChartControls', () => {
       expect(controls.helpPopover).toBeNull();
     });
 
-    test('nulls out log scale button reference', () => {
+    test('nulls out log scale control references', () => {
       controls.destroy();
-      expect(controls.logScaleButton).toBeNull();
+      expect(controls.logScaleControl).toBeNull();
+      expect(controls.logScaleCheckbox).toBeNull();
     });
   });
 
   describe('accessibility', () => {
     test('every control button has an aria-label matching its title', () => {
-      for (const btn of [controls.resetButton, controls.fullSizeButton, controls.downloadButton, controls.logScaleButton, controls.helpButton]) {
+      for (const btn of [controls.resetButton, controls.fullSizeButton, controls.downloadButton, controls.helpButton]) {
         expect(btn.getAttribute('aria-label')).toBe(btn.title);
         expect(btn.getAttribute('aria-label')).not.toBe('');
       }
+    });
+
+    test('log scale checkbox has an aria-label', () => {
+      expect(controls.logScaleCheckbox.getAttribute('aria-label')).toBe(CHART_CONTROL_LABELS.toggleLogScale);
     });
 
     test('reset button aria-label is the SSOT label', () => {
