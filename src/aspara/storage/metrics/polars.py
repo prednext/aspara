@@ -366,10 +366,7 @@ class PolarsMetricsStorage(MetricsStorage):
         # the Parquet write had completed but the WAL was not yet cleared.
         # Clear the WAL now to prevent duplicate data on the next archive.
         if marker_path.exists():
-            logger.info(
-                f"Found stale archive marker for {self.project_name}/{self.run_name}; "
-                "clearing WAL to prevent data duplication"
-            )
+            logger.info(f"Found stale archive marker for {self.project_name}/{self.run_name}; clearing WAL to prevent data duplication")
             self._clear_wal(wal_path)
             marker_path.unlink(missing_ok=True)
 

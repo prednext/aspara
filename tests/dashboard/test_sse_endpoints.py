@@ -433,9 +433,7 @@ async def test_sse_response_includes_ping_frames(sse_test_client, monkeypatch):
 
     class _CapturingResponse:
         def __init__(self, content, **kwargs):
-            captured.setdefault("calls", []).append(
-                {"ping": kwargs.get("ping"), "send_timeout": kwargs.get("send_timeout")}
-            )
+            captured.setdefault("calls", []).append({"ping": kwargs.get("ping"), "send_timeout": kwargs.get("send_timeout")})
 
         async def __call__(self, scope, receive, send):
             await send({"type": "http.response.start", "status": 200, "headers": []})

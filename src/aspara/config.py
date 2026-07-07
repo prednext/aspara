@@ -245,9 +245,7 @@ def get_sse_heartbeat_interval() -> int:
     Environment variable:
         ASPARA_SSE_HEARTBEAT_INTERVAL: override the ping interval (default: 15)
     """
-    return int(
-        os.environ.get("ASPARA_SSE_HEARTBEAT_INTERVAL", _SSE_DEFAULT_HEARTBEAT_INTERVAL)
-    )
+    return int(os.environ.get("ASPARA_SSE_HEARTBEAT_INTERVAL", _SSE_DEFAULT_HEARTBEAT_INTERVAL))
 
 
 def get_sse_send_timeout() -> float:
@@ -265,6 +263,4 @@ def get_sse_dev_shutdown_timeout() -> float:
     Environment variable:
         ASPARA_SSE_DEV_SHUTDOWN_TIMEOUT: override the timeout (default: 2.0)
     """
-    return float(
-        os.environ.get("ASPARA_SSE_DEV_SHUTDOWN_TIMEOUT", _SSE_DEV_SHUTDOWN_TIMEOUT)
-    )
+    return float(os.environ.get("ASPARA_SSE_DEV_SHUTDOWN_TIMEOUT", _SSE_DEV_SHUTDOWN_TIMEOUT))

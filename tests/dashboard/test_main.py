@@ -181,9 +181,7 @@ class TestDevModeShutdownTimeout:
             return await original_wait_for(aw, timeout=timeout)
 
         monkeypatch.setattr(asyncio, "wait_for", spy_wait_for)
-        monkeypatch.setattr(
-            main_module.asyncio, "wait_for", spy_wait_for
-        )
+        monkeypatch.setattr(main_module.asyncio, "wait_for", spy_wait_for)
 
         # Seed an active SSE task that finishes immediately so gather resolves.
         async def _noop():

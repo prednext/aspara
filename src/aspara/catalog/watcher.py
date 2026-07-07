@@ -107,11 +107,7 @@ class DataDirWatcher:
         duplicate events.
         """
         instance = cls._instance
-        if (
-            instance is not None
-            and instance._task is not None
-            and not instance._task.done()
-        ):
+        if instance is not None and instance._task is not None and not instance._task.done():
             logger.info("[Watcher] Shutting down dispatch task")
             instance._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):

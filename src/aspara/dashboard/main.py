@@ -56,9 +56,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         #   so local development is never locked out
         # - It only takes effect on HTTPS responses from non-localhost hosts,
         #   which is exactly the production case (HF Spaces, internal LAN TLS)
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
-        )
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
         # Content Security Policy - basic policy
         # Allows self-origin scripts/styles, inline styles for chart libraries,
@@ -114,10 +112,7 @@ async def lifespan(app: FastAPI):
         # cancelled task can finish its `finally` cleanup (closing the
         # metrics iterator / watcher unsubscribe) before we give up.
         shutdown_timeout = get_sse_dev_shutdown_timeout()
-        logger.info(
-            f"[DEV MODE] Cancelling {len(app_state.active_sse_tasks)} active SSE tasks "
-            f"(timeout={shutdown_timeout}s)"
-        )
+        logger.info(f"[DEV MODE] Cancelling {len(app_state.active_sse_tasks)} active SSE tasks (timeout={shutdown_timeout}s)")
         for task in list(app_state.active_sse_tasks):
             task.cancel()
 
