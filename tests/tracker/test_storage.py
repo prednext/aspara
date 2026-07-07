@@ -175,7 +175,6 @@ def test_file_storage_load_drops_envelope_fields(temp_storage_dir):
 
     result = storage.load()
 
-    import polars as pl
 
     assert len(result) == 2
     assert "_loss" in result.columns

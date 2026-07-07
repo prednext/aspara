@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import aspara
+from aspara.exceptions import RunAlreadyExistsError
 
 
 @pytest.fixture
@@ -104,8 +105,6 @@ class TestLocalResumeCollision:
     """
 
     def test_resume_false_with_existing_run_raises(self, isolated_data_dir: Path) -> None:
-        from aspara.exceptions import RunAlreadyExistsError
-
         aspara.init(project="p", name="r")
         aspara.finish(quiet=True)
 
@@ -121,7 +120,7 @@ class TestLocalResumeCollision:
         steps_before = _read_metrics_steps(isolated_data_dir, "p", "r")
         assert steps_before == [0]
 
-        with pytest.raises(Exception):
+        with pytest.raises(RunAlreadyExistsError):
             aspara.init(project="p", name="r")
 
         # No new metrics should have been appended

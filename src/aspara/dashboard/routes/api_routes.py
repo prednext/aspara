@@ -86,8 +86,7 @@ def _stream_zip(
     Yields:
         Chunks of the completed ZIP file.
     """
-    buf = tempfile.SpooledTemporaryFile(max_size=_ZIP_SPOOL_MAX_BYTES, suffix=".zip")
-    try:
+    with tempfile.SpooledTemporaryFile(max_size=_ZIP_SPOOL_MAX_BYTES, suffix=".zip") as buf:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for filename, file_path, _ in artifact_entries:
                 zip_file.write(file_path, filename)
@@ -97,8 +96,6 @@ def _stream_zip(
             if not chunk:
                 break
             yield chunk
-    finally:
-        buf.close()
 
 
 @router.get("/api/projects/{project}/runs/{run}/artifacts/download")
