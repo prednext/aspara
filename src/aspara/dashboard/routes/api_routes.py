@@ -11,11 +11,13 @@ This module handles all REST API endpoints:
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import os
+import tempfile
+import urllib.parse
 import zipfile
 from collections import defaultdict
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -59,6 +61,42 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Spool threshold: zips smaller than this stay in memory; larger ones
+# roll over to a temp file on disk. 1 MiB keeps per-request memory
+# bounded while avoiding disk I/O for the common small-artifact case.
+_ZIP_SPOOL_MAX_BYTES = 1 << 20  # 1 MiB
+_ZIP_STREAM_CHUNK_SIZE = 64 * 1024  # 64 KiB
+
+
+def _stream_zip(
+    artifact_entries: list[tuple[str, str, int]],
+) -> Iterator[bytes]:
+    """Build a ZIP on a SpooledTemporaryFile and yield it in chunks.
+
+    The ZIP is written to a ``SpooledTemporaryFile`` (in-memory up to
+    ``_ZIP_SPOOL_MAX_BYTES``, then transparently rolled to a temp file on
+    disk). After the ZIP is finalised the file pointer is rewound and the
+    content is yielded in fixed-size chunks. The temp file is closed in
+    the ``finally`` block so it is cleaned up even on client disconnect.
+
+    Args:
+        artifact_entries: List of (name, path, size) tuples for the
+            files to include in the ZIP.
+
+    Yields:
+        Chunks of the completed ZIP file.
+    """
+    with tempfile.SpooledTemporaryFile(max_size=_ZIP_SPOOL_MAX_BYTES, suffix=".zip") as buf:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for filename, file_path, _ in artifact_entries:
+                zip_file.write(file_path, filename)
+        buf.seek(0)
+        while True:
+            chunk = buf.read(_ZIP_STREAM_CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk
+
 
 @router.get("/api/projects/{project}/runs/{run}/artifacts/download")
 async def download_artifacts_zip(
@@ -94,16 +132,21 @@ async def download_artifacts_zip(
     if not os.path.exists(artifacts_dir_str):
         raise HTTPException(status_code=404, detail="No artifacts found for this run")
 
-    # Single-pass: collect file info using scandir (caches stat results)
+    # Single-pass: collect file info using scandir (caches stat results).
+    # Use follow_symlinks=False so that symlinks in the artifacts directory
+    # are not followed — this prevents a local attacker from tricking the
+    # ZIP builder into bundling files outside data_dir.
     artifact_entries: list[tuple[str, str, int]] = []  # (name, path, size)
     total_size = 0
 
     with os.scandir(artifacts_dir_str) as entries:
         for entry in entries:
-            if entry.is_file():
-                size = entry.stat().st_size  # Uses cached stat
+            if entry.is_file(follow_symlinks=False):
+                size = entry.stat(follow_symlinks=False).st_size
                 artifact_entries.append((entry.name, entry.path, size))
                 total_size += size
+            elif entry.is_symlink():
+                logger.warning(f"Skipping symlink in artifacts directory: {entry.path}")
 
     if not artifact_entries:
         raise HTTPException(status_code=404, detail="No artifact files found")
@@ -116,28 +159,22 @@ async def download_artifacts_zip(
             detail=(f"Total artifacts size ({total_size} bytes) exceeds maximum ZIP size limit ({limits.max_zip_size} bytes)"),
         )
 
-    # Create ZIP file in memory
-    zip_buffer = io.BytesIO()
-
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for filename, file_path, _ in artifact_entries:
-            # Add file to zip with just the filename (no directory structure)
-            zip_file.write(file_path, filename)
-
-    zip_buffer.seek(0)
-
     # Generate filename with timestamp
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     zip_filename = f"{project}_{run}_artifacts_{timestamp}.zip"
 
-    # Return as streaming response
-    # Encode filename for Content-Disposition header to prevent header injection
-    # Use RFC 5987 encoding for non-ASCII characters
-    import urllib.parse
-
+    # Encode filename for Content-Disposition header to prevent header
+    # injection. Use RFC 5987 encoding for non-ASCII characters.
     encoded_filename = urllib.parse.quote(zip_filename, safe="")
+
+    # Build the ZIP using a SpooledTemporaryFile so that memory usage is
+    # bounded (small zips stay in memory up to the spool threshold; larger
+    # ones roll over to a temp file on disk). The generator then streams
+    # the file in fixed-size chunks, keeping per-request memory constant
+    # regardless of total ZIP size. The temp file is cleaned up in the
+    # generator's finally block.
     return StreamingResponse(
-        io.BytesIO(zip_buffer.read()),
+        _stream_zip(artifact_entries),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
@@ -246,8 +283,12 @@ async def get_project_metadata_api(
     Raises:
         HTTPException: 400 if project name is invalid.
     """
-    # Use ProjectCatalog metadata API (synchronous call inside async endpoint)
-    metadata = project_catalog.get_metadata(project)
+    # Use ProjectCatalog metadata API.
+    # Read-only catalog call: offload to a worker thread so the event loop
+    # is not blocked while waiting on file I/O. Write paths
+    # (update_metadata / delete) stay synchronous because they use a
+    # read-modify-write pattern that would race if run concurrently.
+    metadata = await asyncio.to_thread(project_catalog.get_metadata, project)
     return Metadata.model_validate(metadata)
 
 
@@ -271,7 +312,7 @@ async def update_project_metadata_api(
         HTTPException: 400 if project name is invalid.
     """
     if is_read_only():
-        existing = project_catalog.get_metadata(project)
+        existing = await asyncio.to_thread(project_catalog.get_metadata, project)
         return Metadata.model_validate(existing)
 
     update_data = metadata.model_dump(exclude_none=True)
@@ -336,8 +377,11 @@ async def get_run_metadata_api(
     Raises:
         HTTPException: 400 if project/run name is invalid.
     """
-    # Use RunCatalog metadata API
-    metadata = run_catalog.get_metadata(project, run)
+    # Read-only catalog call: offload to a worker thread so the event
+    # loop is not blocked on file I/O. Write paths stay synchronous to
+    # avoid read-modify-write races (see get_project_metadata_api for
+    # the rationale).
+    metadata = await asyncio.to_thread(run_catalog.get_metadata, project, run)
     return metadata
 
 
@@ -363,7 +407,7 @@ async def update_run_metadata_api(
         HTTPException: 400 if project/run name is invalid.
     """
     if is_read_only():
-        existing = run_catalog.get_metadata(project, run)
+        existing = await asyncio.to_thread(run_catalog.get_metadata, project, run)
         return existing
 
     update_data = metadata.model_dump(exclude_none=True)

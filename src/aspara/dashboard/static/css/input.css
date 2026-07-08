@@ -1,6 +1,25 @@
 @import "tailwindcss";
 @source "../../templates/**/*.mustache";
 
+/* === Global reduced-motion guard ===
+ * Disable all CSS animations and transitions when the user has
+ * requested reduced motion at the OS / browser level. This is the
+ * single source of truth for reduced-motion handling — component-
+ * specific @media blocks are no longer needed.
+ * Order matters: this must come after @import "tailwindcss" so it
+ * can override Tailwind's animate-* utilities (e.g. animate-pulse).
+ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
 @theme {
   --color-action: #2C2520;
   --color-action-hover: #1a1512;
@@ -51,13 +70,6 @@
 /* Sidebar animation - optimized for responsiveness */
 #runs-sidebar {
     transition: width 250ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Accessibility: respect reduced motion preference */
-@media (prefers-reduced-motion: reduce) {
-    #runs-sidebar {
-        transition: none;
-    }
 }
 
 .content-area {
@@ -163,9 +175,43 @@ dialog.delete-dialog::backdrop {
     @apply focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2;
 }
 
-/* Reduced motion support */
-@media (prefers-reduced-motion: reduce) {
-    .card-interactive {
-        @apply transition-none;
-    }
+/* === SSE Status Indicator === */
+
+.sse-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.sse-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+}
+
+.sse-dot--connected {
+    background: var(--color-status-success);
+    animation: sse-pulse 2s ease-in-out infinite;
+}
+
+.sse-dot--reconnecting {
+    background: var(--color-status-warning);
+    animation: sse-blink 1s ease-in-out infinite;
+}
+
+.sse-dot--disconnected {
+    background: var(--color-status-error);
+}
+
+@keyframes sse-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+@keyframes sse-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
 }

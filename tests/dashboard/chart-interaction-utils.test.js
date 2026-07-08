@@ -73,6 +73,36 @@ describe('calculateDataRanges', () => {
     expect(result.yMin).toBe(-10);
     expect(result.yMax).toBe(10);
   });
+
+  test('log scale filters out non-positive y values', () => {
+    const series = [
+      {
+        data: {
+          steps: [0, 1, 2, 3],
+          values: [0, -1, 0.5, 10],
+        },
+      },
+    ];
+
+    const result = calculateDataRanges(series, 'log');
+    expect(result.xMin).toBe(0);
+    expect(result.xMax).toBe(3);
+    expect(result.yMin).toBe(0.5);
+    expect(result.yMax).toBe(10);
+  });
+
+  test('log scale returns null when all y values are non-positive', () => {
+    const series = [
+      {
+        data: {
+          steps: [0, 1],
+          values: [0, -5],
+        },
+      },
+    ];
+
+    expect(calculateDataRanges(series, 'log')).toBeNull();
+  });
 });
 
 describe('binarySearchNearestStep', () => {
@@ -294,7 +324,7 @@ describe('Performance: Binary search', () => {
       console.log('Scalability test (binary search):');
       console.log(`  Both ${smallCount} and ${largeCount} points are too fast to measure - excellent!`);
     } else {
-      expect(timeRatio).toBeLessThan(20); // CI環境での変動を許容 (O(log n)なので100xにはならない)
+      expect(timeRatio).toBeLessThan(20); // Allow for CI environment variance (won't be 100x since it's O(log n))
 
       console.log('Scalability test (binary search):');
       console.log(`  ${smallCount} points: ${smallTime.toFixed(4)}ms`);

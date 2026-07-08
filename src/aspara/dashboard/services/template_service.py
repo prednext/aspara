@@ -13,7 +13,7 @@ from typing import Any
 import pystache
 
 from aspara.catalog import ProjectInfo, RunInfo
-from aspara.config import is_dev_mode
+from aspara.config import get_resource_limits, is_dev_mode
 
 BASE_DIR = Path(__file__).parent.parent
 _mustache_renderer = pystache.Renderer(search_dirs=[str(BASE_DIR / "templates")])
@@ -59,6 +59,9 @@ def render_mustache_response(template_name: str, context: dict[str, Any]) -> str
         "current_year": datetime.now(timezone.utc).year,
         "page_title": context.get("page_title", "Aspara"),
         "dev_mode": is_dev_mode(),
+        # Expose server-side resource limits to the client so the server
+        # remains the single source of truth for validation bounds.
+        "max_notes_length": get_resource_limits().max_notes_length,
     })
 
     # Render content template

@@ -1,5 +1,5 @@
 /**
- * ChartColorPalette の色パレット・RunStyleRegistryのテスト
+ * Tests for the ChartColorPalette color palette and RunStyleRegistry
  */
 
 import { beforeEach, describe, expect, test } from 'vitest';

@@ -3,16 +3,16 @@
 RESTful API endpoints using FastAPI APIRouter.
 """
 
+import json
 import logging
 import os
-import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, UploadFile
 
-from aspara.config import get_data_dir, is_read_only
+from aspara.config import get_data_dir, get_resource_limits, is_read_only
 from aspara.models import MetricRecord
 from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.utils import validators
@@ -28,12 +28,10 @@ from .models import (
     RunCreateResponse,
     StatusResponse,
     SummaryUpdateRequest,
+    TagsUpdateRequest,
 )
 
 logger = logging.getLogger(__name__)
-
-# Maximum artifact file size (100MB)
-MAX_ARTIFACT_SIZE = 100 * 1024 * 1024
 
 router = APIRouter()
 
@@ -109,10 +107,40 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
     data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
-    # Detect duplicate run by checking existing metadata file
+    # Detect existing run by checking metadata file
     metadata_path = base_dir / project_name / f"{request.name}.meta.json"
     if metadata_path.exists():
-        raise HTTPException(status_code=409, detail="Run already exists")
+        if not request.resume:
+            raise HTTPException(status_code=409, detail="Run already exists")
+        # Resume path: reuse existing run_id and reset finish state.
+        try:
+            with open(metadata_path) as f:
+                existing_meta = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to read existing run metadata",
+            ) from e
+        run_id = existing_meta.get("run_id") or uuid.uuid4().hex[:16]
+        storage = RunMetadataStorage(
+            base_dir=str(data_dir),
+            project_name=project_name,
+            run_name=request.name,
+        )
+        storage.reset_finish()
+        if request.config:
+            storage.update_config(request.config)
+        if request.project_tags:
+            update_project_metadata_tags(
+                base_dir=data_dir,
+                project_name=project_name,
+                new_tags=request.project_tags,
+            )
+        return RunCreateResponse(
+            project=project_name,
+            name=request.name,
+            run_id=run_id,
+        )
 
     # Initialize run-level metadata using RunMetadataStorage
     storage = RunMetadataStorage(
@@ -267,13 +295,6 @@ async def upload_artifact(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
 
-        # Check file size limit
-        if file.size and file.size > MAX_ARTIFACT_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large: {file.size} bytes (max: {MAX_ARTIFACT_SIZE} bytes)",
-            )
-
         # Set up artifacts directory
         data_dir = get_data_dir()
         base_dir = Path(data_dir)
@@ -287,14 +308,43 @@ async def upload_artifact(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
 
-        # Save uploaded file
-        with open(dest_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+        # Save uploaded file with streaming size enforcement.
+        # UploadFile.size may be None under chunked transfer encoding, so
+        # we cannot rely on it alone. Read in fixed-size chunks and track
+        # the cumulative bytes written; abort (and clean up the partial
+        # file) as soon as the limit is exceeded. The limit is the SSOT
+        # value from ResourceLimits.max_file_size (env-configurable via
+        # ASPARA_MAX_FILE_SIZE).
+        max_file_size = get_resource_limits().max_file_size
+        written = 0
+        chunk_size = 1 << 20  # 1 MiB
+        try:
+            with open(dest_path, "wb") as f:
+                while True:
+                    chunk = file.file.read(chunk_size)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_file_size:
+                        f.close()
+                        dest_path.unlink(missing_ok=True)
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File too large: exceeds limit of {max_file_size} bytes",
+                        )
+                    f.write(chunk)
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Clean up partial file on any write error
+            dest_path.unlink(missing_ok=True)
+            logger.error(f"Error writing artifact {artifact_name}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to write artifact") from e
 
         logger.info(f"Uploaded artifact: {artifact_name} to {project_name}/{run_name}")
 
         # Get file size
-        file_size = os.path.getsize(dest_path)
+        file_size = written
 
         # Prepare artifact metadata
         artifact_data = {
@@ -495,3 +545,58 @@ async def finish_run(
     except Exception as e:
         logger.error(f"Error finishing run: {e}")
         raise HTTPException(status_code=500, detail="Failed to finish run") from e
+
+
+@router.post(
+    "/api/v1/projects/{project_name}/runs/{run_name}/tags",
+    response_model=StatusResponse,
+    tags=["Runs"],
+    dependencies=[Depends(verify_csrf_header)],
+)
+async def update_tags(
+    project_name: str,
+    run_name: str,
+    request: TagsUpdateRequest,
+) -> StatusResponse:
+    """Update tags for a run.
+
+    Args:
+        project_name: Target project name
+        run_name: Target run name
+        request: Tags update request containing the new tag list
+
+    Returns:
+        StatusResponse: Response with status
+
+    Raises:
+        HTTPException: If validation fails or run doesn't exist
+    """
+    # Validate input names to prevent path traversal
+    try:
+        validators.validate_project_name(project_name)
+        validators.validate_run_name(run_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    if is_read_only():
+        return StatusResponse()
+
+    data_dir = get_data_dir()
+    base_dir = Path(data_dir)
+
+    # Check if run exists
+    metadata_path = base_dir / project_name / f"{run_name}.meta.json"
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    try:
+        storage = RunMetadataStorage(
+            base_dir=str(data_dir),
+            project_name=project_name,
+            run_name=run_name,
+        )
+        storage.set_tags(request.tags)
+        return StatusResponse()
+    except Exception as e:
+        logger.error(f"Error updating tags: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update tags") from e

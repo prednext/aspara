@@ -45,6 +45,7 @@ class RunCreateRequest(BaseModel):
     tags: list[str] = []
     notes: str = ""
     project_tags: list[str] | None = None
+    resume: bool = False
 
 
 class RunCreateResponse(BaseModel):
@@ -80,6 +81,12 @@ class FinishRequest(BaseModel):
     """Request model for finishing a run."""
 
     exit_code: int = 0
+
+
+class TagsUpdateRequest(BaseModel):
+    """Request model for updating run tags."""
+
+    tags: list[str] = []
 
 
 class StatusResponse(BaseModel):

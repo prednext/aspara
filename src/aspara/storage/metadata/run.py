@@ -152,6 +152,18 @@ class RunMetadataStorage(BaseMetadataStorage):
 
         self._save()
 
+    def reset_finish(self) -> None:
+        """Reset finish state so the run can receive new metrics.
+
+        Used when resuming an existing run: clears ``is_finished``,
+        ``exit_code``, ``finish_time`` and resets ``status`` to WIP.
+        """
+        self._metadata["is_finished"] = False
+        self._metadata["exit_code"] = None
+        self._metadata["finish_time"] = None
+        self._metadata["status"] = RunStatus.WIP.value
+        self._save()
+
     def set_tags(self, tags: list[str]) -> None:
         """Set tags (replaces existing tags).
 
@@ -193,9 +205,10 @@ class RunMetadataStorage(BaseMetadataStorage):
         Returns:
             True if file was deleted, False if it didn't exist
         """
-        if not self._metadata_path.exists():
+        try:
+            self._metadata_path.unlink()
+        except FileNotFoundError:
             return False
-        self._metadata_path.unlink()
         self._metadata = {
             "run_id": None,
             "tags": [],

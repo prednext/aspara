@@ -152,6 +152,16 @@ class TestRunBasic:
             assert metadata["is_finished"] is True
             assert metadata["exit_code"] == 0
 
+    def test_run_finish_accepts_flush_timeout_local(self):
+        """LocalRun.finish() must accept flush_timeout for signature parity with RemoteRun."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run = Run(name="test_run", dir=temp_dir)
+            run.log({"loss": 0.5})
+            # Should not raise TypeError
+            run.finish(exit_code=0, quiet=True, flush_timeout=10.0)
+            metadata = read_metadata(temp_dir, "default", "test_run")
+            assert metadata["is_finished"] is True
+
     def test_run_log_after_finish_raises(self):
         """Test that logging after finish raises error."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -160,6 +170,14 @@ class TestRunBasic:
 
             with pytest.raises(RuntimeError, match="Cannot log to a finished run"):
                 run.log({"loss": 0.5})
+
+    def test_local_run_flush_returns_int(self):
+        """Test that LocalRun.flush() returns an int (0), not None."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run = Run(name="test_run", dir=temp_dir)
+            result = run.flush()
+            assert result == 0
+            assert isinstance(result, int)
 
 
 class TestConfig:
@@ -359,7 +377,7 @@ class TestModuleLevelAPI:
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
         monkeypatch.setattr(
             "aspara.run._remote_run.TrackerClient.create_run",
-            lambda self, name, project, config, tags, notes, project_tags=None: {"run_id": "server-gen-id", "name": name},
+            lambda self, name, project, config, tags, notes, project_tags=None, resume=False: {"run_id": "server-gen-id", "name": name},
         )
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
 
@@ -387,7 +405,7 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = MagicMock()
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):  # type: ignore[override]
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):  # type: ignore[override]
             captured_kwargs.update(
                 name=name,
                 project=project,
@@ -421,7 +439,7 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):  # type: ignore[override]
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):  # type: ignore[override]
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
@@ -450,7 +468,7 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):  # type: ignore[override]
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):  # type: ignore[override]
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)

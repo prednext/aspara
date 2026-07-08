@@ -15,6 +15,7 @@
         <p class="text-sm {{#is_corrupted}}text-status-error{{/is_corrupted}}{{^is_corrupted}}text-text-secondary{{/is_corrupted}}">Project: <a href="/projects/{{project}}" class="text-accent hover:underline">{{project}}</a></p>
         {{#is_corrupted}}
         <p class="text-sm text-status-error mt-1">{{error_message}}</p>
+        <p class="text-xs text-text-muted mt-1">This run's metadata may be incomplete. You can delete it from the runs list and re-run your experiment.</p>
         {{/is_corrupted}}
       </div>
 
@@ -28,13 +29,20 @@
           <span class="ml-2 font-mono text-text-secondary">{{duration}}</span>
         </div>
         <div>
+          <span class="font-semibold">Steps:</span>
+          <span class="ml-2 font-mono text-text-secondary">{{step_count}}</span>
+        </div>
+        <div>
           <span class="font-semibold">Status:</span>
           <span class="ml-2">
             {{#is_corrupted}}
             <span class="text-status-error font-medium">Error</span>
             {{/is_corrupted}}
             {{^is_corrupted}}
-            <span class="text-status-success font-medium">Completed</span>
+            {{#is_wip}}<span class="text-status-warning font-medium">Running</span>{{/is_wip}}
+            {{#is_completed}}<span class="text-status-success font-medium">Completed</span>{{/is_completed}}
+            {{#is_failed}}<span class="text-status-error font-medium">Failed</span>{{/is_failed}}
+            {{#is_maybe_failed}}<span class="text-status-warning font-medium">Maybe Failed</span>{{/is_maybe_failed}}
             {{/is_corrupted}}
           </span>
         </div>

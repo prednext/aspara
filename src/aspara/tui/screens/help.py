@@ -19,14 +19,18 @@ HELP_TEXT = """\
   [cyan]q[/]           Quit application
   [cyan]?[/]           Show this help
   [cyan]Backspace[/]   Go back to previous screen
-  [cyan]Esc[/]         Go back / Close modal
+  [cyan]Esc[/]         Close modal / Unfocus search
 
 [bold underline]Navigation (vim-style)[/bold underline]
   [cyan]j[/] / [cyan]↓[/]       Move down
   [cyan]k[/] / [cyan]↑[/]       Move up
   [cyan]Enter[/]       Select / Confirm
+  [cyan]Tab[/]         Focus next widget (e.g. metric charts)
+
+[bold underline]List Screens (Projects, Runs)[/bold underline]
   [cyan]/[/]           Focus search input
   [cyan]s[/]           Toggle sort order
+  [cyan]Ctrl+r[/]       Reload list from disk
 
 [bold underline]Chart View[/bold underline]
   [cyan]h[/] / [cyan]←[/]       Pan left
@@ -34,6 +38,8 @@ HELP_TEXT = """\
   [cyan]+[/] / [cyan]=[/]       Zoom in
   [cyan]-[/]           Zoom out
   [cyan]r[/]           Reset view
+  [cyan]g[/]           Jump to start
+  [cyan]G[/]           Jump to end
   [cyan]w[/]           Toggle live watch mode
 
 [bold underline]Status Icons[/bold underline]

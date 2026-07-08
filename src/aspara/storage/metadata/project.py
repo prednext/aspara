@@ -5,9 +5,11 @@ This module provides storage for project metadata (notes, tags, timestamps)
 used by the catalog and dashboard layers.
 """
 
+import copy
+import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from aspara.logger import logger
 from aspara.utils.validators import validate_name, validate_safe_path
@@ -21,6 +23,44 @@ class ProjectMetadataStorage(BaseMetadataStorage):
     Stores project metadata in {project_name}/metadata.json files.
     This includes notes, tags, created_at, and updated_at timestamps.
     """
+
+    _DEFAULT_METADATA: ClassVar[dict[str, Any]] = {
+        "notes": "",
+        "tags": [],
+        "created_at": None,
+        "updated_at": None,
+    }
+
+    @classmethod
+    def default_metadata(cls) -> dict[str, Any]:
+        """Return a fresh copy of the default metadata values."""
+        return copy.deepcopy(cls._DEFAULT_METADATA)
+
+    @classmethod
+    def _normalize_loaded(cls, loaded: dict[str, Any]) -> dict[str, Any]:
+        """Normalise loaded metadata, filling missing fields with defaults."""
+        return {
+            "notes": loaded.get("notes", ""),
+            "tags": loaded.get("tags", []),
+            "created_at": loaded.get("created_at"),
+            "updated_at": loaded.get("updated_at"),
+        }
+
+    @classmethod
+    def load_metadata_file(cls, path: Path) -> dict[str, Any]:
+        """Load and normalise metadata from a JSON file.
+
+        Returns the default metadata if the file is missing or unreadable.
+        """
+        try:
+            with open(path, encoding="utf-8") as f:
+                loaded = json.load(f)
+        except FileNotFoundError:
+            return cls.default_metadata()
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to load metadata from {path}: {type(e).__name__}: {e}")
+            return cls.default_metadata()
+        return cls._normalize_loaded(loaded)
 
     def __init__(self, base_dir: str | Path, project_name: str) -> None:
         """Initialize project metadata storage.
@@ -40,12 +80,7 @@ class ProjectMetadataStorage(BaseMetadataStorage):
         self._metadata_path = self._get_metadata_path()
         validate_safe_path(self._metadata_path, self.base_dir)
 
-        self._metadata: dict[str, Any] = {
-            "notes": "",
-            "tags": [],
-            "created_at": None,
-            "updated_at": None,
-        }
+        self._metadata: dict[str, Any] = self.default_metadata()
         self._load()
 
     def _get_metadata_path(self) -> Path:
@@ -58,12 +93,7 @@ class ProjectMetadataStorage(BaseMetadataStorage):
 
     def _merge_loaded(self, loaded: dict[str, Any]) -> dict[str, Any]:
         """Normalise loaded metadata, filling missing fields with defaults."""
-        return {
-            "notes": loaded.get("notes", ""),
-            "tags": loaded.get("tags", []),
-            "created_at": loaded.get("created_at"),
-            "updated_at": loaded.get("updated_at"),
-        }
+        return self._normalize_loaded(loaded)
 
     def update_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
         """Update metadata.
@@ -104,18 +134,12 @@ class ProjectMetadataStorage(BaseMetadataStorage):
         Returns:
             True if deleted, False if it didn't exist
         """
-        if not self._metadata_path.exists():
-            return False
-
         try:
             self._metadata_path.unlink()
-            self._metadata = {
-                "notes": "",
-                "tags": [],
-                "created_at": None,
-                "updated_at": None,
-            }
-            return True
+        except FileNotFoundError:
+            return False
         except OSError as e:
             logger.warning(f"Failed to delete project metadata file {self._metadata_path}: {e}")
             return False
+        self._metadata = self.default_metadata()
+        return True

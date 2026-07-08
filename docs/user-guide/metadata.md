@@ -23,8 +23,10 @@ run = aspara.init(
 - **tags**
     - A list of strings to label the run.
     - Useful for representing model architecture, dataset name, experiment version or group name.
+    - Up to 100 tags per run by default (configurable via `ASPARA_MAX_TAGS_COUNT`).
 - **notes**
     - Saves free-form notes about the experiment's purpose, assumptions, observations, etc.
+    - Up to 10 KB (10,240 characters) by default (configurable via `ASPARA_MAX_NOTES_LENGTH`).
 - **config**
     - A JSON object representing hyperparameters like learning rate and batch size, model and dataset settings, etc.
     - Can also be viewed in the dashboard, which helps with experiment reproducibility.

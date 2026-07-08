@@ -6,7 +6,8 @@ import pytest
 from textual.widgets import DataTable, Input
 
 from aspara.tui.app import AsparaTUIApp
-from aspara.tui.screens import HelpScreen, ProjectsScreen
+from aspara.tui.screens import HelpScreen, ProjectsScreen, RunDetailScreen
+from aspara.tui.screens.metric_chart import MetricChartScreen
 
 
 @pytest.fixture
@@ -113,4 +114,97 @@ class TestProjectsScreen:
             await pilot.press("j")
             await pilot.pause()
             await pilot.press("k")
+            await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_reload_projects(self, app: AsparaTUIApp) -> None:
+        """Test that Ctrl+r reloads the project list without error."""
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+r")
+            await pilot.pause()
+
+
+class TestRunDetailScreen:
+    """Tests for RunDetailScreen."""
+
+    @pytest.mark.asyncio
+    async def test_scroll_with_j_k(self, tmp_path) -> None:
+        """Test that j/k keys scroll the metrics container without error."""
+        # Create a minimal project/run directory so the catalog doesn't raise
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir(exist_ok=True)
+        (project_dir / "test_run.jsonl").touch()
+        (project_dir / "test_run.meta.json").write_text("{}")
+
+        app = AsparaTUIApp(data_dir=str(tmp_path))
+        async with app.run_test() as pilot:
+            screen = RunDetailScreen(project_name="test_project", run_name="test_run")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # j and k should not raise errors even with no metrics
+            await pilot.press("j")
+            await pilot.pause()
+            await pilot.press("k")
+            await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_tab_enter_opens_metric_chart(self, tmp_path) -> None:
+        """Test that Tab focuses a chart cell and Enter opens the metric chart."""
+        import json
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir(exist_ok=True)
+
+        # Write metrics data with one metric
+        with (project_dir / "test_run.jsonl").open("w") as f:
+            f.write(json.dumps({"timestamp": 1700000000000, "step": 0, "metrics": {"loss": 0.5}}) + "\n")
+            f.write(json.dumps({"timestamp": 1700000001000, "step": 1, "metrics": {"loss": 0.3}}) + "\n")
+
+        (project_dir / "test_run.meta.json").write_text("{}")
+
+        app = AsparaTUIApp(data_dir=str(tmp_path))
+        async with app.run_test() as pilot:
+            screen = RunDetailScreen(project_name="test_project", run_name="test_run")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # Tab to focus the first chart cell, then Enter to open it
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # Should have pushed MetricChartScreen
+            from aspara.tui.screens.metric_chart import MetricChartScreen
+
+            assert isinstance(app.screen, MetricChartScreen)
+
+
+class TestMetricChartScreen:
+    """Tests for MetricChartScreen."""
+
+    @pytest.mark.asyncio
+    async def test_jump_to_start_and_end(self, tmp_path) -> None:
+        """Test that g/G keys jump to start/end without error."""
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir(exist_ok=True)
+        (project_dir / "test_run.jsonl").touch()
+        (project_dir / "test_run.meta.json").write_text("{}")
+
+        app = AsparaTUIApp(data_dir=str(tmp_path))
+        async with app.run_test() as pilot:
+            screen = MetricChartScreen(
+                project_name="test_project",
+                run_name="test_run",
+                metric_name="loss",
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            # g and G should not raise errors even with no data
+            await pilot.press("g")
+            await pilot.pause()
+            await pilot.press("G")
             await pilot.pause()

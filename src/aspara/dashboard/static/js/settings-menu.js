@@ -2,6 +2,7 @@
  * Settings Menu JavaScript module
  * Handles hamburger menu interactions and settings toggles
  */
+import { registerPageLifecycle } from './lifecycle.js';
 
 const FULL_WIDTH_KEY = 'aspara-full-width';
 
@@ -149,7 +150,9 @@ class SettingsMenu {
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-  new SettingsMenu();
+  const page = new SettingsMenu();
+  window.__asparaPage = page;
+  registerPageLifecycle(page);
 });
 
 export { SettingsMenu };

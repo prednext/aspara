@@ -44,6 +44,16 @@ class TrackerClient:
         # Set X-Requested-With header for CSRF protection on all requests
         self.session.headers.update({"X-Requested-With": "XMLHttpRequest"})
 
+    def close(self) -> None:
+        """Close the HTTP session and release connection pool resources."""
+        self.session.close()
+
+    def __enter__(self) -> TrackerClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def create_run(
         self,
         name: str,
@@ -52,6 +62,7 @@ class TrackerClient:
         tags: list[str] | None,
         notes: str | None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
         """Create a new run on the tracker.
 
@@ -62,6 +73,7 @@ class TrackerClient:
             tags: List of tags
             notes: Run notes/description
             project_tags: Optional project-level tags
+            resume: If True, resume an existing run with the same name
 
         Returns:
             Parsed JSON response from the tracker (expected to contain
@@ -78,6 +90,7 @@ class TrackerClient:
                 "tags": tags or [],
                 "notes": notes or "",
                 "project_tags": project_tags,
+                "resume": resume,
             },
             timeout=_DEFAULT_TIMEOUT,
         )
@@ -175,6 +188,24 @@ class TrackerClient:
         )
         response.raise_for_status()
 
+    def update_tags(self, project: str, run_name: str, tags: list[str]) -> None:
+        """Update tags for a run on the tracker.
+
+        Args:
+            project: Project name
+            run_name: Run name
+            tags: New list of tags (replaces existing tags)
+
+        Raises:
+            requests.RequestException: If HTTP request fails
+        """
+        response = self.session.post(
+            f"{self.base_url}/api/v1/projects/{quote(project, safe='')}/runs/{quote(run_name, safe='')}/tags",
+            json={"tags": tags},
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+
     def health_check(self, timeout: float = 5.0) -> bool:
         """Check if the tracker server is healthy.
 
@@ -254,6 +285,7 @@ class RemoteRun(BaseRun):
         notes: str | None = None,
         tracker_uri: str | None = None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> None:
         """Initialize a new remote run.
 
@@ -264,6 +296,10 @@ class RemoteRun(BaseRun):
             tags: List of tags for this run.
             notes: Run notes/description (wandb-compatible).
             tracker_uri: Tracker server URI (required for RemoteRun)
+            project_tags: List of tags to add to the project.
+            resume: If True and a run with the same name already exists on the
+                tracker, resume it (reuse run_id, reset finish state). If no
+                existing run is found, a new run is created.
 
         Raises:
             ValueError: If tracker_uri is not provided
@@ -277,7 +313,7 @@ class RemoteRun(BaseRun):
         # Initialize tracker client
         self.client = TrackerClient(tracker_uri)
 
-        # Create run on tracker
+        # Create (or resume) run on tracker
         try:
             response = self.client.create_run(
                 name=self.name,
@@ -286,6 +322,7 @@ class RemoteRun(BaseRun):
                 tags=self.tags,
                 notes=self.notes,
                 project_tags=project_tags,
+                resume=resume,
             )
             # Server always generates run_id
             self.id = response["run_id"]
@@ -329,8 +366,10 @@ class RemoteRun(BaseRun):
         )
         self._retry_worker.start()
 
-        logger.info(f"RemoteRun {self.name} initialized")
-        logger.info(f"Sending metrics to: {tracker_uri}")
+        # User-facing guidance: where data is being sent and how to view it.
+        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'")
+        print(f"aspara: Sending metrics to: {tracker_uri}")
+        print("aspara: View results with: aspara dashboard")
 
     def log(
         self,
@@ -404,9 +443,12 @@ class RemoteRun(BaseRun):
             self.client.finish_run(self.project, self.name, exit_code)
         except requests.RequestException as e:
             logger.warning(f"Failed to finish run on tracker: {e}")
+        finally:
+            self.client.close()
 
         if not quiet:
-            logger.info(f"RemoteRun {self.name} finished with exit code {exit_code}")
+            print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
+            print("aspara: View results with: aspara dashboard")
 
     def log_artifact(
         self,
@@ -463,10 +505,19 @@ class RemoteRun(BaseRun):
     def set_tags(self, tags: list[str]) -> None:
         """Set tags for this run.
 
-        Note:
-            This method is not yet supported for remote runs.
+        Replaces the existing run-level tags with the provided list.
+
+        Args:
+            tags: List of tags
 
         Raises:
-            NotImplementedError: Always raised as remote tag setting is not implemented.
+            RuntimeError: If run has already finished
         """
-        raise NotImplementedError("set_tags is not yet supported for remote runs")
+        if self._finished:
+            raise RuntimeError("Cannot modify a finished run")
+
+        self.tags = tags
+        try:
+            self.client.update_tags(self.project, self.name, tags)
+        except Exception as e:
+            logger.warning(f"Failed to sync tags to tracker: {e}")

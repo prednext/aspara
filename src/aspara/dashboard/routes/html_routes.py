@@ -20,6 +20,8 @@ from starlette.requests import Request
 
 from aspara.config import is_read_only
 from aspara.exceptions import RunNotFoundError
+from aspara.models import RunStatus
+from aspara.utils.timestamp import parse_to_ms
 
 from ..dependencies import (
     ProjectCatalogDep,
@@ -36,18 +38,47 @@ from ..services.template_service import (
 router = APIRouter()
 
 
+def _format_duration_ms(duration_ms: float | int | None) -> str:
+    """Format a duration given in milliseconds into a human-readable string.
+
+    Returns ``"N/A"`` when no duration is available.
+    """
+    if duration_ms is None or duration_ms < 0:
+        return "N/A"
+    seconds = duration_ms / 1000.0
+    if seconds < 1:
+        return f"{int(duration_ms)}ms"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    total_seconds = int(seconds)
+    minutes = total_seconds // 60
+    secs = total_seconds % 60
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours < 24:
+        return f"{hours}h {mins}m"
+    days = hours // 24
+    hrs = hours % 24
+    return f"{days}d {hrs}h"
+
+
 @router.get("/")
 async def home(
     request: Request,
     project_catalog: ProjectCatalogDep,
 ) -> HTMLResponse:
     """Render the projects list page."""
-    projects = project_catalog.get_projects()
+    # Read-only catalog call: offload to worker threads so the event
+    # loop is not blocked on file I/O. Write paths stay synchronous to
+    # avoid read-modify-write races (see api_routes.get_project_metadata_api).
+    # Project metadata is loaded together with the directory scan in one pass
+    # to avoid the N+1 pattern of per-project file opens.
+    projects_with_metadata = await asyncio.to_thread(project_catalog.get_projects_with_metadata)
 
-    # Format projects for template, including metadata tags
     formatted_projects = []
-    for project in projects:
-        metadata = project_catalog.get_metadata(project.name)
+    for project, metadata in projects_with_metadata:
         tags = metadata.get("tags") or []
         formatted_projects.append(TemplateService.format_project_for_template(project, tags))
 
@@ -77,10 +108,10 @@ async def project_detail(
 ) -> HTMLResponse:
     """Project detail page - shows metrics charts."""
     # Check if project exists
-    if not project_catalog.exists(project):
+    if not await asyncio.to_thread(project_catalog.exists, project):
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
-    runs = run_catalog.get_runs(project)
+    runs = await asyncio.to_thread(run_catalog.get_runs, project)
 
     # Format runs for template (excluding corrupted runs)
     formatted_runs = []
@@ -123,10 +154,10 @@ async def list_project_runs(
 ) -> HTMLResponse:
     """List runs in a project."""
     # Check if project exists
-    if not project_catalog.exists(project):
+    if not await asyncio.to_thread(project_catalog.exists, project):
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
-    runs = run_catalog.get_runs(project)
+    runs = await asyncio.to_thread(run_catalog.get_runs, project)
 
     # Format runs for template
     formatted_runs = [TemplateService.format_run_for_list(run) for run in runs]
@@ -158,12 +189,12 @@ async def get_run(
 ) -> HTMLResponse:
     """Get run details including parameters and metrics."""
     # Check if project exists
-    if not project_catalog.exists(project):
+    if not await asyncio.to_thread(project_catalog.exists, project):
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
     # Get Run information and check if it's corrupted
     try:
-        current_run = run_catalog.get(project, run)
+        current_run = await asyncio.to_thread(run_catalog.get, project, run)
     except RunNotFoundError as e:
         raise HTTPException(status_code=404, detail=f"Run '{run}' not found in project '{project}'") from e
 
@@ -200,10 +231,66 @@ async def get_run(
 
     formatted_latest_metrics = [{"key": k, "value": f"{v:.4f}" if isinstance(v, int | float) else str(v)} for k, v in latest_metrics.items()]
 
-    # Get run start time from DataFrame
-    start_time = None
-    if len(df_metrics) > 0 and "timestamp" in df_metrics.columns:
-        start_time = df_metrics.select("timestamp").to_series().min()
+    # Resolve start/finish timestamps (in ms) from metadata. The metadata may
+    # store them as either UNIX milliseconds (real API) or ISO 8601 strings
+    # (legacy/test fixtures), so normalize via parse_to_ms.
+    start_time_raw = metadata.get("start_time")
+    finish_time_raw = metadata.get("finish_time")
+    start_time_ms: int | None = None
+    finish_time_ms: int | None = None
+    if start_time_raw is not None:
+        try:
+            start_time_ms = parse_to_ms(start_time_raw)
+        except ValueError:
+            start_time_ms = None
+    if finish_time_raw is not None:
+        try:
+            finish_time_ms = parse_to_ms(finish_time_raw)
+        except ValueError:
+            finish_time_ms = None
+
+    # Compute duration. For WIP runs (no finish_time), use the most recent
+    # metrics timestamp as the current end so the user sees elapsed time.
+    duration_ms: int | None = None
+    if start_time_ms is not None:
+        end_ms: int | None = finish_time_ms
+        if end_ms is None and len(df_metrics) > 0 and "timestamp" in df_metrics.columns:
+            last_ts = df_metrics.select("timestamp").to_series().max()
+            if isinstance(last_ts, datetime):
+                end_ms = int(last_ts.timestamp() * 1000)
+            elif isinstance(last_ts, (int, float)):
+                end_ms = int(last_ts)
+        if end_ms is not None:
+            duration_ms = end_ms - start_time_ms
+
+    if duration_ms is not None:
+        formatted_duration = _format_duration_ms(duration_ms)
+    elif not is_corrupted and current_run.status == RunStatus.WIP:
+        # WIP run with no metrics yet.
+        formatted_duration = "Running..."
+    else:
+        formatted_duration = "N/A"
+
+    # Step count = number of logged metric rows
+    step_count = len(df_metrics)
+
+    # Start time display: prefer metadata start_time, fall back to DataFrame
+    start_time_display = "N/A"
+    if start_time_ms is not None:
+        try:
+            from aspara.utils.timestamp import parse_to_datetime
+
+            start_time_display = parse_to_datetime(start_time_ms).strftime("%B %d, %Y at %I:%M %p")
+        except ValueError:
+            start_time_display = "N/A"
+    elif len(df_metrics) > 0 and "timestamp" in df_metrics.columns:
+        ts = df_metrics.select("timestamp").to_series().min()
+        if isinstance(ts, datetime):
+            start_time_display = ts.strftime("%B %d, %Y at %I:%M %p")
+
+    # Run status flags for template rendering
+    status = current_run.status
+    status_value = status.value
 
     context = {
         "page_title": f"{run} - Details",
@@ -219,8 +306,14 @@ async def get_run(
         "has_params": len(formatted_params) > 0,
         "latest_metrics": formatted_latest_metrics,
         "has_latest_metrics": len(formatted_latest_metrics) > 0,
-        "formatted_start_time": (start_time.strftime("%B %d, %Y at %I:%M %p") if isinstance(start_time, datetime) else "N/A"),
-        "duration": "N/A",  # We don't have duration data in current format
+        "formatted_start_time": start_time_display,
+        "duration": formatted_duration,
+        "step_count": step_count,
+        "status": status_value,
+        "is_wip": status == RunStatus.WIP,
+        "is_completed": status == RunStatus.COMPLETED,
+        "is_failed": status == RunStatus.FAILED,
+        "is_maybe_failed": status == RunStatus.MAYBE_FAILED,
         "has_tags": len(run_tags) > 0,
         "tags": run_tags,
         "artifacts": [TemplateService.format_artifact_for_template(artifact) for artifact in artifacts],

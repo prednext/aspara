@@ -417,3 +417,63 @@ async def test_keeping_anext_task_keeps_generator_alive(tmp_path):
         await pending_metric_task
 
     await subscribe_gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sse_response_includes_ping_frames(sse_test_client, monkeypatch):
+    """SSE stream must be constructed with ping and send_timeout parameters
+    to keep the connection alive and detect dead clients.
+    """
+    from aspara.dashboard.routes import sse_routes
+
+    # Patch EventSourceResponse to capture the ping / send_timeout args.
+    # The real EventSourceResponse is a Starlette Response (ASGI callable);
+    # we replace it with a minimal ASGI app that returns 200 OK.
+    captured: dict = {}
+
+    class _CapturingResponse:
+        def __init__(self, content, **kwargs):
+            captured.setdefault("calls", []).append({"ping": kwargs.get("ping"), "send_timeout": kwargs.get("send_timeout")})
+
+        async def __call__(self, scope, receive, send):
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    monkeypatch.setattr(sse_routes, "EventSourceResponse", _CapturingResponse)
+
+    client, data_dir = sse_test_client
+    project_dir = data_dir / "test_project"
+    project_dir.mkdir()
+
+    monkeypatch.setenv("ASPARA_SSE_HEARTBEAT_INTERVAL", "7")
+    monkeypatch.setenv("ASPARA_SSE_SEND_TIMEOUT", "42.0")
+
+    since = 0
+    response = client.get(
+        f"/api/projects/test_project/runs/stream?runs=run1&since={since}",
+        headers={"Accept": "text/event-stream"},
+    )
+    assert response.status_code == 200
+
+    # The final EventSourceResponse call (the real stream, not error generators)
+    # should carry the configured ping and send_timeout values.
+    final_call = captured["calls"][-1]
+    assert final_call["ping"] == 7, f"Expected ping=7, got {final_call}"
+    assert final_call["send_timeout"] == 42.0, f"Expected send_timeout=42.0, got {final_call}"
+
+
+def test_sse_config_defaults_and_overrides(monkeypatch):
+    """SSE heartbeat / send_timeout config respects env vars and defaults."""
+    from aspara.config import get_sse_heartbeat_interval, get_sse_send_timeout
+
+    # Defaults
+    monkeypatch.delenv("ASPARA_SSE_HEARTBEAT_INTERVAL", raising=False)
+    monkeypatch.delenv("ASPARA_SSE_SEND_TIMEOUT", raising=False)
+    assert get_sse_heartbeat_interval() == 15
+    assert get_sse_send_timeout() == 30.0
+
+    # Overrides
+    monkeypatch.setenv("ASPARA_SSE_HEARTBEAT_INTERVAL", "5")
+    monkeypatch.setenv("ASPARA_SSE_SEND_TIMEOUT", "10.5")
+    assert get_sse_heartbeat_interval() == 5
+    assert get_sse_send_timeout() == 10.5

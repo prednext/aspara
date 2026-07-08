@@ -26,7 +26,7 @@ class TestRemoteRunOfflineQueue:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None):
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
@@ -235,6 +235,42 @@ class TestRemoteRunOfflineQueue:
         assert not thread.is_alive()
         assert run._retry_worker._thread is None
 
+    def test_remote_run_finish_closes_client_session(self, mock_tracker_client, temp_data_dir):
+        """Test that finish() closes the TrackerClient HTTP session."""
+        from aspara.run._remote_run import RemoteRun
+
+        run = RemoteRun(
+            name="test_run",
+            project="test_project",
+            tracker_uri="http://localhost:3142",
+        )
+
+        run.finish(quiet=True)
+
+        # session.close() should have been called
+        mock_tracker_client.close.assert_called_once()
+
+    def test_tracker_client_close_and_context_manager(self):
+        """Test TrackerClient.close() and context manager protocol."""
+        from unittest.mock import patch
+
+        from aspara.run._remote_run import TrackerClient
+
+        # Patch requests.Session to track close() calls
+        with patch("aspara.run._remote_run.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+
+            client = TrackerClient("http://localhost:3142")
+            client.close()
+            mock_session.close.assert_called_once()
+
+            # Context manager should also close
+            mock_session.reset_mock()
+            with TrackerClient("http://localhost:3142") as ctx:
+                assert ctx is not None
+            mock_session.close.assert_called_once()
+
     def test_remote_run_queue_preserves_timestamp(self, mock_tracker_client, temp_data_dir):
         """Test that queued metrics preserve the timestamp."""
         from aspara.run._remote_run import RemoteRun
@@ -280,6 +316,44 @@ class TestRemoteRunOfflineQueue:
         assert steps == [10, 20]
 
         run.finish(quiet=True, flush_timeout=0.1)
+
+    def test_remote_run_set_tags_syncs_to_tracker(self, mock_tracker_client, temp_data_dir):
+        """Test that set_tags updates tags locally and syncs to tracker."""
+        from aspara.run._remote_run import RemoteRun
+
+        run = RemoteRun(
+            name="test_run",
+            project="test_project",
+            tags=["initial"],
+            tracker_uri="http://localhost:3142",
+        )
+
+        assert run.tags == ["initial"]
+
+        run.set_tags(["new", "tags"])
+
+        assert run.tags == ["new", "tags"]
+        # Verify the tags endpoint was called
+        post_calls = mock_tracker_client.post.call_args_list
+        tags_calls = [c for c in post_calls if "/tags" in c[0][0]]
+        assert len(tags_calls) == 1
+        assert tags_calls[0][1]["json"] == {"tags": ["new", "tags"]}
+
+        run.finish(quiet=True)
+
+    def test_remote_run_set_tags_after_finish_raises(self, mock_tracker_client, temp_data_dir):
+        """Test that set_tags raises RuntimeError after finish."""
+        from aspara.run._remote_run import RemoteRun
+
+        run = RemoteRun(
+            name="test_run",
+            project="test_project",
+            tracker_uri="http://localhost:3142",
+        )
+        run.finish(quiet=True)
+
+        with pytest.raises(RuntimeError, match="Cannot modify a finished run"):
+            run.set_tags(["new"])
 
 
 class TestTrackerClientHealthCheck:
@@ -576,3 +650,23 @@ class TestTrackerClientURLEncoding:
         call_url = mock_session.post.call_args[0][0]
         assert "project%2Fspecial" in call_url
         assert "run%2Fname" in call_url
+
+    def test_update_tags_encodes_project_and_run_name(self):
+        """Test that update_tags URL-encodes the project and run_name."""
+        from aspara.run._remote_run import TrackerClient
+
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_session.post.return_value = mock_response
+
+        client = TrackerClient.__new__(TrackerClient)
+        client.base_url = "http://localhost:3142"
+        client.session = mock_session
+
+        client.update_tags("project/special", "run/name", ["tag1"])
+
+        call_url = mock_session.post.call_args[0][0]
+        assert "project%2Fspecial" in call_url
+        assert "run%2Fname" in call_url
+        call_json = mock_session.post.call_args[1]["json"]
+        assert call_json == {"tags": ["tag1"]}

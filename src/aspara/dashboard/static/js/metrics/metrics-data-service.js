@@ -4,6 +4,8 @@
  */
 import { decode as msgpackDecode } from '@msgpack/msgpack';
 import { INITIAL_SINCE_TIMESTAMP, buildSSEUrl } from '../runs-list/sse-utils.js';
+import { removeEventListeners } from '../html-utils.js';
+import { SSEReconnectManager } from '../sse-reconnect-manager.js';
 import { decompressDeltaData, findLatestTimestamp, mergeDataPoint } from './metrics-utils.js';
 
 /**
@@ -20,6 +22,7 @@ export class MetricsDataService {
    * @param {function} options.onMetricUpdate - Callback when metric is updated via SSE
    * @param {function} options.onStatusUpdate - Callback when run status is updated via SSE
    * @param {function} options.onCacheUpdated - Callback when cache is updated (for re-rendering)
+   * @param {function} [options.onConnectionStateChange] - Callback when SSE connection state changes. Receives (state, detail).
    */
   constructor(project, options = {}) {
     this.project = project;
@@ -40,11 +43,14 @@ export class MetricsDataService {
     // SSE state
     this.eventSource = null;
     this.lastSSETimestamp = INITIAL_SINCE_TIMESTAMP;
+    this.lastEventTime = 0;
     this.currentSSERuns = '';
-    this.isReconnecting = false;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
-    this.baseReconnectDelay = 1000;
+
+    // Reconnection state managed by SSEReconnectManager (SSOT for
+    // backoff constants, guard logic, and connection state notification).
+    this.reconnectManager = new SSEReconnectManager({
+      onConnectionStateChange: options.onConnectionStateChange || null,
+    });
 
     // SSE event handlers (stored for cleanup)
     this.sseOpenHandler = null;
@@ -77,6 +83,30 @@ export class MetricsDataService {
   }
 
   /**
+   * Build the metrics API URL for a comma-separated run list.
+   * @param {string} runsList - Comma-separated run names
+   * @param {number|null} since - Optional SSE timestamp to fetch deltas from
+   * @returns {string} Metrics API URL
+   */
+  _buildMetricsUrl(runsList, since = null) {
+    const sinceParam = since !== null ? `&since=${since}` : '';
+    return `/api/projects/${encodeURIComponent(this.project)}/runs/metrics?runs=${encodeURIComponent(runsList)}&format=msgpack${sinceParam}`;
+  }
+
+  /**
+   * Update lastSSETimestamp from a data object that may contain a timestamp.
+   * @param {Object} data - Object with an optional timestamp field
+   */
+  _updateLastSSETimestamp(data) {
+    if (data.timestamp) {
+      const ts = new Date(data.timestamp).getTime();
+      if (!Number.isNaN(ts) && ts > this.lastSSETimestamp) {
+        this.lastSSETimestamp = ts;
+      }
+    }
+  }
+
+  /**
    * Fetch metrics for specific runs and add to cache.
    * @param {Array<string>} runNames - Array of run names to fetch
    * @returns {Promise<void>}
@@ -85,7 +115,7 @@ export class MetricsDataService {
     const runsList = runNames.join(',');
 
     const fetchStart = performance.now();
-    const response = await fetch(`/api/projects/${encodeURIComponent(this.project)}/runs/metrics?runs=${encodeURIComponent(runsList)}&format=msgpack`);
+    const response = await fetch(this._buildMetricsUrl(runsList));
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -226,19 +256,15 @@ export class MetricsDataService {
     this.sseOpenHandler = () => {
       console.log('[SSE] Connection opened with since:', this.lastSSETimestamp);
       // Reset reconnection state on successful connection
-      this.isReconnecting = false;
-      this.reconnectAttempts = 0;
+      this.reconnectManager.resetReconnectState();
+      this.reconnectManager.notifyConnectionState('connected');
     };
 
     this.sseMetricHandler = (event) => {
       try {
         const metric = JSON.parse(event.data);
-        if (metric.timestamp) {
-          const ts = new Date(metric.timestamp).getTime();
-          if (!Number.isNaN(ts) && ts > this.lastSSETimestamp) {
-            this.lastSSETimestamp = ts;
-          }
-        }
+        this._updateLastSSETimestamp(metric);
+        this.lastEventTime = Date.now();
         this.handleMetricUpdate(metric);
       } catch (error) {
         console.error('Error processing SSE metric:', error);
@@ -248,12 +274,7 @@ export class MetricsDataService {
     this.sseStatusHandler = (event) => {
       try {
         const statusData = JSON.parse(event.data);
-        if (statusData.timestamp) {
-          const ts = new Date(statusData.timestamp).getTime();
-          if (!Number.isNaN(ts) && ts > this.lastSSETimestamp) {
-            this.lastSSETimestamp = ts;
-          }
-        }
+        this._updateLastSSETimestamp(statusData);
         if (this.onStatusUpdate) {
           this.onStatusUpdate(statusData);
         }
@@ -286,24 +307,20 @@ export class MetricsDataService {
    * Uses exponential backoff and max retry limit to prevent infinite loops.
    */
   async reconnectSSE() {
-    if (this.isReconnecting) {
-      console.log('[SSE] Already reconnecting, skipping');
+    if (!this.reconnectManager.canReconnect()) {
+      // If max attempts reached (not just "already reconnecting"), notify disconnected
+      if (!this.reconnectManager.isReconnecting && this.reconnectManager.reconnectAttempts >= this.reconnectManager.maxReconnectAttempts) {
+        console.error('[SSE] Max reconnection attempts reached, giving up');
+        this.reconnectManager.notifyConnectionState('disconnected', { lastEventTime: this.lastEventTime });
+      }
       return;
     }
 
-    // Check max retry count
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[SSE] Max reconnection attempts reached, giving up');
-      this.isReconnecting = false;
-      return;
-    }
+    this.reconnectManager.beginReconnect();
 
-    this.isReconnecting = true;
-    this.reconnectAttempts++;
-
-    // Exponential backoff: 1s, 2s, 4s, 8s... (max 30s)
-    const delay = Math.min(this.baseReconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
-    console.log(`[SSE] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}, waiting ${delay}ms`);
+    // Exponential backoff via SSEReconnectManager
+    const delay = this.reconnectManager.calculateBackoffDelay(this.reconnectManager.reconnectAttempts);
+    console.log(`[SSE] Reconnect attempt ${this.reconnectManager.reconnectAttempts}/${this.reconnectManager.maxReconnectAttempts}, waiting ${delay}ms`);
 
     try {
       if (this.eventSource) {
@@ -315,7 +332,7 @@ export class MetricsDataService {
 
       if (!this.currentSSERuns) {
         console.log('[SSE] No runs to reconnect');
-        this.isReconnecting = false;
+        this.reconnectManager.isReconnecting = false;
         return;
       }
 
@@ -331,10 +348,10 @@ export class MetricsDataService {
       this.setupSSE(this.currentSSERuns);
       // Reset isReconnecting after setupSSE() completes
       // This allows the next error event to trigger a new reconnection attempt
-      this.isReconnecting = false;
+      this.reconnectManager.isReconnecting = false;
     } catch (error) {
       console.error('[SSE] Reconnection failed:', error);
-      this.isReconnecting = false;
+      this.reconnectManager.isReconnecting = false;
     }
   }
 
@@ -344,7 +361,7 @@ export class MetricsDataService {
    */
   async fetchDeltaViaMsgPack(runsList) {
     const fetchStart = performance.now();
-    const url = `/api/projects/${encodeURIComponent(this.project)}/runs/metrics?runs=${encodeURIComponent(runsList)}&format=msgpack&since=${this.lastSSETimestamp}`;
+    const url = this._buildMetricsUrl(runsList, this.lastSSETimestamp);
 
     console.log('[SSE] Fetching delta from:', url);
 
@@ -455,19 +472,12 @@ export class MetricsDataService {
    */
   closeSSE() {
     if (this.eventSource) {
-      // Remove event listeners before closing to prevent memory leaks
-      if (this.sseOpenHandler) {
-        this.eventSource.removeEventListener('open', this.sseOpenHandler);
-      }
-      if (this.sseMetricHandler) {
-        this.eventSource.removeEventListener('metric', this.sseMetricHandler);
-      }
-      if (this.sseStatusHandler) {
-        this.eventSource.removeEventListener('status', this.sseStatusHandler);
-      }
-      if (this.sseErrorHandler) {
-        this.eventSource.removeEventListener('error', this.sseErrorHandler);
-      }
+      removeEventListeners(this.eventSource, {
+        open: this.sseOpenHandler,
+        metric: this.sseMetricHandler,
+        status: this.sseStatusHandler,
+        error: this.sseErrorHandler,
+      });
       this.eventSource.close();
       this.eventSource = null;
     }
@@ -487,6 +497,6 @@ export class MetricsDataService {
     this.cachedRuns.clear();
     this.cacheAccessOrder = [];
     this.cacheAccessSet.clear();
-    this.reconnectAttempts = 0;
+    this.reconnectManager.resetReconnectState();
   }
 }

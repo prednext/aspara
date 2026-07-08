@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from aspara.config import get_data_dir
-from aspara.logger import logger
+from aspara.exceptions import RunAlreadyExistsError
 from aspara.run._base_run import BaseRun
 from aspara.run._config import Config
 from aspara.run._summary import Summary
 from aspara.storage.metrics import create_metrics_storage, resolve_metrics_storage_backend
 from aspara.utils.metadata import update_project_metadata_tags
-from aspara.utils.timestamp import parse_to_ms
+from aspara.utils.timestamp import now_ms, parse_to_ms
 
 
 class LocalRun(BaseRun):
@@ -32,6 +32,7 @@ class LocalRun(BaseRun):
         dir: str | None = None,
         storage_backend: str | None = None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> None:
         """Initialize a new local run.
 
@@ -43,13 +44,12 @@ class LocalRun(BaseRun):
             notes: Run notes/description (wandb-compatible).
             dir: Base directory for storing data. If None, uses XDG-based default (~/.local/share/aspara).
             storage_backend: Storage backend type ('jsonl' or 'polars'). Defaults to 'jsonl'. ASPARA_STORAGE_BACKEND has higher priority than this argument.
+            project_tags: List of tags to add to the project.
+            resume: If True and a run with the same name already exists, resume
+                it (reuse run_id, reset finish state, continue step numbering).
+                If no existing run is found, a new run is created.
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
-
-        # LocalRun generates its own run_id
-        self.id = self._generate_run_id()
-
-        self.config = Config(config, on_change=self._on_config_change)
 
         # Determine data directory
         data_dir = dir or str(get_data_dir())
@@ -84,28 +84,86 @@ class LocalRun(BaseRun):
             run_name=self.name,
         )
 
+        # Detect existing run by checking for a metadata file with a run_id.
+        existing_meta_path = Path(base_dir) / f"{self.name}.meta.json"
+        existing_run_id: str | None = None
+        if existing_meta_path.exists():
+            try:
+                with open(existing_meta_path) as f:
+                    existing_meta = json.load(f)
+                existing_run_id = existing_meta.get("run_id")
+            except (json.JSONDecodeError, OSError):
+                existing_run_id = None
+
+        is_resuming = resume and existing_run_id is not None
+
+        if is_resuming:
+            # Reuse the existing run_id and reset finish state.
+            self.id = existing_run_id
+            self._metadata_storage.reset_finish()
+            # Continue step numbering from where the previous session left off.
+            self._current_step = self._recover_last_step(data_dir)
+        else:
+            # New run: generate a fresh run_id.
+            self.id = self._generate_run_id()
+            if existing_run_id is not None and not resume:
+                # A run with the same name already exists and the user did not
+                # request a resume. Appending would mix metrics from independent
+                # run instances and corrupt step numbering, so refuse rather
+                # than silently corrupting data.
+                raise RunAlreadyExistsError(
+                    f"Run '{self.name}' already exists in project '{self.project}'. "
+                    f"Use resume=True to continue the existing run, or choose a "
+                    f"different run name."
+                )
+
+        self.config = Config(config, on_change=self._on_config_change)
         self.summary = Summary(on_change=self._on_summary_change)
 
         # Update project-level metadata tags if provided
         update_project_metadata_tags(self._data_dir, self.project, project_tags)
 
-        # Log initialization message
+        # User-facing guidance: where data is stored and how to view it.
         backend_msg = f" (backend: {self._storage_backend_type})" if self._storage_backend_type == "polars" else ""
-        logger.info(f"Run {self.name} initialized{backend_msg}")
-
-        # Log storage location based on backend
-        if self._storage_backend_type == "polars":
-            wal_path = os.path.join(base_dir, f"{self.name}.wal.jsonl")
-            logger.info(f"Writing metrics to: {os.path.abspath(wal_path)}")
-        else:
-            logger.info(f"Writing logs to: {os.path.abspath(self._output_path)}")
+        storage_location = (
+            os.path.abspath(os.path.join(base_dir, f"{self.name}.wal.jsonl")) if self._storage_backend_type == "polars" else os.path.abspath(self._output_path)
+        )
+        resume_msg = " (resumed)" if is_resuming else ""
+        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'{backend_msg}{resume_msg}")
+        print(f"aspara: Data directory: {os.path.abspath(data_dir)}")
+        print(f"aspara: Writing metrics to: {storage_location}")
+        print("aspara: View results with: aspara dashboard")
 
         self._ensure_output_dir()
         self._write_init_record()
 
+    def _recover_last_step(self, data_dir: str) -> int:
+        """Recover the next step number from existing metrics.
+
+        Reads the existing metrics file and returns ``max(step) + 1`` so that
+        resumed logging continues without overwriting earlier rows. Returns 0
+        when no prior metrics are present.
+
+        Args:
+            data_dir: Base data directory.
+
+        Returns:
+            Next step number to use.
+        """
+        try:
+            df = self._metrics_storage.load()
+        except Exception:
+            return 0
+        if df is None or len(df) == 0 or "step" not in df.columns:
+            return 0
+        last_step = df.select("step").to_series().max()
+        if last_step is None:
+            return 0
+        return int(last_step) + 1
+
     def _write_init_record(self) -> None:
         """Write initial run record with metadata."""
-        timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+        timestamp = now_ms()
         self._metadata_storage.set_init(
             run_id=self.id,
             tags=self.tags,
@@ -161,7 +219,7 @@ class LocalRun(BaseRun):
         if metrics:
             # Generate current time if timestamp is None, otherwise parse
             if timestamp is None:
-                timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                timestamp_ms = now_ms()
             else:
                 timestamp_ms = parse_to_ms(timestamp)
             metrics_data = {
@@ -229,7 +287,7 @@ class LocalRun(BaseRun):
             "original_path": abs_file_path,
             "stored_path": os.path.join("artifacts", artifact_name),
             "file_size": file_size,
-            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "timestamp": now_ms(),
         }
 
         if description:
@@ -240,17 +298,20 @@ class LocalRun(BaseRun):
 
         self._metadata_storage.add_artifact(artifact_data)
 
-    def finish(self, exit_code: int = 0, quiet: bool = False) -> None:
+    def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
         """Finish the run and write final record.
 
         Args:
             exit_code: Exit code for the run (0 = success)
             quiet: If True, suppress output messages
+            flush_timeout: Unused — LocalRun writes synchronously so there is
+                no queue to flush. Accepted for signature compatibility with
+                RemoteRun.finish().
         """
         if not self._mark_finished():
             return
 
-        timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+        timestamp = now_ms()
         self._metadata_storage.set_finish(exit_code=exit_code, timestamp=timestamp)
 
         # Finalize metrics storage (e.g., flush WAL to Parquet)
@@ -264,13 +325,26 @@ class LocalRun(BaseRun):
             self._metadata_storage.close()
 
         if not quiet:
-            logger.info(f"Run {self.name} finished with exit code {exit_code}")
+            print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
+            print("aspara: View results with: aspara dashboard")
 
-    def flush(self) -> None:
-        """Ensure all metrics are written to disk."""
+    def flush(self, timeout: float = 30.0) -> int:
+        """Ensure all metrics are written to disk.
+
+        LocalRun writes directly to disk on every ``log()`` call, so there
+        is never any buffered data to flush. This method always returns 0
+        (no failures) for API compatibility with ``RemoteRun.flush()``.
+
+        Args:
+            timeout: Ignored. Accepted for API compatibility with
+                ``RemoteRun.flush()``.
+
+        Returns:
+            Number of metrics that failed to persist (always 0 for local runs).
+        """
         # Currently a no-op as we're writing directly to file
         # This method exists for API compatibility and future buffering support
-        pass
+        return 0
 
     def _ensure_output_dir(self) -> None:
         """Ensure the output directory exists."""

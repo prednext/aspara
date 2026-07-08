@@ -1,6 +1,9 @@
 import { deleteProjectApi } from './api/delete-api.js';
+import { registerPageLifecycle } from './lifecycle.js';
 import { createSortComparator, matchesSearch, parseProjectElement } from './projects-list-utils.js';
 import { initializeTagEditorsForElements } from './tag-editor.js';
+import { attachSortHeaders } from './sort-utils.js';
+import { debounce } from './timer-utils.js';
 
 class ProjectsListSorter {
   constructor() {
@@ -10,9 +13,9 @@ class ProjectsListSorter {
     this.sortKey = localStorage.getItem('projects_sort_key') || 'name';
     this.sortOrder = localStorage.getItem('projects_sort_order') || 'asc';
 
-    // Search input handler and timeout (stored for cleanup)
+    // Search input handler and debounced trigger (stored for cleanup)
     this.searchInputHandler = null;
-    this.searchTimeoutId = null;
+    this._searchDebounced = null;
     this._sortHeaderHandlers = [];
     this._cardHandlers = [];
     this._deleteContainerHandler = null;
@@ -104,16 +107,14 @@ class ProjectsListSorter {
         searchButton.style.display = 'none';
       }
 
-      // Store handler for cleanup
+      // Debounce re-rendering via the shared timer-utils (SSOT for
+      // search/filter debounce timing).
+      this._searchDebounced = debounce((value) => {
+        this.currentQuery = value.trim();
+        this.sortAndRender();
+      });
       this.searchInputHandler = (event) => {
-        const value = event.target.value;
-        if (this.searchTimeoutId) {
-          clearTimeout(this.searchTimeoutId);
-        }
-        this.searchTimeoutId = setTimeout(() => {
-          this.currentQuery = value.trim();
-          this.sortAndRender();
-        }, 300);
+        this._searchDebounced(event.target.value);
       };
       searchInput.addEventListener('input', this.searchInputHandler);
     } else {
@@ -135,24 +136,7 @@ class ProjectsListSorter {
   }
 
   attachEventListeners() {
-    const headers = document.querySelectorAll('[data-sort]');
-    for (const header of headers) {
-      const handler = () => {
-        const key = header.dataset.sort;
-        if (this.sortKey === key) {
-          this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-        } else {
-          this.sortKey = key;
-          this.sortOrder = 'asc';
-        }
-        localStorage.setItem('projects_sort_key', this.sortKey);
-        localStorage.setItem('projects_sort_order', this.sortOrder);
-        this.updateSortIndicators();
-        this.sortAndRender();
-      };
-      header.addEventListener('click', handler);
-      this._sortHeaderHandlers.push({ element: header, handler });
-    }
+    this._sortHeaderHandlers = attachSortHeaders(this, 'projects');
   }
 
   updateSortIndicators() {
@@ -367,9 +351,9 @@ class ProjectsListSorter {
    * Clean up event listeners and timeouts.
    */
   destroy() {
-    if (this.searchTimeoutId) {
-      clearTimeout(this.searchTimeoutId);
-      this.searchTimeoutId = null;
+    if (this._searchDebounced) {
+      this._searchDebounced.cancel();
+      this._searchDebounced = null;
     }
     if (this.searchInputHandler) {
       const searchInput = document.getElementById('projectSearchInput');
@@ -401,7 +385,9 @@ class ProjectsListSorter {
 
 document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('projects-container')) {
-    new ProjectsListSorter();
+    const page = new ProjectsListSorter();
+    window.__asparaPage = page;
+    registerPageLifecycle(page);
   }
 });
 

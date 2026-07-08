@@ -135,3 +135,50 @@ def test_file_storage_load(temp_storage_dir):
     storage_non_existent = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="non_existent_run")
     with pytest.raises(RunNotFoundError):
         storage_non_existent.load()
+
+
+def test_file_storage_load_drops_envelope_fields(temp_storage_dir):
+    """Envelope fields (type, run, project) must not be treated as metrics.
+
+    Records written via the tracker API contain MetricRecord fields (run,
+    project) plus a record-type discriminator (type). These must be dropped
+    during load so they don't show up as bogus metric charts.
+    """
+    storage = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="test_run_1")
+
+    project_dir = temp_storage_dir / "test_project"
+    project_dir.mkdir(parents=True)
+    run_file = project_dir / "test_run_1.jsonl"
+
+    test_data = [
+        {
+            "type": "metrics",
+            "run": "test_run_1",
+            "project": "test_project",
+            "timestamp": "2025-06-07T12:00:00",
+            "step": 1,
+            "metrics": {"loss": 0.5, "accuracy": 0.8},
+        },
+        {
+            "type": "metrics",
+            "run": "test_run_1",
+            "project": "test_project",
+            "timestamp": "2025-06-07T12:01:00",
+            "step": 2,
+            "metrics": {"loss": 0.4, "accuracy": 0.85},
+        },
+    ]
+
+    with open(run_file, "w") as f:
+        for item in test_data:
+            f.write(json.dumps(item) + "\n")
+
+    result = storage.load()
+
+    assert len(result) == 2
+    assert "_loss" in result.columns
+    assert "_accuracy" in result.columns
+    # Envelope fields must not leak as metric columns
+    assert "_type" not in result.columns
+    assert "_run" not in result.columns
+    assert "_project" not in result.columns

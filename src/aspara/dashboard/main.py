@@ -10,12 +10,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from aspara.config import is_dev_mode
+from aspara.catalog import DataDirWatcher
+from aspara.config import get_sse_dev_shutdown_timeout, is_dev_mode
 
 from .router import router
 
@@ -49,6 +49,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Enable XSS filter in browsers (legacy but still useful)
         response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        # HSTS - set unconditionally because:
+        # - Browsers ignore it on HTTP responses, so HTTP deployments are unaffected
+        # - Browsers ignore it from localhost (Chrome 132+, Firefox, Brave),
+        #   so local development is never locked out
+        # - It only takes effect on HTTPS responses from non-localhost hosts,
+        #   which is exactly the production case (HF Spaces, internal LAN TLS)
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
         # Content Security Policy - basic policy
         # Allows self-origin scripts/styles, inline styles for chart libraries,
@@ -99,45 +107,49 @@ async def lifespan(app: FastAPI):
             await queue.put(None)  # Sentinel value to signal shutdown
 
     if is_dev_mode():
-        # Development mode: forcefully cancel SSE tasks for fast restart
-        logger.info(f"[DEV MODE] Cancelling {len(app_state.active_sse_tasks)} active SSE tasks")
+        # Development mode: forcefully cancel SSE tasks for fast restart.
+        # The timeout must be >= SSE_METRICS_ITERATOR_CLOSE_TIMEOUT so each
+        # cancelled task can finish its `finally` cleanup (closing the
+        # metrics iterator / watcher unsubscribe) before we give up.
+        shutdown_timeout = get_sse_dev_shutdown_timeout()
+        logger.info(f"[DEV MODE] Cancelling {len(app_state.active_sse_tasks)} active SSE tasks (timeout={shutdown_timeout}s)")
         for task in list(app_state.active_sse_tasks):
             task.cancel()
 
-        # Wait briefly for tasks to be cancelled
+        # Wait for tasks to be cancelled
         if app_state.active_sse_tasks:
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(
                     asyncio.gather(*app_state.active_sse_tasks, return_exceptions=True),
-                    timeout=0.1,
+                    timeout=shutdown_timeout,
                 )
         logger.info("[DEV MODE] SSE tasks cancelled, shutdown complete")
     else:
         # Production mode: graceful shutdown with 30 second timeout
         await asyncio.sleep(0.5)
 
+    # Tear down the DataDirWatcher singleton so that the underlying
+    # awatch/inotify FD is closed and a subsequent reload (e.g. --dev
+    # auto-reload) does not reuse a stale watcher — which would leak
+    # inotify FDs and deliver duplicate events.
+    await DataDirWatcher.shutdown()
+
 
 app = FastAPI(
     title="Aspara Dashboard",
     description="Real-time metrics visualization for machine learning experiments",
-    docs_url="/docs/dashboard",  # /docs/dashboard としてアクセスできるようにする
-    redoc_url=None,  # ReDocは使わない
+    docs_url="/docs/dashboard" if is_dev_mode() else None,
+    redoc_url=None,
     lifespan=lifespan,
 )
 
 # Security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)  # ty: ignore[invalid-argument-type]
 
-# CORS middleware - credentials disabled for security with wildcard origins
-# Note: allow_credentials=True with allow_origins=["*"] is a security vulnerability
-# as it allows any site to make credentialed requests to our API
-app.add_middleware(
-    CORSMiddleware,  # ty: ignore[invalid-argument-type]
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "X-Requested-With"],
-)
+# No CORS middleware is configured intentionally. The dashboard static JS and API
+# are served from the same origin, so CORS is unnecessary. Keeping a wildcard
+# CORS policy would allow cross-origin sites to pass the X-Requested-With CSRF
+# header check via preflight, defeating that protection.
 
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")

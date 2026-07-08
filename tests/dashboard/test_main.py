@@ -2,6 +2,9 @@
 Unit tests for the FastAPI server endpoints.
 """
 
+import asyncio
+import contextlib
+
 import pytest
 
 
@@ -45,6 +48,9 @@ class TestProjectRunsEndpoints:
 
         assert response.status_code == 200
         assert "No runs found" in response.text
+        # Empty state should include a code example to guide the user
+        assert "aspara.init" in response.text
+        assert "empty_project" in response.text
 
     def test_project_runs_list_nonexistent_project(self, test_client, setup_test_data):
         """Test runs list for nonexistent project returns 404."""
@@ -85,6 +91,23 @@ class TestCompareEndpoint:
         assert data["project"] == "test_project"
 
 
+class TestSecurityHeaders:
+    """Tests for security headers added by SecurityHeadersMiddleware."""
+
+    def test_hsts_header_present(self, test_client, setup_test_data):
+        """HSTS header should be set on all responses unconditionally.
+
+        Browsers ignore it on HTTP responses and from localhost, so it is
+        safe to always include. See SecurityHeadersMiddleware for rationale.
+        """
+        response = test_client.get("/")
+
+        assert response.status_code == 200
+        hsts = response.headers.get("strict-transport-security", "")
+        assert "max-age=31536000" in hsts
+        assert "includeSubDomains" in hsts
+
+
 class TestStaticFiles:
     """Tests for static file serving."""
 
@@ -123,3 +146,61 @@ def test_html_endpoints_have_required_elements(test_client, setup_test_data, end
     assert "Aspara" in response.text  # App name
     assert "styles.css" in response.text  # CSS framework (Tailwind CSS compiled)
     assert "Inter" in response.text  # Font
+
+
+class TestDevModeShutdownTimeout:
+    """Tests for SSE task cancellation timeout during dev-mode shutdown."""
+
+    @pytest.mark.asyncio
+    async def test_dev_shutdown_uses_configured_timeout(self, monkeypatch):
+        """dev-mode shutdown should wait get_sse_dev_shutdown_timeout() seconds.
+
+        Previously the timeout was hard-coded to 0.1s, shorter than the
+        metrics_iterator.aclose() timeout (1.0s), so cancelled SSE tasks
+        could not finish their `finally` cleanup before shutdown gave up.
+        """
+        from aspara.dashboard import main as main_module
+
+        # Force dev mode on.
+        monkeypatch.setattr(main_module, "is_dev_mode", lambda: True)
+
+        # Use a sentinel timeout we can observe via asyncio.wait_for.
+        sentinel_timeout = 0.25
+        monkeypatch.setattr(
+            main_module,
+            "get_sse_dev_shutdown_timeout",
+            lambda: sentinel_timeout,
+        )
+
+        # Record the timeout passed to asyncio.wait_for during shutdown.
+        captured: list[float] = []
+        original_wait_for = asyncio.wait_for
+
+        async def spy_wait_for(aw, timeout):
+            captured.append(timeout)
+            return await original_wait_for(aw, timeout=timeout)
+
+        monkeypatch.setattr(asyncio, "wait_for", spy_wait_for)
+        monkeypatch.setattr(main_module.asyncio, "wait_for", spy_wait_for)
+
+        # Seed an active SSE task that finishes immediately so gather resolves.
+        async def _noop():
+            return
+
+        task = asyncio.ensure_future(_noop())
+        main_module.app_state.active_sse_tasks.add(task)
+        # lifespan() flips shutting_down to True; restore it so the global
+        # app_state doesn't leak into other tests sharing the module.
+        original_shutting_down = main_module.app_state.shutting_down
+        try:
+            # Run the lifespan shutdown phase directly.
+            async with main_module.lifespan(main_module.app):
+                pass
+        finally:
+            main_module.app_state.active_sse_tasks.discard(task)
+            main_module.app_state.shutting_down = original_shutting_down
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        assert captured, "asyncio.wait_for was not called during shutdown"
+        assert sentinel_timeout in captured

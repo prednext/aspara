@@ -24,15 +24,16 @@ def validate_safe_path(path: Path, base_dir: Path) -> None:
     """Validate that the resolved path is within the base directory.
 
     This function prevents path traversal attacks by ensuring that the resolved
-    absolute path stays within the base directory boundaries. It also checks for
-    symlinks in the path to prevent symlink-based attacks.
+    absolute path stays within the base directory boundaries. Symlinks are
+    handled implicitly by ``Path.resolve()``, which follows them before the
+    boundary check.
 
     Args:
         path: Path to validate
         base_dir: Base directory that should contain the path
 
     Raises:
-        ValueError: If path is outside base_dir, contains symlinks, or path resolution fails
+        ValueError: If path is outside base_dir or path resolution fails
 
     Examples:
         >>> base = Path("/data")
@@ -40,23 +41,10 @@ def validate_safe_path(path: Path, base_dir: Path) -> None:
         >>> validate_safe_path(Path("/data/../etc/passwd"), base)  # Raises ValueError
     """
     try:
-        # First resolve both paths to absolute paths
+        # Resolve both paths to absolute paths; resolve() follows symlinks,
+        # so a symlink that escapes base_dir is rejected by the check below.
         resolved_path = path.resolve()
         resolved_base = base_dir.resolve()
-
-        # Check for symlinks in the path hierarchy
-        # Walk from the path up to the base directory, checking each component
-        current = path
-        while current != current.parent:
-            if current.exists() and current.is_symlink():
-                raise ValueError(f"Path contains symlink: {current}")
-            # Stop checking when we reach the base directory
-            try:
-                current.relative_to(resolved_base)
-            except ValueError:
-                # We've gone above the base directory, stop checking
-                break
-            current = current.parent
 
         # Check if the resolved path is within the base directory
         # Use os.path.commonpath for more robust comparison

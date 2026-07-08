@@ -72,13 +72,13 @@ class TestResponseHeaders:
         assert response.status_code == 200
         assert "application/json" in response.headers["content-type"]
 
-    def test_cors_headers(self, test_client):
-        """Test CORS headers are present."""
+    def test_no_cors_headers(self, test_client):
+        """CORS middleware is not installed; no CORS headers should be returned."""
         # OPTIONS requests need Origin header, so add it
         response = test_client.options("/", headers={"Origin": "http://testserver"})
 
-        # Check if CORS middleware adds appropriate headers
-        assert "access-control-allow-origin" in response.headers
+        # The dashboard API is same-origin only; CORS headers must not be present
+        assert "access-control-allow-origin" not in response.headers
 
 
 class TestDataValidation:
@@ -150,8 +150,7 @@ class TestPerformance:
             for i in range(100)
         ]
 
-        mock_catalog.get_projects.return_value = large_projects
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(project, {}) for project in large_projects]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:
@@ -179,8 +178,7 @@ class TestTemplateRendering:
             last_update=pytest.importorskip("datetime").datetime.now(),
         )
 
-        mock_catalog.get_projects.return_value = [special_project]
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(special_project, {})]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:
@@ -203,8 +201,7 @@ class TestTemplateRendering:
             last_update=pytest.importorskip("datetime").datetime.now(),
         )
 
-        mock_catalog.get_projects.return_value = [unicode_project]
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(unicode_project, {})]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:
@@ -227,8 +224,7 @@ class TestTemplateRendering:
             last_update=pytest.importorskip("datetime").datetime.now(),
         )
 
-        mock_catalog.get_projects.return_value = [incomplete_project]
-        mock_catalog.get_metadata.return_value = {}
+        mock_catalog.get_projects_with_metadata.return_value = [(incomplete_project, {})]
 
         app.dependency_overrides[get_project_catalog] = lambda: mock_catalog
         try:

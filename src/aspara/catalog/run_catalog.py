@@ -255,7 +255,7 @@ class RunCatalog:
 
         Returns:
             (project, run_name, file_type) where file_type is 'metrics', 'wal', or 'meta'
-            None if path doesn't match expected pattern
+            None if path doesn't match expected pattern or names are invalid
         """
         try:
             relative = file_path.relative_to(self.data_dir)
@@ -270,13 +270,27 @@ class RunCatalog:
         filename = parts[1]
 
         if filename.endswith(".wal.jsonl"):
-            return (project, filename[:-10], "wal")
+            run_name = filename[:-10]
+            file_type = "wal"
         elif filename.endswith(".meta.json"):
-            return (project, filename[:-10], "meta")
+            run_name = filename[:-10]
+            file_type = "meta"
         elif filename.endswith(".jsonl"):
-            return (project, filename[:-6], "metrics")
+            run_name = filename[:-6]
+            file_type = "metrics"
+        else:
+            return None
 
-        return None
+        # Validate project and run names so that reserved/hidden directories
+        # (e.g. .queue) or names with path-traversal characters are rejected
+        # at parse time rather than leaking into downstream consumers.
+        try:
+            validate_name(project, "project name")
+            validate_name(run_name, "run name")
+        except ValueError:
+            return None
+
+        return (project, run_name, file_type)
 
     def _read_run_info(self, project: str, run_name: str, run_file: Path) -> RunInfo:
         """Read run information from JSONL metrics file and metadata file.
@@ -388,8 +402,12 @@ class RunCatalog:
         runs = []
         seen_run_names: set[str] = set()
 
-        # Process .jsonl files (including .wal.jsonl for Polars backend)
-        for run_file in list(project_dir.glob("*.jsonl")):
+        # Process .jsonl files (including .wal.jsonl for Polars backend).
+        # Iterate the glob generator directly without list() to avoid
+        # materialising all paths upfront. TOCTOU races (file deleted
+        # between discovery and read) are handled by _read_run_info,
+        # which catches FileNotFoundError on stat().
+        for run_file in project_dir.glob("*.jsonl"):
             # Determine run name from file
             if run_file.name.endswith(".wal.jsonl"):
                 # Skip WAL files - they're handled by metadata
@@ -719,8 +737,7 @@ class RunCatalog:
         Returns:
             Dictionary containing run config (params, config, status, etc.)
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_run_config, project, run)
+        return await asyncio.to_thread(self.get_run_config, project, run)
 
     async def get_metadata_async(self, project: str, run: str) -> dict[str, Any]:
         """Get run metadata asynchronously using run_in_executor.
@@ -732,8 +749,7 @@ class RunCatalog:
         Returns:
             Dictionary containing run metadata (tags, notes, params, etc.)
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_metadata, project, run)
+        return await asyncio.to_thread(self.get_metadata, project, run)
 
     async def get_artifacts_async(self, project: str, run: str) -> list[dict[str, Any]]:
         """Get artifacts for a run asynchronously using run_in_executor.
@@ -745,5 +761,4 @@ class RunCatalog:
         Returns:
             List of artifact dictionaries
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_artifacts, project, run)
+        return await asyncio.to_thread(self.get_artifacts, project, run)

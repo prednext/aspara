@@ -86,3 +86,49 @@ The metrics storage format can be specified with `ASPARA_STORAGE_BACKEND`.
 - `polars` (experimental)
 
 For details, see [Storage (Advanced)](storage.md).
+
+## Resource Limits
+
+Aspara enforces several resource limits to prevent excessive memory usage and protect the tracker server. All limits (except the artifact upload size) can be customized via environment variables.
+
+### Default Limits
+
+| Resource | Default | Environment Variable |
+|----------|---------|----------------------|
+| Metrics file size | 1 GB | `ASPARA_MAX_FILE_SIZE` |
+| Metrics file lines | 1,000,000 | `ASPARA_MAX_JSONL_LINES` |
+| ZIP file size | 1 GB | `ASPARA_MAX_ZIP_SIZE` |
+| Metric names (comma-separated) | 100 | `ASPARA_MAX_METRIC_NAMES` |
+| Notes length | 10 KB (10,240 chars) | `ASPARA_MAX_NOTES_LENGTH` |
+| Tags count | 100 | `ASPARA_MAX_TAGS_COUNT` |
+| LTTB downsampling threshold | 1,000 | `ASPARA_LTTB_THRESHOLD` |
+| Artifact upload size (tracker) | 100 MB | *(hardcoded, not configurable)* |
+
+### Customizing Limits
+
+Set the environment variables before running your script or starting the dashboard:
+
+```bash
+# Increase metrics file size limit to 2GB
+export ASPARA_MAX_FILE_SIZE=2147483648
+
+# Allow up to 200 tags
+export ASPARA_MAX_TAGS_COUNT=200
+
+# Raise LTTB threshold to reduce downsampling
+export ASPARA_LTTB_THRESHOLD=5000
+
+python train.py
+```
+
+!!! note "Artifact upload size"
+    The 100 MB limit on artifact uploads to the tracker is hardcoded in
+    `src/aspara/tracker/router.py` and cannot be changed via environment
+    variables. If you need to upload larger files, consider splitting
+    them or storing artifacts outside the tracker.
+
+!!! note "Local vs Remote"
+    File-size and line-count limits apply when **reading** metrics files
+    (e.g., in the dashboard or TUI). The notes and tags limits are
+    enforced at write time by the metadata storage layer, so they apply
+    to both local and remote runs.

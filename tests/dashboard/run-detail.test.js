@@ -18,14 +18,15 @@ vi.mock('../../src/aspara/dashboard/static/js/metrics/metrics-data-service.js', 
     constructor() {
       this.fetchAndCacheMetrics = vi.fn().mockResolvedValue({});
       this.getCachedMetrics = vi.fn().mockReturnValue({});
+      this.destroy = vi.fn();
     }
   },
 }));
 vi.mock('../../src/aspara/dashboard/static/js/note-editor.js', () => ({
-  initNoteEditorFromDOM: vi.fn(),
+  initNoteEditorFromDOM: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../../src/aspara/dashboard/static/js/tag-editor.js', () => ({
-  initializeTagEditorsForElements: vi.fn(),
+  initializeTagEditorsForElements: vi.fn().mockReturnValue([]),
 }));
 vi.mock('../../src/aspara/dashboard/static/js/metrics/chart-layout.js', () => ({
   CHART_SIZE_KEY: 'chart-size',
@@ -46,7 +47,9 @@ vi.mock('../../src/aspara/dashboard/static/js/html-utils.js', () => ({
   escapeHtml: vi.fn((s) => s),
 }));
 
+import { initNoteEditorFromDOM } from '../../src/aspara/dashboard/static/js/note-editor.js';
 import { RunDetail } from '../../src/aspara/dashboard/static/js/pages/run-detail.js';
+import { initializeTagEditorsForElements } from '../../src/aspara/dashboard/static/js/tag-editor.js';
 
 describe('RunDetail', () => {
   beforeEach(() => {
@@ -96,6 +99,42 @@ describe('RunDetail', () => {
       });
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('destroy', () => {
+    test('should call destroy on dataService', () => {
+      const rd = new RunDetail('proj', 'run1');
+      const dataService = rd.dataService;
+      rd.destroy();
+      expect(dataService.destroy).toHaveBeenCalled();
+      expect(rd.dataService).toBeNull();
+    });
+
+    test('should call destroy on tag editors', () => {
+      const tagEditorDestroy = vi.fn();
+      vi.mocked(initializeTagEditorsForElements).mockReturnValueOnce([{ destroy: tagEditorDestroy }]);
+      const rd = new RunDetail('proj', 'run1');
+      rd.destroy();
+      expect(tagEditorDestroy).toHaveBeenCalled();
+      expect(rd.tagEditors).toEqual([]);
+    });
+
+    test('should call destroy on note editor', async () => {
+      const noteEditorDestroy = vi.fn();
+      vi.mocked(initNoteEditorFromDOM).mockResolvedValueOnce({ destroy: noteEditorDestroy });
+      const rd = new RunDetail('proj', 'run1');
+      // Wait for async note editor initialization
+      await vi.waitFor(() => expect(rd.noteEditor).not.toBeNull());
+      rd.destroy();
+      expect(noteEditorDestroy).toHaveBeenCalled();
+      expect(rd.noteEditor).toBeNull();
+    });
+
+    test('should be idempotent', () => {
+      const rd = new RunDetail('proj', 'run1');
+      expect(() => rd.destroy()).not.toThrow();
+      expect(() => rd.destroy()).not.toThrow();
     });
   });
 });

@@ -2,22 +2,22 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // テスト環境
+    // Test environment
     environment: 'jsdom',
 
-    // テストファイルパターン
+    // Test file patterns
     include: ['**/tests/**/*.test.js'],
 
-    // Playwrightテストを除外
+    // Exclude Playwright tests
     exclude: ['**/node_modules/**', '**/*.spec.js', '**/e2e/**'],
 
-    // セットアップファイル
+    // Setup files
     setupFiles: ['./tests/vitest-canvas-setup.js', './tests/vitest-setup.js'],
 
-    // グローバル設定（describe, it, expect等をインポート不要にする）
+    // Global setup (no need to import describe, it, expect, etc.)
     globals: true,
 
-    // カバレッジ設定
+    // Coverage settings
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
@@ -31,10 +31,10 @@ export default defineConfig({
       },
     },
 
-    // テストタイムアウト
+    // Test timeout
     testTimeout: 10000,
 
-    // DOM環境設定
+    // DOM environment settings
     environmentOptions: {
       jsdom: {
         url: 'http://localhost',

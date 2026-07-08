@@ -157,6 +157,42 @@ class TestArtifactZipDownload:
             assert "subdir/nested_file.txt" not in zip_files
             assert "nested_file.txt" not in zip_files
 
+    def test_download_artifacts_symlink_not_followed(self):
+        """Test that symlinks in the artifacts directory are not included."""
+        import os
+
+        # Initialize services with temp directory
+        from aspara.dashboard.router import configure_data_dir
+
+        configure_data_dir(self.temp_dir)
+
+        # Create a file outside the artifacts directory
+        outside_file = os.path.join(self.temp_dir, "secret.txt")
+        with open(outside_file, "w") as f:
+            f.write("This should not be in the ZIP")
+
+        # Create a symlink inside artifacts pointing to the outside file
+        symlink_path = os.path.join(self.artifacts_dir, "symlink_to_secret.txt")
+        os.symlink(outside_file, symlink_path)
+
+        client = TestClient(app)
+        response = client.get(f"/api/projects/{self.test_project}/runs/{self.test_run}/artifacts/download")
+
+        assert response.status_code == 200
+
+        # Parse ZIP content and ensure the symlink target is NOT included
+        zip_content = io.BytesIO(response.content)
+        with zipfile.ZipFile(zip_content, "r") as zip_file:
+            zip_files = zip_file.namelist()
+
+            # The symlink itself should not appear as a file in the ZIP
+            assert "symlink_to_secret.txt" not in zip_files
+
+            # The secret file content must not be present
+            for name in zip_files:
+                with zip_file.open(name) as f:
+                    assert b"This should not be in the ZIP" not in f.read()
+
     def test_download_artifacts_large_files(self):
         """Test ZIP download with larger files."""
         import os

@@ -8,6 +8,7 @@ and PyArrow for Parquet I/O, with a Write-Ahead Log (WAL) pattern for lock-free 
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ import polars as pl
 
 from aspara.exceptions import RunNotFoundError
 from aspara.logger import logger
-from aspara.utils import datasync, secure_open_append
+from aspara.utils import atomic_write_text, datasync, secure_open_append
 
 from .base import MetricsStorage
 
@@ -84,7 +85,7 @@ class PolarsMetricsStorage(MetricsStorage):
     def _read_wal(self, wal_path: Path) -> list[dict[str, Any]]:
         """Read all records from WAL."""
         records = []
-        if wal_path.exists():
+        try:
             with open(wal_path) as f:
                 for line in f:
                     line = line.strip()
@@ -93,6 +94,8 @@ class PolarsMetricsStorage(MetricsStorage):
                             records.append(json.loads(line))
                         except json.JSONDecodeError:
                             continue
+        except FileNotFoundError:
+            pass
         return records
 
     def _parse_timestamp(self, ts: int | str) -> datetime:
@@ -241,15 +244,17 @@ class PolarsMetricsStorage(MetricsStorage):
         )
 
     def _clear_wal(self, wal_path: Path) -> None:
-        """Clear WAL by truncating.
+        """Clear WAL atomically.
+
+        Writes an empty file to a temp path, fsyncs it, then atomically
+        renames it over the WAL. This avoids the data-loss window where
+        a plain ``open(w, "w")`` truncates the file before the new (empty)
+        content is durable.
 
         Args:
             wal_path: Path to the WAL file
         """
-        with open(wal_path, "w") as f:
-            f.truncate(0)
-            f.flush()
-            datasync(f.fileno())
+        atomic_write_text(wal_path, lambda f: None, suffix=".wal.tmp")
 
     def _load_from_parquet(
         self,
@@ -333,13 +338,37 @@ class PolarsMetricsStorage(MetricsStorage):
         # Concatenate and handle overlapping columns
         return pl.concat(dfs, how="diagonal").sort(["timestamp", "step"])
 
+    def _get_archive_marker_path(self) -> Path:
+        """Get the marker file path used for two-phase archive commit."""
+        return self._get_archive_path().parent / f"{self.run_name}.archive.marker"
+
     def _try_archive(self) -> bool:
         """Try to archive WAL to Parquet via Polars.
+
+        Uses a two-phase commit with a marker file to avoid data loss or
+        duplication if the process crashes mid-archive:
+
+        1. Write Parquet (combined existing + WAL data)
+        2. Write the marker file (Parquet is committed, WAL can be cleared)
+        3. Clear WAL atomically
+        4. Remove the marker
+
+        If a marker is found on startup, the Parquet write had completed but
+        the WAL was not yet cleared. Clear the WAL to prevent duplication.
 
         Returns:
             bool: True if archive succeeded
         """
         wal_path = self._get_wal_path()
+        marker_path = self._get_archive_marker_path()
+
+        # Recovery: if a marker from a previous (crashed) archive exists,
+        # the Parquet write had completed but the WAL was not yet cleared.
+        # Clear the WAL now to prevent duplicate data on the next archive.
+        if marker_path.exists():
+            logger.info(f"Found stale archive marker for {self.project_name}/{self.run_name}; clearing WAL to prevent data duplication")
+            self._clear_wal(wal_path)
+            marker_path.unlink(missing_ok=True)
 
         try:
             records = self._read_wal(wal_path)
@@ -360,9 +389,22 @@ class PolarsMetricsStorage(MetricsStorage):
             # Combine existing and new data
             combined_df = pl.concat([existing_df, new_df]) if existing_df is not None else new_df
 
-            # Write and clear WAL
+            # Phase 1: write Parquet
             self._write_partitioned_parquet(combined_df, archive_path)
+
+            # Phase 2: write marker (Parquet is committed, WAL safe to clear)
+            marker_path.write_text("archived", encoding="utf-8")
+            marker_fd = os.open(str(marker_path), os.O_RDONLY)
+            try:
+                os.fsync(marker_fd)
+            finally:
+                os.close(marker_fd)
+
+            # Phase 3: clear WAL atomically
             self._clear_wal(wal_path)
+
+            # Phase 4: remove marker (archive complete)
+            marker_path.unlink(missing_ok=True)
             return True
 
         except Exception as e:  # pragma: no cover - best-effort logging
@@ -381,7 +423,11 @@ class PolarsMetricsStorage(MetricsStorage):
         wal_path = self._get_wal_path()
 
         # Check if archiving is needed BEFORE writing
-        if wal_path.exists() and wal_path.stat().st_size >= self._archive_threshold:
+        try:
+            needs_archive = wal_path.stat().st_size >= self._archive_threshold
+        except FileNotFoundError:
+            needs_archive = False
+        if needs_archive:
             self._try_archive()
 
         try:
@@ -436,7 +482,11 @@ class PolarsMetricsStorage(MetricsStorage):
         This ensures all metrics are persisted in Parquet format when the run completes.
         """
         wal_path = self._get_wal_path()
-        if wal_path.exists() and wal_path.stat().st_size > 0:
+        try:
+            has_wal_data = wal_path.stat().st_size > 0
+        except FileNotFoundError:
+            has_wal_data = False
+        if has_wal_data:
             self._try_archive()
 
     def close(self) -> None:

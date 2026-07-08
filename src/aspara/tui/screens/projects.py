@@ -33,6 +33,7 @@ class ProjectsScreen(Screen[None]):
         Binding("s", "toggle_sort", "Sort", show=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
+        Binding("ctrl+r", "reload", "Reload", show=True),
         Binding("escape", "unfocus_search", "Clear focus", show=False),
     ]
 
@@ -88,15 +89,15 @@ class ProjectsScreen(Screen[None]):
         try:
             self._projects = self.tui_app.project_catalog.get_projects()
         except FileNotFoundError:
-            logger.debug("Data directory not found")
+            logger.debug("Data directory not found: %s", self.tui_app.data_dir)
             self._projects = []
         except PermissionError as e:
             logger.warning("Permission denied loading projects: %s", e)
-            self.notify("Permission denied", severity="error")
+            self.notify(f"Permission denied: {self.tui_app.data_dir}", severity="error")
             self._projects = []
         except OSError as e:
             logger.error("Failed to load projects: %s", e)
-            self.notify("Failed to load projects", severity="error")
+            self.notify(f"Failed to load projects: {e}", severity="error")
             self._projects = []
 
         if filter_text:
@@ -131,6 +132,13 @@ class ProjectsScreen(Screen[None]):
                 last_update,
                 tags_str,
                 key=project.name,
+            )
+
+        if not self._projects:
+            data_dir = self.tui_app.data_dir
+            self.notify(
+                f"No projects found in {data_dir}. Create one with aspara.init(project=...)",
+                timeout=8,
             )
 
     def _update_column_widths(self) -> None:
@@ -213,6 +221,12 @@ class ProjectsScreen(Screen[None]):
         """Move cursor up in table."""
         table = self.query_one("#projects-table", DataTable)
         table.action_cursor_up()
+
+    def action_reload(self) -> None:
+        """Reload the project list from disk."""
+        search_input = self.query_one("#search-input", Input)
+        self._load_projects(filter_text=search_input.value)
+        self.notify("Projects reloaded")
 
     def action_unfocus_search(self) -> None:
         """Remove focus from search input (Escape key)."""

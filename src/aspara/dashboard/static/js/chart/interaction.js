@@ -1,4 +1,6 @@
+import { removeEventListeners } from '../html-utils.js';
 import { binarySearchByStep, calculateDataRanges, findNearestStepBinary } from './interaction-utils.js';
+import { computePaddedYRange, fromLogDomain, isLogScale, isValidLogValue, toLogDomain, valueToChartY } from './scale.js';
 
 export class ChartInteraction {
   constructor(chart, renderer) {
@@ -7,6 +9,7 @@ export class ChartInteraction {
     // 2.4 Optimization: Cache data ranges to avoid recalculation on every mouse move
     this._cachedRanges = null;
     this._lastDataRef = null;
+    this._lastScale = null;
 
     // Canvas event handlers (stored for cleanup)
     this.mousemoveHandler = null;
@@ -21,22 +24,24 @@ export class ChartInteraction {
   }
 
   /**
-   * Invalidate the cached data ranges. Call this when data changes.
+   * Invalidate the cached data ranges. Call this when data or scale changes.
    */
   invalidateRangesCache() {
     this._cachedRanges = null;
     this._lastDataRef = null;
+    this._lastScale = null;
   }
 
   /**
-   * Get data ranges, using cache if data hasn't changed.
+   * Get data ranges, using cache if data and scale haven't changed.
    * @returns {Object|null} Object with xMin, xMax, yMin, yMax or null
    */
   _getDataRanges() {
-    // Check if data reference changed (simple identity check)
-    if (this.chart.data?.series !== this._lastDataRef) {
+    // Check if data reference or scale changed (simple identity check)
+    if (this.chart.data?.series !== this._lastDataRef || this.chart.yScale !== this._lastScale) {
       this._lastDataRef = this.chart.data?.series;
-      this._cachedRanges = calculateDataRanges(this.chart.data?.series || []);
+      this._lastScale = this.chart.yScale;
+      this._cachedRanges = calculateDataRanges(this.chart.data?.series || [], this.chart.yScale);
     }
     return this._cachedRanges;
   }
@@ -62,29 +67,28 @@ export class ChartInteraction {
   }
 
   /**
+   * Destroy the interaction and release all resources.
+   * Implements the Destroyable lifecycle contract.
+   */
+  destroy() {
+    this.removeEventListeners();
+    this._cachedRanges = null;
+    this._lastDataRef = null;
+    this._lastScale = null;
+  }
+
+  /**
    * Remove event listeners from canvas.
    */
   removeEventListeners() {
-    if (this.chart.canvas) {
-      if (this.mousemoveHandler) {
-        this.chart.canvas.removeEventListener('mousemove', this.mousemoveHandler);
-      }
-      if (this.mouseleaveHandler) {
-        this.chart.canvas.removeEventListener('mouseleave', this.mouseleaveHandler);
-      }
-      if (this.mousedownHandler) {
-        this.chart.canvas.removeEventListener('mousedown', this.mousedownHandler);
-      }
-      if (this.mouseupHandler) {
-        this.chart.canvas.removeEventListener('mouseup', this.mouseupHandler);
-      }
-      if (this.dblclickHandler) {
-        this.chart.canvas.removeEventListener('dblclick', this.dblclickHandler);
-      }
-      if (this.contextmenuHandler) {
-        this.chart.canvas.removeEventListener('contextmenu', this.contextmenuHandler);
-      }
-    }
+    removeEventListeners(this.chart.canvas, {
+      mousemove: this.mousemoveHandler,
+      mouseleave: this.mouseleaveHandler,
+      mousedown: this.mousedownHandler,
+      mouseup: this.mouseupHandler,
+      dblclick: this.dblclickHandler,
+      contextmenu: this.contextmenuHandler,
+    });
     this.mousemoveHandler = null;
     this.mouseleaveHandler = null;
     this.mousedownHandler = null;
@@ -210,9 +214,7 @@ export class ChartInteraction {
       yMax = this.chart.zoom.y.max;
     }
 
-    const yRange = yMax - yMin;
-    const yMinPadded = yMin - yRange * this.chart.constructor.Y_PADDING_RATIO;
-    const yMaxPadded = yMax + yRange * this.chart.constructor.Y_PADDING_RATIO;
+    const { yMinPadded, yMaxPadded } = computePaddedYRange(yMin, yMax, this.chart.yScale, this.chart.constructor.Y_PADDING_RATIO);
 
     // Use binary search to find nearest step - O(log M) instead of O(N×M)
     const nearestStep = findNearestStepBinary(mouseX, this.chart.data.series, margin, plotWidth, xMin, xMax);
@@ -230,9 +232,9 @@ export class ChartInteraction {
       // Use binary search instead of linear .find() - O(log M) instead of O(M)
       const result = binarySearchByStep(steps, values, nearestStep);
 
-      if (result) {
+      if (result && (!isLogScale(this.chart.yScale) || isValidLogValue(result.value))) {
         const x = margin + ((result.step - xMin) / (xMax - xMin)) * plotWidth;
-        const y = margin + plotHeight - ((result.value - yMinPadded) / (yMaxPadded - yMinPadded)) * plotHeight;
+        const y = valueToChartY(result.value, this.chart.yScale, plotHeight, margin, yMinPadded, yMaxPadded);
 
         nearestPoints.push({
           data: { step: result.step, value: result.value },
@@ -380,10 +382,20 @@ export class ChartInteraction {
 
     const currentYMin = this.chart.zoom.y ? this.chart.zoom.y.min : dataYMin;
     const currentYMax = this.chart.zoom.y ? this.chart.zoom.y.max : dataYMax;
-    const currentYRange = currentYMax - currentYMin;
 
-    const newYMin = currentYMin + yMinRatio * currentYRange;
-    const newYMax = currentYMin + yMaxRatio * currentYRange;
+    let newYMin;
+    let newYMax;
+    if (isLogScale(this.chart.yScale)) {
+      const logCurrentMin = toLogDomain(currentYMin);
+      const logCurrentMax = toLogDomain(currentYMax);
+      const logRange = logCurrentMax - logCurrentMin;
+      newYMin = fromLogDomain(logCurrentMin + yMinRatio * logRange);
+      newYMax = fromLogDomain(logCurrentMin + yMaxRatio * logRange);
+    } else {
+      const currentYRange = currentYMax - currentYMin;
+      newYMin = currentYMin + yMinRatio * currentYRange;
+      newYMax = currentYMin + yMaxRatio * currentYRange;
+    }
 
     this.chart.zoom.x = { min: newXMin, max: newXMax };
     this.chart.zoom.y = { min: newYMin, max: newYMax };

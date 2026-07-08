@@ -126,6 +126,12 @@ class JsonlMetricsStorage(MetricsStorage):
 
         # Build transformation chain using lazy API
         if "metrics" in schema:
+            # Keep only the core record fields; drop any envelope fields
+            # (e.g. type, run, project) so they aren't mistaken for metrics.
+            # Using an allowlist avoids fragility as envelope fields evolve.
+            core_cols = [c for c in ("timestamp", "step", "metrics") if c in schema.names()]
+            lf = lf.select(core_cols)
+
             # Unnest the metrics struct to get individual metric columns
             lf = lf.unnest("metrics")
 
@@ -133,8 +139,8 @@ class JsonlMetricsStorage(MetricsStorage):
             schema = lf.collect_schema()
 
             # Rename metric columns to add underscore prefix
-            # (excluding timestamp and step)
-            metric_cols = [col for col in schema.names() if col not in ["timestamp", "step", "project_name", "run_name"]]
+            # (all remaining columns except timestamp and step are metrics)
+            metric_cols = [col for col in schema.names() if col not in ("timestamp", "step")]
             rename_map = {col: f"_{col}" for col in metric_cols}
             lf = lf.rename(rename_map)
 

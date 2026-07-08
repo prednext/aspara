@@ -1,5 +1,7 @@
 import { deleteRunApi } from '../api/delete-api.js';
+import { registerPageLifecycle } from '../lifecycle.js';
 import { initializeTagEditorsForElements } from '../tag-editor.js';
+import { attachSortHeaders } from '../sort-utils.js';
 import { createRunSortComparator, parseRunElement } from './utils.js';
 
 class RunsListSorter {
@@ -98,27 +100,7 @@ class RunsListSorter {
   }
 
   attachEventListeners() {
-    const signal = this._abortController.signal;
-    const headers = document.querySelectorAll('[data-sort]');
-    for (const header of headers) {
-      header.addEventListener(
-        'click',
-        () => {
-          const key = header.dataset.sort;
-          if (this.sortKey === key) {
-            this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-          } else {
-            this.sortKey = key;
-            this.sortOrder = 'asc';
-          }
-          localStorage.setItem('runs_sort_key', this.sortKey);
-          localStorage.setItem('runs_sort_order', this.sortOrder);
-          this.updateSortIndicators();
-          this.sortAndRender();
-        },
-        { signal }
-      );
-    }
+    attachSortHeaders(this, 'runs', this._abortController.signal);
   }
 
   updateSortIndicators() {
@@ -206,7 +188,9 @@ class RunsListSorter {
 
 document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('runs-container')) {
-    new RunsListSorter();
+    const page = new RunsListSorter();
+    window.__asparaPage = page;
+    registerPageLifecycle(page);
   }
 });
 

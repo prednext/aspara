@@ -460,6 +460,33 @@ class TestParseFilePath:
         path = tmp_path / "run.jsonl"
         assert catalog._parse_file_path(path) is None
 
+    def test_hidden_project_dir_rejected(self, tmp_path):
+        """Hidden/reserved directories (e.g. .queue) must be rejected."""
+        catalog = RunCatalog(tmp_path)
+        path = tmp_path / ".queue" / "run1.jsonl"
+        assert catalog._parse_file_path(path) is None
+
+    def test_hidden_run_name_rejected(self, tmp_path):
+        """Run names starting with '.' must be rejected."""
+        catalog = RunCatalog(tmp_path)
+        path = tmp_path / "project_a" / ".hidden.jsonl"
+        assert catalog._parse_file_path(path) is None
+
+    def test_project_name_with_dot_rejected(self, tmp_path):
+        """Project names containing '.' must be rejected by validate_name."""
+        catalog = RunCatalog(tmp_path)
+        path = tmp_path / "proj.ect" / "run1.jsonl"
+        assert catalog._parse_file_path(path) is None
+
+    def test_run_name_with_slash_rejected(self, tmp_path):
+        """Run names with path separators must be rejected."""
+        catalog = RunCatalog(tmp_path)
+        # The path resolves to project="project_a", filename="../run1.jsonl"
+        # which relative_to would catch, but test a name that would pass
+        # relative_to but fail validate_name.
+        path = tmp_path / "project_a" / "run..1.jsonl"
+        assert catalog._parse_file_path(path) is None
+
 
 class TestSubscribe:
     """Tests for subscribe() method."""

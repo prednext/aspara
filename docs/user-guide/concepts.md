@@ -65,6 +65,7 @@ Each project and run can have various metadata beyond metrics.
     - Free-form text for recording experiment purposes, assumptions, observations, etc.
 - **Artifacts**
     - Files associated with the run, such as trained models, log files, configuration files, etc.
+    - Uploads to the tracker are limited to 100 MB per file.
 - **Status**
     - A field representing the run's state (running, completed, etc.).
 

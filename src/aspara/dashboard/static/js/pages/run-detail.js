@@ -3,6 +3,7 @@
  * Orchestrates metric chart rendering for a single run with grid layout.
  */
 import { Chart } from '../chart.js';
+import { registerPageLifecycle } from '../lifecycle.js';
 import { MetricsDataService } from '../metrics/metrics-data-service.js';
 import { initNoteEditorFromDOM } from '../note-editor.js';
 import { initializeTagEditorsForElements } from '../tag-editor.js';
@@ -21,6 +22,10 @@ class RunDetail extends BaseChartPage {
     this.chartsContainerId = 'metrics-container';
     this.emptyStateMessage = 'No metrics have been recorded for this run.';
 
+    // Editor instances (stored for cleanup in destroy())
+    this.tagEditors = [];
+    this.noteEditor = null;
+
     this.init();
     this.initializeTagEditor();
     this.initializeNoteEditor();
@@ -28,7 +33,7 @@ class RunDetail extends BaseChartPage {
   }
 
   initializeTagEditor() {
-    initializeTagEditorsForElements('#run-tags-detail', (container) => {
+    this.tagEditors = initializeTagEditorsForElements('#run-tags-detail', (container) => {
       const projectName = container.dataset.projectName;
       const runName = container.dataset.runName;
       if (!projectName || !runName) return null;
@@ -36,8 +41,8 @@ class RunDetail extends BaseChartPage {
     });
   }
 
-  initializeNoteEditor() {
-    initNoteEditorFromDOM('run-note');
+  async initializeNoteEditor() {
+    this.noteEditor = await initNoteEditorFromDOM('run-note');
   }
 
   async loadMetrics() {
@@ -69,6 +74,39 @@ class RunDetail extends BaseChartPage {
     });
     return chart;
   }
+
+  /**
+   * Clean up all resources held by this page.
+   * Overrides BaseChartPage.destroy() to also clean up run-specific
+   * resources (dataService, tag editors, note editor).
+   */
+  destroy() {
+    // Destroy owned child instances
+    if (this.dataService) {
+      this.dataService.destroy();
+      this.dataService = null;
+    }
+    for (const editor of this.tagEditors) {
+      if (editor.destroy) {
+        editor.destroy();
+      }
+    }
+    this.tagEditors = [];
+    if (this.noteEditor?.destroy) {
+      this.noteEditor.destroy();
+    }
+    this.noteEditor = null;
+
+    // Destroy charts (delegates to Chart.destroy() for each)
+    for (const chart of this.charts.values()) {
+      if (chart.destroy) {
+        chart.destroy();
+      }
+    }
+
+    // Call parent cleanup (resize handlers, size buttons, charts map)
+    super.destroy();
+  }
 }
 
 // Initialize when DOM is loaded
@@ -82,7 +120,10 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  new RunDetail(project, run);
+  const page = new RunDetail(project, run);
+  // Store for SPA cleanup
+  window.__asparaPage = page;
+  registerPageLifecycle(page);
 });
 
 export { RunDetail };

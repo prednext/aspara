@@ -22,37 +22,39 @@ describe('MetricsDataService SSE Reconnection', () => {
     mockEventSourceInstances = [];
     eventListeners = [];
 
-    const mockEventSource = vi.fn(class {
-      constructor(url) {
-        const listeners = {};
-        this.url = url;
-        this.readyState = 0; // CONNECTING
-        this.addEventListener = vi.fn((event, handler) => {
-          if (!listeners[event]) {
-            listeners[event] = [];
-          }
-          listeners[event].push(handler);
-        });
-        this.removeEventListener = vi.fn();
-        this.close = vi.fn(() => {
-          this.readyState = 2; // CLOSED
-        });
-        // Helper to trigger events in tests
-        this._triggerEvent = (eventName, data) => {
-          if (listeners[eventName]) {
-            for (const handler of listeners[eventName]) {
-              handler(data);
+    const mockEventSource = vi.fn(
+      class {
+        constructor(url) {
+          const listeners = {};
+          this.url = url;
+          this.readyState = 0; // CONNECTING
+          this.addEventListener = vi.fn((event, handler) => {
+            if (!listeners[event]) {
+              listeners[event] = [];
             }
-          }
-        };
-        this._setReadyState = (state) => {
-          this.readyState = state;
-        };
-        this._listeners = listeners;
-        mockEventSourceInstances.push(this);
-        eventListeners.push(listeners);
+            listeners[event].push(handler);
+          });
+          this.removeEventListener = vi.fn();
+          this.close = vi.fn(() => {
+            this.readyState = 2; // CLOSED
+          });
+          // Helper to trigger events in tests
+          this._triggerEvent = (eventName, data) => {
+            if (listeners[eventName]) {
+              for (const handler of listeners[eventName]) {
+                handler(data);
+              }
+            }
+          };
+          this._setReadyState = (state) => {
+            this.readyState = state;
+          };
+          this._listeners = listeners;
+          mockEventSourceInstances.push(this);
+          eventListeners.push(listeners);
+        }
       }
-    });
+    );
 
     global.EventSource = mockEventSource;
     // Define EventSource constants
@@ -80,10 +82,10 @@ describe('MetricsDataService SSE Reconnection', () => {
 
   describe('Initial state', () => {
     test('should have correct initial reconnection state', () => {
-      expect(dataService.isReconnecting).toBe(false);
-      expect(dataService.reconnectAttempts).toBe(0);
-      expect(dataService.maxReconnectAttempts).toBe(10);
-      expect(dataService.baseReconnectDelay).toBe(1000);
+      expect(dataService.reconnectManager.isReconnecting).toBe(false);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(0);
+      expect(dataService.reconnectManager.maxReconnectAttempts).toBe(10);
+      expect(dataService.reconnectManager.baseReconnectDelay).toBe(1000);
     });
   });
 
@@ -106,12 +108,12 @@ describe('MetricsDataService SSE Reconnection', () => {
     test('should increment reconnectAttempts on each reconnection attempt', async () => {
       dataService.currentSSERuns = 'run_1';
 
-      expect(dataService.reconnectAttempts).toBe(0);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(0);
 
       // First reconnection attempt
       const reconnectPromise1 = dataService.reconnectSSE();
-      expect(dataService.reconnectAttempts).toBe(1);
-      expect(dataService.isReconnecting).toBe(true);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(1);
+      expect(dataService.reconnectManager.isReconnecting).toBe(true);
 
       // Advance timer past the delay
       await vi.advanceTimersByTimeAsync(1000);
@@ -122,7 +124,7 @@ describe('MetricsDataService SSE Reconnection', () => {
       eventSource1._triggerEvent('error', {});
 
       // Second attempt
-      expect(dataService.reconnectAttempts).toBe(2);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(2);
     });
   });
 
@@ -132,7 +134,7 @@ describe('MetricsDataService SSE Reconnection', () => {
 
       // First attempt: 1000ms delay
       const promise1 = dataService.reconnectSSE();
-      expect(dataService.reconnectAttempts).toBe(1);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(1);
 
       // Should not have created EventSource yet (waiting for delay)
       const initialCount = mockEventSourceInstances.length;
@@ -151,7 +153,7 @@ describe('MetricsDataService SSE Reconnection', () => {
       es1._triggerEvent('error', {});
 
       // Second attempt: 2000ms delay
-      expect(dataService.reconnectAttempts).toBe(2);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(2);
 
       // Advance 1500ms - should still be waiting
       const countAfterError = mockEventSourceInstances.length;
@@ -169,10 +171,10 @@ describe('MetricsDataService SSE Reconnection', () => {
       dataService.currentSSERuns = 'run_1';
 
       // Set attempts high to test cap
-      dataService.reconnectAttempts = 5; // 2^5 * 1000 = 32000ms, should cap at 30000
+      dataService.reconnectManager.reconnectAttempts = 5; // 2^5 * 1000 = 32000ms, should cap at 30000
 
       const promise = dataService.reconnectSSE();
-      expect(dataService.reconnectAttempts).toBe(6);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(6);
 
       const initialCount = mockEventSourceInstances.length;
 
@@ -190,19 +192,19 @@ describe('MetricsDataService SSE Reconnection', () => {
   describe('Max retry limit', () => {
     test('should stop reconnecting after max attempts', async () => {
       dataService.currentSSERuns = 'run_1';
-      dataService.reconnectAttempts = 10; // Already at max
+      dataService.reconnectManager.reconnectAttempts = 10; // Already at max
 
       await dataService.reconnectSSE();
 
       // Should not create new EventSource
       expect(mockEventSourceInstances.length).toBe(0);
-      expect(dataService.isReconnecting).toBe(false);
+      expect(dataService.reconnectManager.isReconnecting).toBe(false);
     });
 
     test('should log error when max attempts reached', async () => {
       const consoleSpy = vi.spyOn(console, 'error');
       dataService.currentSSERuns = 'run_1';
-      dataService.reconnectAttempts = 10;
+      dataService.reconnectManager.reconnectAttempts = 10;
 
       await dataService.reconnectSSE();
 
@@ -213,8 +215,8 @@ describe('MetricsDataService SSE Reconnection', () => {
   describe('Successful connection resets state', () => {
     test('should reset reconnectAttempts on successful connection (open event)', async () => {
       dataService.currentSSERuns = 'run_1';
-      dataService.reconnectAttempts = 5;
-      dataService.isReconnecting = true;
+      dataService.reconnectManager.reconnectAttempts = 5;
+      dataService.reconnectManager.isReconnecting = true;
 
       // Setup SSE (simulates successful setupSSE call)
       dataService.setupSSE('run_1');
@@ -227,8 +229,8 @@ describe('MetricsDataService SSE Reconnection', () => {
       eventSource._triggerEvent('open', {});
 
       // State should be reset
-      expect(dataService.isReconnecting).toBe(false);
-      expect(dataService.reconnectAttempts).toBe(0);
+      expect(dataService.reconnectManager.isReconnecting).toBe(false);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(0);
     });
   });
 
@@ -275,7 +277,7 @@ describe('MetricsDataService SSE Reconnection', () => {
 
         // Verify EventSource was created
         expect(mockEventSourceInstances.length).toBe(i + 1);
-        expect(dataService.reconnectAttempts).toBe(i + 1);
+        expect(dataService.reconnectManager.reconnectAttempts).toBe(i + 1);
 
         // Trigger error on the new EventSource to start next cycle
         if (i < 4) {
@@ -293,24 +295,24 @@ describe('MetricsDataService SSE Reconnection', () => {
 
       // Start reconnection
       dataService.reconnectSSE();
-      expect(dataService.isReconnecting).toBe(true);
+      expect(dataService.reconnectManager.isReconnecting).toBe(true);
 
       // Try to start another reconnection while one is in progress
       dataService.reconnectSSE();
 
       // Should still only have one attempt
-      expect(dataService.reconnectAttempts).toBe(1);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(1);
     });
   });
 
   describe('destroy() resets reconnection state', () => {
     test('should reset reconnectAttempts on destroy', () => {
-      dataService.reconnectAttempts = 5;
-      dataService.isReconnecting = true;
+      dataService.reconnectManager.reconnectAttempts = 5;
+      dataService.reconnectManager.isReconnecting = true;
 
       dataService.destroy();
 
-      expect(dataService.reconnectAttempts).toBe(0);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(0);
     });
   });
 
@@ -321,16 +323,16 @@ describe('MetricsDataService SSE Reconnection', () => {
 
       // Start first reconnection
       const promise1 = dataService.reconnectSSE();
-      expect(dataService.reconnectAttempts).toBe(1);
-      expect(dataService.isReconnecting).toBe(true);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(1);
+      expect(dataService.reconnectManager.isReconnecting).toBe(true);
 
       // Simulate another error event calling reconnectSSE while the first is waiting
       // (Error handler no longer resets isReconnecting, just calls reconnectSSE)
       dataService.reconnectSSE();
 
       // Should still be 1 - second call is skipped because isReconnecting is true
-      expect(dataService.reconnectAttempts).toBe(1);
-      console.log('reconnectAttempts after duplicate call during delay:', dataService.reconnectAttempts);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(1);
+      console.log('reconnectAttempts after duplicate call during delay:', dataService.reconnectManager.reconnectAttempts);
 
       // Clean up
       await vi.advanceTimersByTimeAsync(60000);
@@ -342,14 +344,14 @@ describe('MetricsDataService SSE Reconnection', () => {
 
       // Start first reconnection
       const promise1 = dataService.reconnectSSE();
-      expect(dataService.reconnectAttempts).toBe(1);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(1);
 
       // Wait for delay and setupSSE to complete
       await vi.advanceTimersByTimeAsync(1000);
       await promise1;
 
       // isReconnecting should be false now (reset after setupSSE)
-      expect(dataService.isReconnecting).toBe(false);
+      expect(dataService.reconnectManager.isReconnecting).toBe(false);
 
       // New EventSource was created
       expect(mockEventSourceInstances.length).toBe(1);
@@ -359,8 +361,8 @@ describe('MetricsDataService SSE Reconnection', () => {
       es._triggerEvent('error', {});
 
       // Should start second reconnection attempt
-      expect(dataService.reconnectAttempts).toBe(2);
-      expect(dataService.isReconnecting).toBe(true);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(2);
+      expect(dataService.reconnectManager.isReconnecting).toBe(true);
 
       // Clean up
       await vi.advanceTimersByTimeAsync(60000);
@@ -398,8 +400,8 @@ describe('MetricsDataService SSE Reconnection', () => {
       es1._triggerEvent('error', {});
 
       // At this point, second reconnection should have started
-      expect(dataService.reconnectAttempts).toBe(2);
-      expect(dataService.isReconnecting).toBe(true);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(2);
+      expect(dataService.reconnectManager.isReconnecting).toBe(true);
 
       // Advance only 1 second (old bug would have created new EventSource)
       await vi.advanceTimersByTimeAsync(1000);
@@ -420,11 +422,11 @@ describe('MetricsDataService SSE Reconnection', () => {
       global.fetch = vi.fn().mockRejectedValue(new Error('Server unavailable'));
 
       // Manually set attempts to near max to avoid long test duration
-      dataService.reconnectAttempts = 9;
+      dataService.reconnectManager.reconnectAttempts = 9;
 
       // Start the 10th (last allowed) attempt
       const promise = dataService.reconnectSSE();
-      expect(dataService.reconnectAttempts).toBe(10);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(10);
 
       // Advance past delay
       await vi.advanceTimersByTimeAsync(30000); // Max delay
@@ -439,7 +441,7 @@ describe('MetricsDataService SSE Reconnection', () => {
 
       // At this point, reconnectSSE is called but should return early
       // because reconnectAttempts (10) >= maxReconnectAttempts (10)
-      expect(dataService.reconnectAttempts).toBe(10);
+      expect(dataService.reconnectManager.reconnectAttempts).toBe(10);
 
       // No new EventSource should be created
       await vi.advanceTimersByTimeAsync(30000);

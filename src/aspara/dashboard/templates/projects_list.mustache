@@ -70,7 +70,13 @@
 
   {{^has_projects}}
   <div class="bg-base-surface border border-base-border p-6">
-    <p class="text-text-muted">No projects found. Get started by creating a new project.</p>
+    <p class="text-text-muted mb-2">No projects found.</p>
+    <p class="text-sm text-text-secondary mb-3">Create one by logging a run in your training script:</p>
+    <pre class="mt-2 p-3 bg-base-bg rounded text-xs overflow-x-auto"><code>import aspara
+
+aspara.init(project="my_project")
+aspara.log({"loss": 0.5})
+aspara.finish()</code></pre>
   </div>
   {{/has_projects}}
 </div>

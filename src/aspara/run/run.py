@@ -33,6 +33,7 @@ class Run:
         storage_backend: str | None = None,
         tracker_uri: str | None = None,
         project_tags: list[str] | None = None,
+        resume: bool = False,
     ) -> None:
         """Create a new run instance.
 
@@ -46,6 +47,9 @@ class Run:
             storage_backend: Storage backend type ('jsonl' or 'polars'). Defaults to 'jsonl'.
             tracker_uri: Tracker server URI for remote mode. If None, uses local file storage.
             project_tags: List of tags to add to the project.
+            resume: If True and a run with the same name already exists, resume
+                it (reuse run_id, reset finish state, continue step numbering).
+                If no existing run is found, a new run is created.
         """
         if tracker_uri is not None:
             from aspara.run._remote_run import RemoteRun
@@ -58,6 +62,7 @@ class Run:
                 notes=notes,
                 tracker_uri=tracker_uri,
                 project_tags=project_tags,
+                resume=resume,
             )
         else:
             from aspara.run._local_run import LocalRun
@@ -71,6 +76,7 @@ class Run:
                 dir=dir,
                 storage_backend=storage_backend,
                 project_tags=project_tags,
+                resume=resume,
             )
 
     # ---- Property delegations ----------------------------------------
@@ -139,21 +145,32 @@ class Run:
         """
         self._backend.log(data, step=step, commit=commit, timestamp=timestamp)
 
-    def finish(self, exit_code: int = 0, quiet: bool = False) -> None:
+    def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
         """Finish the run.
 
         Args:
             exit_code: Exit code for the run (0 = success)
             quiet: If True, suppress output messages
+            flush_timeout: Maximum time to wait for queue flush in seconds.
+                Only meaningful for remote runs; ignored by LocalRun.
         """
-        self._backend.finish(exit_code=exit_code, quiet=quiet)
+        self._backend.finish(exit_code=exit_code, quiet=quiet, flush_timeout=flush_timeout)
 
-    def flush(self, *args: Any, **kwargs: Any) -> Any:
+    def flush(self, timeout: float = 30.0) -> int:
         """Ensure all data is persisted.
 
-        For LocalRun this is a no-op. For RemoteRun this flushes queued metrics.
+        For LocalRun this is a no-op (data is written directly to disk on
+        every ``log()`` call) and always returns 0. For RemoteRun this
+        flushes any queued metrics that failed to send previously.
+
+        Args:
+            timeout: Maximum time to wait for flush in seconds
+                (only meaningful for remote runs).
+
+        Returns:
+            Number of metrics that failed to persist (always 0 for local runs).
         """
-        return self._backend.flush(*args, **kwargs)
+        return self._backend.flush(timeout=timeout)
 
     def log_artifact(
         self,
@@ -175,11 +192,10 @@ class Run:
     def set_tags(self, tags: list[str]) -> None:
         """Set tags for this run.
 
+        Replaces the existing run-level tags with the provided list.
+
         Args:
             tags: List of tags
-
-        Note:
-            This method is only available for local runs.
         """
         self._backend.set_tags(tags)
 

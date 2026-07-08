@@ -7,6 +7,8 @@ import { ChartControls } from './chart/controls.js';
 import { ChartExport } from './chart/export.js';
 import { ChartInteraction } from './chart/interaction.js';
 import { ChartRenderer } from './chart/renderer.js';
+import { calculateDataRanges } from './chart/interaction-utils.js';
+import { YScale, computePaddedYRange, isLogScale, isValidLogValue, valueToChartY } from './chart/scale.js';
 
 export class Chart {
   // Chart layout constants
@@ -43,6 +45,8 @@ export class Chart {
     this.width = 0;
     this.height = 0;
     this.onZoomChange = options.onZoomChange || null;
+    this.onYScaleChange = options.onYScaleChange || null;
+    this.yScale = options.yScale || YScale.LINEAR;
 
     // Color palette for managing series styles
     this.colorPalette = new ChartColorPalette();
@@ -70,6 +74,7 @@ export class Chart {
     // Data range cache for performance optimization
     this._cachedDataRanges = null;
     this._lastDataRef = null;
+    this._lastScale = null;
 
     this.init();
   }
@@ -81,6 +86,19 @@ export class Chart {
     this.canvas.style.border = '1px solid #e5e7eb';
     this.canvas.style.display = 'block';
     this.canvas.style.maxWidth = '100%';
+
+    // Accessibility: expose the canvas as a decorative image whose
+    // accessible name is derived from the chart's <h3> title via
+    // aria-labelledby. The title id is stashed on the container div by
+    // createMetricChartContainer(); when absent (e.g. standalone Chart
+    // usage) fall back to a generic label.
+    this.canvas.setAttribute('role', 'img');
+    const titleId = this.container.dataset.ariaLabelledby;
+    if (titleId) {
+      this.canvas.setAttribute('aria-labelledby', titleId);
+    } else {
+      this.canvas.setAttribute('aria-label', 'Metrics line chart');
+    }
 
     this.container.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d');
@@ -149,13 +167,13 @@ export class Chart {
   }
 
   /**
-   * Get cached data ranges, recalculating only when data changes.
+   * Get cached data ranges, recalculating only when data or scale changes.
    * @returns {Object|null} Object with xMin, xMax, yMin, yMax or null
    */
   _getDataRanges() {
-    // Check if data reference changed
-    if (this.data?.series !== this._lastDataRef) {
+    if (this.data?.series !== this._lastDataRef || this.yScale !== this._lastScale) {
       this._lastDataRef = this.data?.series;
+      this._lastScale = this.yScale;
       this._cachedDataRanges = this._calculateDataRanges();
     }
     return this._cachedDataRanges;
@@ -163,34 +181,11 @@ export class Chart {
 
   /**
    * Calculate data ranges from all series.
+   * For log scale, only positive values are considered.
    * @returns {Object|null} Object with xMin, xMax, yMin, yMax or null
    */
   _calculateDataRanges() {
-    if (!this.data?.series?.length) return null;
-
-    let xMin = Number.POSITIVE_INFINITY;
-    let xMax = Number.NEGATIVE_INFINITY;
-    let yMin = Number.POSITIVE_INFINITY;
-    let yMax = Number.NEGATIVE_INFINITY;
-
-    for (const series of this.data.series) {
-      if (!series.data?.steps?.length) continue;
-      const { steps, values } = series.data;
-
-      // steps are sorted, so O(1) for min/max
-      xMin = Math.min(xMin, steps[0]);
-      xMax = Math.max(xMax, steps[steps.length - 1]);
-
-      // values min/max
-      for (let i = 0; i < values.length; i++) {
-        if (values[i] < yMin) yMin = values[i];
-        if (values[i] > yMax) yMax = values[i];
-      }
-    }
-
-    if (xMin === Number.POSITIVE_INFINITY) return null;
-
-    return { xMin, xMax, yMin, yMax };
+    return calculateDataRanges(this.data?.series || [], this.yScale);
   }
 
   draw() {
@@ -239,12 +234,15 @@ export class Chart {
       yMax = this.zoom.y.max;
     }
 
-    const yRange = yMax - yMin;
-    const yMinPadded = yMin - yRange * Chart.Y_PADDING_RATIO;
-    const yMaxPadded = yMax + yRange * Chart.Y_PADDING_RATIO;
+    if (isLogScale(this.yScale) && (yMin <= 0 || yMax <= 0)) {
+      this.renderer.drawMessage('Log scale requires positive y values');
+      return;
+    }
 
-    this.renderer.drawGrid(margin, plotWidth, plotHeight, xMin, xMax, yMinPadded, yMaxPadded);
-    this.renderer.drawAxisLabels(margin, plotWidth, plotHeight, xMin, xMax, yMinPadded, yMaxPadded);
+    const { yMinPadded, yMaxPadded } = computePaddedYRange(yMin, yMax, this.yScale, Chart.Y_PADDING_RATIO);
+
+    this.renderer.drawGrid(margin, plotWidth, plotHeight, xMin, xMax, yMinPadded, yMaxPadded, this.yScale);
+    this.renderer.drawAxisLabels(margin, plotWidth, plotHeight, xMin, xMax, yMinPadded, yMaxPadded, this.yScale);
 
     // Clip to plot area
     this.ctx.save();
@@ -271,13 +269,26 @@ export class Chart {
       }
 
       this.ctx.beginPath();
+      let hasValidPoint = false;
 
       for (let i = 0; i < steps.length; i++) {
-        const x = margin + ((steps[i] - xMin) / (xMax - xMin)) * plotWidth;
-        const y = margin + plotHeight - ((values[i] - yMinPadded) / (yMaxPadded - yMinPadded)) * plotHeight;
+        const value = values[i];
+        if (isLogScale(this.yScale) && !isValidLogValue(value)) {
+          // Break the line at non-positive values; resume at the next valid point.
+          if (hasValidPoint) {
+            this.ctx.stroke();
+            this.ctx.beginPath();
+            hasValidPoint = false;
+          }
+          continue;
+        }
 
-        if (i === 0) {
+        const x = margin + ((steps[i] - xMin) / (xMax - xMin)) * plotWidth;
+        const y = valueToChartY(value, this.yScale, plotHeight, margin, yMinPadded, yMaxPadded);
+
+        if (!hasValidPoint) {
           this.ctx.moveTo(x, y);
+          hasValidPoint = true;
         } else {
           this.ctx.lineTo(x, y);
         }
@@ -317,6 +328,29 @@ export class Chart {
   resetZoom() {
     this.zoom.x = null;
     this.zoom.y = null;
+    this.draw();
+  }
+
+  /**
+   * Toggle the y-axis scale between linear and logarithmic.
+   * Zoom is cleared because a linear zoom range does not translate to log space.
+   */
+  toggleYScale() {
+    this.setYScale(this.yScale === YScale.LOG ? YScale.LINEAR : YScale.LOG);
+  }
+
+  /**
+   * Set the y-axis scale explicitly.
+   * @param {string} scale - YScale.LINEAR or YScale.LOG
+   */
+  setYScale(scale) {
+    if (scale !== YScale.LINEAR && scale !== YScale.LOG) return;
+    this.yScale = scale;
+    this.zoom.y = null;
+    this.hoverPoint = null;
+    if (this.onYScaleChange) {
+      this.onYScaleChange(this.yScale);
+    }
     this.draw();
   }
 
@@ -411,7 +445,7 @@ export class Chart {
       this.fullscreenChangeHandler = null;
     }
     if (this.interaction) {
-      this.interaction.removeEventListeners();
+      this.interaction.destroy();
     }
     if (this.controls) {
       this.controls.destroy();

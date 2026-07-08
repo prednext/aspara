@@ -95,6 +95,25 @@ class DataDirWatcher:
         cls._instance = None
         cls._lock = None
 
+    @classmethod
+    async def shutdown(cls) -> None:
+        """Properly shut down the singleton instance.
+
+        Cancels the running dispatch task (which closes the underlying
+        awatch/inotify file descriptor) and then clears the singleton
+        state via reset_instance(). Call this from the application
+        lifespan shutdown so that a subsequent reload does not reuse a
+        stale watcher — which would leak inotify FDs and deliver
+        duplicate events.
+        """
+        instance = cls._instance
+        if instance is not None and instance._task is not None and not instance._task.done():
+            logger.info("[Watcher] Shutting down dispatch task")
+            instance._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(instance._task, timeout=2.0)
+        cls.reset_instance()
+
     def _parse_file_path(self, file_path: Path) -> tuple[str, str, str] | None:
         """Parse file path to extract project, run name, and file type.
 
@@ -103,7 +122,7 @@ class DataDirWatcher:
 
         Returns:
             (project, run_name, file_type) where file_type is 'metrics', 'wal', or 'meta'
-            None if path doesn't match expected pattern
+            None if path doesn't match expected pattern or names are invalid
         """
         try:
             relative = file_path.relative_to(self.data_dir)
@@ -118,13 +137,28 @@ class DataDirWatcher:
         filename = parts[1]
 
         if filename.endswith(".wal.jsonl"):
-            return (project, filename[:-10], "wal")
+            run_name = filename[:-10]
+            file_type = "wal"
         elif filename.endswith(".meta.json"):
-            return (project, filename[:-10], "meta")
+            run_name = filename[:-10]
+            file_type = "meta"
         elif filename.endswith(".jsonl"):
-            return (project, filename[:-6], "metrics")
+            run_name = filename[:-6]
+            file_type = "metrics"
+        else:
+            return None
 
-        return None
+        # Validate project and run names so that reserved/hidden directories
+        # (e.g. .queue) or names with path-traversal characters are ignored
+        # at the watcher level rather than dispatched to subscribers and
+        # later rejected by the API layer.
+        try:
+            validate_name(project, "project name")
+            validate_name(run_name, "run name")
+        except ValueError:
+            return None
+
+        return (project, run_name, file_type)
 
     def _parse_metric_line(self, line: str, project: str, run: str, since: datetime) -> MetricRecord | None:
         """Parse a JSONL line and return MetricRecord if it passes the since filter.

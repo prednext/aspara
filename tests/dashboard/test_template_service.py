@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from aspara.catalog import ProjectInfo, RunInfo
-from aspara.dashboard.services.template_service import TemplateService, create_breadcrumbs
+from aspara.dashboard.services.template_service import (
+    TemplateService,
+    create_breadcrumbs,
+    render_mustache_response,
+)
 from aspara.models import RunStatus
 
 
@@ -220,3 +224,16 @@ class TestFormatArtifactForTemplate:
             artifact = {"name": "x", "category": cat}
             result = TemplateService.format_artifact_for_template(artifact)
             assert result[flag] is True, f"Failed for category {cat}"
+
+
+class TestRenderMustacheResponse:
+    """Tests for render_mustache_response() common context."""
+
+    def test_exposes_server_max_notes_length_on_body(self) -> None:
+        """The server-side max_notes_length is rendered into the layout so
+        the client can use it as the single source of truth."""
+        html = render_mustache_response("projects_list", {"has_projects": False})
+        from aspara.config import get_resource_limits
+
+        expected = f'data-max-notes-length="{get_resource_limits().max_notes_length}"'
+        assert expected in html

@@ -11,10 +11,88 @@ import argparse
 import os
 import socket
 import sys
+import tempfile
+from importlib.metadata import version as _pkg_version
+from pathlib import Path
 
 import uvicorn
 
-from aspara.config import get_data_dir, get_storage_backend
+from aspara.config import _validate_data_dir, get_data_dir, get_storage_backend
+
+
+def _get_version() -> str:
+    """Get the installed aspara version.
+
+    Reads package metadata (sourced from pyproject.toml) so the CLI does not
+    need to import the aspara package (and its heavy dependencies) just to
+    print ``--version``.
+    """
+    try:
+        return _pkg_version("aspara")
+    except Exception:
+        # Fallback for environments without installed metadata (e.g. running
+        # directly from a source checkout without install).
+        from aspara import __version__
+
+        return __version__
+
+
+def _resolve_and_validate_data_dir(data_dir: str | None, *, require_writable: bool = True) -> str:
+    """Resolve *data_dir* to an absolute path and validate it.
+
+    Performs the following checks (in order):
+
+    1.  Forbidden system-path check (delegates to ``config._validate_data_dir``).
+    2.  Parent directory exists (so the path is creatable).
+    3.  If *require_writable* is ``True``, the directory (or its parent when
+        it does not yet exist) is writable.
+
+    On any failure an error message is printed to stdout and ``sys.exit(1)``
+    is called.
+
+    Args:
+        data_dir: Raw ``--data-dir`` value. ``None`` falls back to
+            ``get_data_dir()``.
+        require_writable: When ``True`` (server commands), verify write
+            access. Read-only commands (``projects``, ``runs``) pass
+            ``False``.
+
+    Returns:
+        The resolved absolute path as a ``str``.
+    """
+    if data_dir is None:
+        return str(get_data_dir())
+
+    raw_path = Path(data_dir).expanduser()
+    resolved = raw_path.resolve()
+
+    # 1. Forbidden system-path check
+    try:
+        _validate_data_dir(resolved)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    # 2. Parent directory must exist (so the path is creatable)
+    parent = resolved if resolved.exists() else resolved.parent
+    if not parent.exists():
+        print(f"Error: data directory parent does not exist: {parent}")
+        print("Hint: create the parent directory first, e.g.:")
+        print(f"  mkdir -p {parent}")
+        sys.exit(1)
+
+    # 3. Writable check (for server commands that write data)
+    if require_writable:
+        test_dir = resolved if resolved.exists() else parent
+        try:
+            with tempfile.TemporaryFile(dir=str(test_dir), prefix=".aspara_write_test_"):
+                pass
+        except (PermissionError, OSError) as exc:
+            print(f"Error: data directory is not writable: {test_dir}")
+            print(f"  {exc}")
+            sys.exit(1)
+
+    return str(resolved)
 
 
 def parse_serve_components(components: list[str]) -> tuple[bool, bool]:
@@ -93,6 +171,29 @@ def find_available_port(start_port: int = 3141, max_attempts: int = 100) -> int 
     return None
 
 
+def _warn_wildcard_host(host: str) -> None:
+    """Warn when binding to a wildcard address without read-only mode.
+
+    Binding to ``0.0.0.0`` or ``::`` exposes the server to the entire
+    network. Since Aspara has no authentication, anyone on the network
+    can read, modify, or delete all data. This helper prints a warning
+    recommending read-only mode in that case.
+
+    Args:
+        host: Host string passed via ``--host``
+    """
+    if host not in ("0.0.0.0", "::", ""):
+        return
+
+    print("WARNING: binding to a wildcard address exposes the server")
+    print("to the entire network. Aspara has no authentication, so")
+    print("anyone on the network can read, modify, or delete all data.")
+    if os.environ.get("ASPARA_READ_ONLY") != "1":
+        print("Consider enabling read-only mode:")
+        print("  ASPARA_READ_ONLY=1 aspara dashboard --host 0.0.0.0")
+    print()
+
+
 def run_dashboard(
     host: str = "127.0.0.1",
     port: int = 3141,
@@ -122,8 +223,7 @@ def run_dashboard(
     if dev:
         os.environ["ASPARA_DEV_MODE"] = "1"
 
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
@@ -134,6 +234,7 @@ def run_dashboard(
 
     configure_data_dir(data_dir)
 
+    _warn_wildcard_host(host)
     print("Starting Aspara Dashboard server...")
     print(f"Access http://{host}:{port} in your browser!")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -157,8 +258,7 @@ def run_tui(data_dir: str | None = None) -> None:
     Args:
         data_dir: Data directory. Defaults to XDG-based default (~/.local/share/aspara)
     """
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     print("Starting Aspara TUI...")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -200,11 +300,11 @@ def run_tracker(
     if storage_backend is not None:
         os.environ["ASPARA_STORAGE_BACKEND"] = storage_backend
 
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
+    _warn_wildcard_host(host)
     print("Starting Aspara Tracker API server...")
     print(f"Endpoint: http://{host}:{port}/tracker/api/v1")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -263,8 +363,7 @@ def run_serve(
         port = get_default_port(enable_dashboard, enable_tracker)
 
     # Configure data directory
-    if data_dir is None:
-        data_dir = str(get_data_dir())
+    data_dir = _resolve_and_validate_data_dir(data_dir, require_writable=True)
 
     os.environ["ASPARA_DATA_DIR"] = os.path.abspath(data_dir)
 
@@ -285,6 +384,7 @@ def run_serve(
     else:
         component_desc = "Tracker"
 
+    _warn_wildcard_host(host)
     print(f"Starting Aspara {component_desc} server...")
     print(f"Access http://{host}:{port} in your browser!")
     print(f"Data directory: {os.path.abspath(data_dir)}")
@@ -300,12 +400,71 @@ def run_serve(
         sys.exit(1)
 
 
+def _list_projects(data_dir: str | None) -> None:
+    """Print all projects and their run counts."""
+    from aspara.catalog import ProjectCatalog
+
+    resolved_dir = _resolve_and_validate_data_dir(data_dir, require_writable=False)
+    catalog = ProjectCatalog(resolved_dir)
+    projects = catalog.get_projects()
+
+    if not projects:
+        print("No projects found. Use `aspara.init(project=...)` to create one.")
+        return
+
+    # Column widths for alignment
+    name_w = max(len(p.name) for p in projects)
+    print(f"{'PROJECT':<{name_w}}  RUNS  LAST UPDATED")
+    print(f"{'-' * name_w}  ----  ------------")
+    for p in projects:
+        last = p.last_update.strftime("%Y-%m-%d %H:%M") if p.last_update else "N/A"
+        print(f"{p.name:<{name_w}}  {p.run_count:>4}  {last}")
+
+
+def _list_runs(project: str, data_dir: str | None) -> int:
+    """Print all runs in a project.
+
+    Returns 0 on success, 1 if the project does not exist.
+    """
+    from aspara.catalog import ProjectCatalog, RunCatalog
+
+    resolved_dir = _resolve_and_validate_data_dir(data_dir, require_writable=False)
+    project_catalog = ProjectCatalog(resolved_dir)
+    if not project_catalog.exists(project):
+        print(f"Project '{project}' not found in {resolved_dir}")
+        return 1
+
+    run_catalog = RunCatalog(resolved_dir)
+    runs = run_catalog.get_runs(project)
+
+    if not runs:
+        print(f"No runs found in project '{project}'.")
+        return 0
+
+    status_display = {
+        "wip": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "maybe_failed": "Maybe Failed",
+    }
+
+    name_w = max(len(r.name) for r in runs)
+    print(f"{'RUN':<{name_w}}  STATUS     STARTED")
+    print(f"{'-' * name_w}  --------   -------")
+    for r in runs:
+        status = status_display.get(r.status.value, r.status.value)
+        started = r.start_time.strftime("%Y-%m-%d %H:%M") if r.start_time else "N/A"
+        print(f"{r.name:<{name_w}}  {status:<8}   {started}")
+    return 0
+
+
 def main() -> None:
     """
     CLI main entry point
     """
-    parser = argparse.ArgumentParser(description="Aspara management tool")
-    subparsers = parser.add_subparsers(dest="command", help="Subcommands")
+    parser = argparse.ArgumentParser(description="Aspara management tool. Run a subcommand to start a server or the TUI.")
+    parser.add_argument("--version", action="version", version=f"aspara {_get_version()}")
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Subcommands")
 
     dashboard_parser = subparsers.add_parser("dashboard", help="Start dashboard server")
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Host name (default: 127.0.0.1)")
@@ -359,6 +518,13 @@ def main() -> None:
         help="Metrics storage backend (default: jsonl or ASPARA_STORAGE_BACKEND)",
     )
 
+    projects_parser = subparsers.add_parser("projects", help="List all projects")
+    projects_parser.add_argument("--data-dir", default=None, help="Data directory (default: XDG-based ~/.local/share/aspara)")
+
+    runs_parser = subparsers.add_parser("runs", help="List runs in a project")
+    runs_parser.add_argument("project", help="Project name")
+    runs_parser.add_argument("--data-dir", default=None, help="Data directory (default: XDG-based ~/.local/share/aspara)")
+
     args = parser.parse_args()
 
     if args.command == "dashboard":
@@ -390,13 +556,12 @@ def main() -> None:
             project_search_mode=args.project_search_mode,
             storage_backend=args.storage_backend,
         )
-    else:
-        port = find_available_port(start_port=3141)
-        if port is None:
-            print("Error: No available port found!")
-            sys.exit(1)
-
-        run_dashboard(port=port)
+    elif args.command == "projects":
+        _list_projects(data_dir=args.data_dir)
+    elif args.command == "runs":
+        exit_code = _list_runs(project=args.project, data_dir=args.data_dir)
+        if exit_code != 0:
+            sys.exit(exit_code)
 
 
 if __name__ == "__main__":

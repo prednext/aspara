@@ -3,7 +3,10 @@
  * Provides common layout calculation and grid management for chart pages.
  */
 
-/** Chart base width map for S/M/L sizes */
+/** Chart base width map for S/M/L sizes.
+ *  Single source of truth for the per-size target width. The
+ *  _chart_size_controls.mustache template references these values in its
+ *  button `title` attributes — keep them in sync. */
 export const CHART_BASE_WIDTH_MAP = {
   S: 300,
   M: 400,
@@ -61,11 +64,15 @@ export function applyGridLayout(container, columns, gap) {
 /**
  * Update heights of chart elements in a container.
  *
+ * Only targets the chart divs (the divs that hold the canvas), never the
+ * title elements. Chart div ids start with `chart-`, while their associated
+ * <h3> titles use the `-title` suffix and must not be resized.
+ *
  * @param {HTMLElement} container - Container element with chart divs
  * @param {number} chartHeight - Height to apply in pixels
- * @param {string} [selector='[id^="chart-"]'] - CSS selector for chart elements
+ * @param {string} [selector='div[id^="chart-"]'] - CSS selector for chart divs
  */
-export function updateChartHeights(container, chartHeight, selector = '[id^="chart-"]') {
+export function updateChartHeights(container, chartHeight, selector = 'div[id^="chart-"]') {
   const chartDivs = container.querySelectorAll(selector);
   for (const chartDiv of chartDivs) {
     chartDiv.style.height = `${chartHeight}px`;

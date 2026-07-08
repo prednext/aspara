@@ -46,7 +46,7 @@ class AsparaTUIApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit", show=True, priority=True),
         Binding("question_mark", "help", "Help", show=True),
-        Binding("escape", "back", "Back", show=True),
+        Binding("escape", "back", "Back", show=False),
     ]
 
     def __init__(self, data_dir: str | None = None) -> None:

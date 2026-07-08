@@ -10,7 +10,7 @@ import { escapeHtml } from '../html-utils.js';
  * @param {string} metricName - Name of the metric
  * @param {number} chartHeight - Height of the chart in pixels
  * @param {string} [chartSize='M'] - Chart size ('S', 'M', or 'L') for padding adjustment
- * @returns {{ container: HTMLElement, chartDiv: HTMLElement, chartId: string }}
+ * @returns {{ container: HTMLElement, chartDiv: HTMLElement, chartId: string, titleId: string }}
  */
 export function createMetricChartContainer(metricName, chartHeight, chartSize = 'M') {
   const chartContainer = document.createElement('div');
@@ -19,12 +19,16 @@ export function createMetricChartContainer(metricName, chartHeight, chartSize = 
   chartContainer.className = `bg-base-surface border border-base-border ${padding}`;
 
   const chartId = `chart-${metricName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  // Stable id for the <h3> title so the canvas can reference it via
+  // aria-labelledby (SSOT: the metric name lives only in the <h3>).
+  const titleId = `${chartId}-title`;
 
   // Header section
   const chartHeader = document.createElement('div');
   chartHeader.className = 'flex items-center justify-between mb-6';
 
   const chartTitle = document.createElement('h3');
+  chartTitle.id = titleId;
   chartTitle.className = 'text-sm font-semibold text-text-primary uppercase tracking-wider';
   chartTitle.textContent = metricName;
   chartHeader.appendChild(chartTitle);
@@ -38,9 +42,12 @@ export function createMetricChartContainer(metricName, chartHeight, chartSize = 
   chartDiv.style.height = `${chartHeight}px`;
   chartDiv.style.width = '100%';
   chartDiv.style.boxSizing = 'border-box';
+  // Stash the title element id so Chart can wire up aria-labelledby on
+  // the canvas it creates inside this div.
+  chartDiv.dataset.ariaLabelledby = titleId;
   chartContainer.appendChild(chartDiv);
 
-  return { container: chartContainer, chartDiv, chartId };
+  return { container: chartContainer, chartDiv, chartId, titleId };
 }
 
 /**

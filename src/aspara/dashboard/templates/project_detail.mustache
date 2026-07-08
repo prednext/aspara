@@ -115,7 +115,7 @@
           {{> _chart_size_controls}}
         </div>
         <div class="flex items-center gap-2">
-          <label class="flex items-center cursor-pointer">
+          <label class="flex items-center cursor-pointer" title="Link zoom across all charts — zooming one applies the same zoom range to the rest">
             <input type="checkbox" id="syncZoom" class="mr-2 accent-accent">
             <span class="text-sm text-text-secondary">Sync Zoom</span>
           </label>
@@ -143,6 +143,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 00-2-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
           </svg>
           <p class="text-text-secondary">No metrics data found for the selected runs.</p>
+          <p class="text-xs text-text-muted mt-2">This can happen when runs have no metrics logged yet, or when all selected runs are filtered out.</p>
         </div>
 
         <!-- Initial State -->
@@ -159,24 +160,16 @@
 
   {{^has_runs}}
   <div class="bg-base-surface border border-base-border p-6">
-    <p class="text-text-muted">No runs found. Create some runs first to view metrics.</p>
+    <p class="text-text-muted mb-2">No runs found in this project.</p>
+    <p class="text-sm text-text-secondary mb-3">Add a run by logging from your training script:</p>
+    <pre class="mt-2 p-3 bg-base-bg rounded text-xs overflow-x-auto"><code>import aspara
+
+aspara.init(project="{{project}}")
+aspara.log({"loss": 0.5})
+aspara.finish()</code></pre>
   </div>
   {{/has_runs}}
 </div>
-
-<!-- Ensure run data is cleared -->
-<script>
-  window.runData = null;
-  window.projectData = {
-    project: "{{project}}",
-    runCount: {{run_count}}
-  };
-
-  // Initialize project note editor when DOM is loaded
-  document.addEventListener('DOMContentLoaded', function() {
-    initNoteEditorFromDOM('project-note');
-  });
-</script>
 
 <!-- Include the project detail JavaScript -->
 <script type="module" src="/static/dist/pages/project-detail.js"></script>

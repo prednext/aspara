@@ -15,6 +15,32 @@ class TagEditor {
   }
 
   /**
+   * Parse a comma-separated tag string into a clean array of tags.
+   * @param {string} value - Comma-separated tag string
+   * @returns {Array<string>} Array of trimmed, non-empty tags
+   */
+  static parseTags(value) {
+    return value
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+  }
+
+  /**
+   * Render tag chips as HTML.
+   * @param {Array<string>} tags - Tags to render
+   * @returns {string} HTML string of tag chips
+   */
+  static renderTagsHtml(tags) {
+    return tags
+      .map(
+        (tag) =>
+          `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-base-bg text-xs text-text-muted border border-base-border">${escapeHtml(tag)}</span>`
+      )
+      .join('');
+  }
+
+  /**
    * Initialize tag editor for an element
    * @param {HTMLElement} element - The tag display element
    * @param {string} apiEndpoint - API endpoint for updating tags
@@ -62,14 +88,7 @@ class TagEditor {
     display.className = 'tag-display flex items-center gap-2 flex-wrap';
 
     const tagsHtml =
-      tags.length > 0
-        ? tags
-            .map(
-              (tag) =>
-                `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-base-bg text-xs text-text-muted border border-base-border">${escapeHtml(tag)}</span>`
-            )
-            .join('')
-        : '<span class="text-text-muted italic text-sm">No tags</span>';
+      TagEditor.renderTagsHtml(tags) || '<span class="text-text-muted italic text-sm">No tags</span>';
 
     display.innerHTML = `
       <div class="tag-list flex items-center gap-1.5 flex-wrap">${tagsHtml}</div>
@@ -148,10 +167,7 @@ class TagEditor {
       (e) => {
         e.stopPropagation();
         // Save current tags before entering edit mode
-        tagsBeforeEdit = input.value
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter((tag) => tag.length > 0);
+        tagsBeforeEdit = TagEditor.parseTags(input.value);
         this.toggleEditMode(wrapper, input);
       },
       { signal }
@@ -271,10 +287,7 @@ class TagEditor {
     errorDiv.classList.add('hidden');
 
     // Get current tags from input
-    const tags = input.value
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0);
+    const tags = TagEditor.parseTags(input.value);
 
     try {
       const response = await fetch(apiEndpoint, {
@@ -326,12 +339,7 @@ class TagEditor {
     const tagList = wrapper.querySelector('.tag-display .tag-list');
 
     if (tags.length > 0) {
-      tagList.innerHTML = tags
-        .map(
-          (tag) =>
-            `<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-base-bg text-xs text-text-muted border border-base-border">${escapeHtml(tag)}</span>`
-        )
-        .join('');
+      tagList.innerHTML = TagEditor.renderTagsHtml(tags);
     } else {
       tagList.innerHTML = '<span class="text-text-muted italic text-sm">No tags</span>';
     }
@@ -364,9 +372,11 @@ class TagEditor {
  * Initialize tag editors for elements matching a selector
  * @param {string} selector - CSS selector for tag containers
  * @param {function} getApiEndpoint - Function that takes container and returns API endpoint (or null to skip)
+ * @returns {TagEditor[]} Array of initialized TagEditor instances (for cleanup via destroy())
  */
 function initializeTagEditorsForElements(selector, getApiEndpoint) {
   const tagContainers = document.querySelectorAll(selector);
+  const editors = [];
   for (const container of tagContainers) {
     const apiEndpoint = getApiEndpoint(container);
     if (!apiEndpoint) continue;
@@ -381,7 +391,9 @@ function initializeTagEditorsForElements(selector, getApiEndpoint) {
 
     // Initialize tag editor
     tagEditor.init(container, apiEndpoint, currentTags);
+    editors.push(tagEditor);
   }
+  return editors;
 }
 
 // Export for use in other scripts

@@ -17,12 +17,15 @@ const BASE_PORT = 6113;
 
 export const test = base.extend({
   /**
-   * Worker-scoped port fixture
-   * Each worker gets a unique port: BASE_PORT + workerIndex
+   * Worker-scoped port fixture.
+   * All workers share the single webServer port because Playwright starts
+   * only one global server. The previous per-worker port allocation was
+   * inconsistent with the global webServer config and left non-zero workers
+   * pointing at a non-existent port.
    */
   port: [
-    async (_fixtures, use, workerInfo) => {
-      const port = BASE_PORT + workerInfo.workerIndex;
+    async ({}, use, workerInfo) => {
+      const port = BASE_PORT;
       console.log(`Worker ${workerInfo.workerIndex} using port ${port}`);
       await use(port);
     },

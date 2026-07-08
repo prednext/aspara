@@ -8,11 +8,13 @@ import { vi } from 'vitest';
 // This file provides fallback mocks only
 
 // ResizeObserver Mock
-global.ResizeObserver = vi.fn(class {
-  observe = vi.fn();
-  unobserve = vi.fn();
-  disconnect = vi.fn();
-});
+global.ResizeObserver = vi.fn(
+  class {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+);
 
 // matchMedia Mock
 Object.defineProperty(window, 'matchMedia', {
@@ -53,7 +55,7 @@ export const createTestContainer = (id = 'test-container') => {
   container.style.top = '0px';
   container.style.left = '0px';
 
-  // getBoundingClientRectをモック
+  // Mock getBoundingClientRect
   container.getBoundingClientRect = () => ({
     width: 600,
     height: 400,
@@ -85,7 +87,7 @@ export const generateTestMetricsData = (seriesCount = 2, pointsPerSeries = 10) =
     for (let i = 0; i < pointsPerSeries; i++) {
       data.push({
         step: i,
-        value: Math.random() * 0.5 + 0.25, // 0.25-0.75の範囲
+        value: Math.random() * 0.5 + 0.25, // range 0.25-0.75
         timestamp: new Date(Date.now() + i * 1000).toISOString(),
       });
     }

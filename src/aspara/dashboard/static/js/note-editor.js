@@ -15,6 +15,19 @@ import {
 } from './note-editor-utils.js';
 import { guardReadOnly } from './read-only-guard.js';
 
+/**
+ * Maximum notes length, sourced from the server-rendered
+ * `data-max-notes-length` attribute on <body> so the server remains the
+ * single source of truth for the validation bound.
+ * @returns {number} max notes length in characters (falls back to Infinity
+ *   if the attribute is absent, leaving validation to the server)
+ */
+function getMaxNotesLength() {
+  const raw = document.body.dataset.maxNotesLength;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.POSITIVE_INFINITY;
+}
+
 class NoteEditor {
   constructor() {
     this.isEditing = false;
@@ -73,8 +86,7 @@ class NoteEditor {
     edit.innerHTML = `
             <textarea class="note-textarea w-full p-2 border border-base-border rounded focus:outline-none focus:ring-2 focus:ring-accent resize-none"
                       rows="3"
-                      placeholder="Enter note..."
-                      maxlength="1000"></textarea>
+                      placeholder="Enter note..."></textarea>
             <div class="note-actions mt-2 flex gap-2">
                 <button class="note-cancel-btn px-3 py-1.5 text-sm bg-secondary text-white rounded-button hover:bg-secondary-hover transition-colors">
                     Cancel
@@ -85,6 +97,13 @@ class NoteEditor {
             </div>
             <div class="note-error hidden mt-2 p-2 bg-red-50 text-status-error rounded text-sm border border-status-error"></div>
         `;
+
+    // Apply the server-provided notes length limit (SSOT) to the textarea.
+    const textarea = edit.querySelector('.note-textarea');
+    const maxNotesLength = getMaxNotesLength();
+    if (Number.isFinite(maxNotesLength)) {
+      textarea.maxLength = maxNotesLength;
+    }
 
     wrapper.appendChild(display);
     wrapper.appendChild(edit);
@@ -317,17 +336,18 @@ class NoteEditor {
  * - data-edit-btn-id: ID of the edit button container
  *
  * @param {string} elementId - ID of the note element
+ * @returns {Promise<NoteEditor|null>} The initialized NoteEditor instance, or null if the element was not found (for cleanup via destroy())
  */
 async function initNoteEditorFromDOM(elementId) {
   const noteElement = document.getElementById(elementId);
-  if (!noteElement) return;
+  if (!noteElement) return null;
 
   const apiEndpoint = noteElement.dataset.apiEndpoint;
   const editBtnId = noteElement.dataset.editBtnId;
 
   if (!apiEndpoint) {
     console.error(`Note editor: missing data-api-endpoint on #${elementId}`);
-    return;
+    return null;
   }
 
   const noteEditor = new NoteEditor();
@@ -343,6 +363,7 @@ async function initNoteEditorFromDOM(elementId) {
     console.error(`Error loading note for #${elementId}:`, error);
     noteEditor.init(noteElement, apiEndpoint, '', editBtnId);
   }
+  return noteEditor;
 }
 
 // Export for use in other scripts

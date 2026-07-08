@@ -3,16 +3,21 @@
  * These functions have no side effects and are easy to test
  */
 
+import { isLogScale, isValidLogValue } from './scale.js';
+
 /**
  * Calculate data ranges from series data (SoA format)
  * @param {Array} series - Array of series objects with data in SoA format { steps: [], values: [] }
+ * @param {string} [scale='linear'] - Y-axis scale type ('linear' or 'log')
  * @returns {Object|null} Object with xMin, xMax, yMin, yMax or null if no data
  */
-export function calculateDataRanges(series) {
+export function calculateDataRanges(series, scale = 'linear') {
   let xMin = Number.POSITIVE_INFINITY;
   let xMax = Number.NEGATIVE_INFINITY;
   let yMin = Number.POSITIVE_INFINITY;
   let yMax = Number.NEGATIVE_INFINITY;
+
+  const logScale = isLogScale(scale);
 
   for (const s of series) {
     if (!s.data?.steps?.length) continue;
@@ -24,12 +29,17 @@ export function calculateDataRanges(series) {
 
     // values min/max
     for (let i = 0; i < values.length; i++) {
+      if (logScale && !isValidLogValue(values[i])) continue;
       if (values[i] < yMin) yMin = values[i];
       if (values[i] > yMax) yMax = values[i];
     }
   }
 
-  return xMin === Number.POSITIVE_INFINITY ? null : { xMin, xMax, yMin, yMax };
+  if (xMin === Number.POSITIVE_INFINITY || yMin === Number.POSITIVE_INFINITY) {
+    return null;
+  }
+
+  return { xMin, xMax, yMin, yMax };
 }
 
 /**

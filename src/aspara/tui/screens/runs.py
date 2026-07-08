@@ -37,7 +37,8 @@ class RunsScreen(Screen[None]):
         Binding("s", "toggle_sort", "Sort", show=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
-        Binding("backspace", "go_back", "Back", show=False),
+        Binding("backspace", "go_back", "Back", show=True),
+        Binding("ctrl+r", "reload", "Reload", show=True),
         Binding("escape", "unfocus_search", "Clear focus", show=False),
     ]
 
@@ -122,15 +123,15 @@ class RunsScreen(Screen[None]):
             logger.debug("Project not found: %s", self._project_name)
             self._runs = []
         except FileNotFoundError:
-            logger.debug("Data directory not found")
+            logger.debug("Data directory not found: %s", self.tui_app.data_dir)
             self._runs = []
         except PermissionError as e:
             logger.warning("Permission denied loading runs: %s", e)
-            self.notify("Permission denied", severity="error")
+            self.notify(f"Permission denied: {self.tui_app.data_dir}", severity="error")
             self._runs = []
         except OSError as e:
             logger.error("Failed to load runs: %s", e)
-            self.notify("Failed to load runs", severity="error")
+            self.notify(f"Failed to load runs: {e}", severity="error")
             self._runs = []
 
         if filter_text:
@@ -231,6 +232,12 @@ class RunsScreen(Screen[None]):
         """Move cursor up in table."""
         table = self.query_one("#runs-table", DataTable)
         table.action_cursor_up()
+
+    def action_reload(self) -> None:
+        """Reload the run list from disk."""
+        search_input = self.query_one("#search-input", Input)
+        self._load_runs(filter_text=search_input.value)
+        self.notify("Runs reloaded")
 
     def action_go_back(self) -> None:
         """Go back to previous screen if not editing."""

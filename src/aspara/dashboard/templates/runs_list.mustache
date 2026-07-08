@@ -85,7 +85,13 @@
 
   {{^has_runs}}
   <div class="bg-base-surface border border-base-border p-6">
-    <p class="text-text-muted">No runs found. Get started by creating a new run.</p>
+    <p class="text-text-muted mb-2">No runs found.</p>
+    <p class="text-sm text-text-secondary mb-3">Add a run to this project by logging from your training script:</p>
+    <pre class="mt-2 p-3 bg-base-bg rounded text-xs overflow-x-auto"><code>import aspara
+
+aspara.init(project="{{project}}")
+aspara.log({"loss": 0.5})
+aspara.finish()</code></pre>
   </div>
   {{/has_runs}}
 </div>
@@ -93,12 +99,25 @@
 {{#has_runs}}
 <script type="module" src="/static/dist/runs-list.js"></script>
 <script src="/static/js/runs-list/sse.js"></script>
-<script>
+<script type="module">
+  import { SSEStatusIndicator } from '/static/js/components/sse-status-indicator.js';
+
   document.addEventListener('DOMContentLoaded', function() {
-    const runsListSSE = new RunsListSSE('{{project}}');
-    
+    const sseIndicator = new SSEStatusIndicator('sse-status');
+    const runsListSSE = new RunsListSSE('{{project}}', {
+      onConnectionStateChange: (state, detail) => {
+        if (state === 'connected') {
+          sseIndicator.setConnected();
+        } else if (state === 'reconnecting') {
+          sseIndicator.setReconnecting(detail.attempt ?? 0, detail.max ?? 0);
+        } else if (state === 'disconnected') {
+          sseIndicator.setDisconnected(detail.lastEventTime ?? 0);
+        }
+      },
+    });
+
     window.addEventListener('beforeunload', function() {
-      runsListSSE.close();
+      runsListSSE.destroy();
     });
   });
 </script>

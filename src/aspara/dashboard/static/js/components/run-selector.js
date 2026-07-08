@@ -3,6 +3,8 @@
  * Handles run selection, filtering, and sorting UI in the project detail page.
  */
 
+import { debounce } from '../timer-utils.js';
+
 /**
  * RunSelector manages the run selection UI including checkboxes, filtering, and sorting.
  */
@@ -22,6 +24,7 @@ export class RunSelector {
 
     // Stored handlers for cleanup
     this._filterHandler = null;
+    this._filterDebounced = null;
     this._checkboxHandlers = [];
     this._sortButtonHandlers = [];
 
@@ -45,8 +48,12 @@ export class RunSelector {
    */
   setupEventListeners() {
     if (this.filterInput) {
+      // Debounce filter re-rendering to avoid reflowing the entire run list
+      // on every keystroke (important for large run lists). Shares the
+      // common debounce timing via timer-utils (SSOT).
+      this._filterDebounced = debounce((value) => this.filterRuns(value));
       this._filterHandler = (e) => {
-        this.filterRuns(e.target.value);
+        this._filterDebounced(e.target.value);
       };
       this.filterInput.addEventListener('input', this._filterHandler);
     }
@@ -170,22 +177,12 @@ export class RunSelector {
       for (const checkbox of this.runCheckboxes) {
         const runName = checkbox.dataset.runName;
         const runItem = checkbox.closest('.run-item');
+        const matches = !pattern || regex.test(runName);
 
-        if (!pattern || regex.test(runName)) {
-          runItem.style.display = '';
-          if (pattern) {
-            if (!this.manuallyDeselectedRuns.has(runName)) {
-              checkbox.checked = true;
-              this.selectedRuns.add(runName);
-            }
-          } else {
-            if (!this.manuallyDeselectedRuns.has(runName)) {
-              checkbox.checked = true;
-              this.selectedRuns.add(runName);
-            }
-          }
-        } else {
-          runItem.style.display = 'none';
+        runItem.style.display = matches ? '' : 'none';
+        if (matches && !this.manuallyDeselectedRuns.has(runName)) {
+          checkbox.checked = true;
+          this.selectedRuns.add(runName);
         }
       }
 
@@ -295,6 +292,10 @@ export class RunSelector {
    * Clean up event listeners.
    */
   destroy() {
+    if (this._filterDebounced) {
+      this._filterDebounced.cancel();
+      this._filterDebounced = null;
+    }
     if (this.filterInput && this._filterHandler) {
       this.filterInput.removeEventListener('input', this._filterHandler);
       this._filterHandler = null;
