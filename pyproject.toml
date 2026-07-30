@@ -80,6 +80,8 @@ dev = [
     "types-requests>=2.31.0",
     "ty>=0.0.12",
     "httpx>=0.28.1",
+    "libsql-experimental>=0.0.55",
+    "libsql>=0.1.11",
 ]
 
 [tool.ruff]
