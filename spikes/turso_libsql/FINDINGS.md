@@ -97,11 +97,15 @@ dashboards read from the local replica. Turso remains the durable, per-tenant so
 
 ## Recommended next steps
 
-1. ~~Cloud spike~~ **done** (above): embedded replica is the model; remote-only is unfit for writes.
-2. **Prototype an embedded-replica storage backend:** local write + background `sync()`, and measure
-   sustained write throughput and large-history sync time (not just 15-row latency).
-3. **Confirm transaction batching:** does an explicit `BEGIN … COMMIT` collapse many inserts into
-   one round trip? Sizes the write path.
+1. ~~Cloud spike~~ **done** (above): embedded replica is the fastest model, but see the decision below.
+2. **Embedded-replica storage backend — DEFERRED (2026-07-31).** ML runs typically log every N
+   steps / per epoch, often asynchronously, so remote-only writes at ~40 ms same-region are expected
+   to keep up. Revisit only if a real workload hits the "risky" cases: high-frequency per-step sync
+   logging (e.g. RL, thousands of steps/sec), a far region, or synchronous blocking in the train
+   loop. Cheaper mitigations to try *before* embedded replica: (a) one transaction per log call so
+   many metrics = one round trip; (b) async writes.
+3. **Confirm transaction batching (do this first when the write path matters):** does an explicit
+   `BEGIN … COMMIT` collapse many inserts into one round trip? (The `executemany` path did not.)
 4. **Schema tuning:** compare long-format vs wide vs compressed-blob on size, and index on/off.
 5. **Compare against the `polars` backend**, not just `jsonl`, for a fair disk-size baseline.
 6. **Provisioning model:** tenant → DB mapping, region placement near users, connection warm-keeping.
