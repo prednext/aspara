@@ -109,6 +109,7 @@ dashboards read from the local replica. Turso remains the durable, per-tenant so
 4. **Schema tuning:** compare long-format vs wide vs compressed-blob on size, and index on/off.
 5. **Compare against the `polars` backend**, not just `jsonl`, for a fair disk-size baseline.
 6. **Provisioning model:** tenant → DB mapping, region placement near users, connection warm-keeping.
+   → drafted in [`PROVISIONING.md`](./PROVISIONING.md).
 
 ## Reproduce
 
