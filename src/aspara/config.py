@@ -191,6 +191,30 @@ def get_storage_backend() -> str | None:
     return os.environ.get("ASPARA_STORAGE_BACKEND")
 
 
+def get_libsql_url() -> str | None:
+    """Get the libSQL/Turso database URL from the environment.
+
+    When set (e.g. ``libsql://<db>-<org>.turso.io``), the libsql metrics backend
+    connects to that remote database instead of a local file. Used by the
+    multi-tenant SaaS path where each tenant maps to a database URL.
+
+    Returns:
+        The database URL if ``ASPARA_LIBSQL_URL`` is set, None otherwise.
+    """
+    return os.environ.get("ASPARA_LIBSQL_URL")
+
+
+def get_libsql_auth_token() -> str | None:
+    """Get the libSQL/Turso auth token from the environment.
+
+    This is a secret. It is only read from the environment and never logged or persisted.
+
+    Returns:
+        The auth token if ``ASPARA_LIBSQL_AUTH_TOKEN`` is set, None otherwise.
+    """
+    return os.environ.get("ASPARA_LIBSQL_AUTH_TOKEN")
+
+
 def use_lttb_fast() -> bool:
     """Check if fast LTTB implementation should be used.
 

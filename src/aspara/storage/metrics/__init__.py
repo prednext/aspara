@@ -1,11 +1,14 @@
-from aspara.config import get_storage_backend
+from aspara.config import get_libsql_auth_token, get_libsql_url, get_storage_backend
 
 from .base import MetricsStorage
 from .jsonl import JsonlMetricsStorage
 from .polars import PolarsMetricsStorage
 
 DEFAULT_METRICS_STORAGE_BACKEND = "jsonl"
-_VALID_METRICS_STORAGE_BACKENDS = {"jsonl", "polars"}
+# "libsql" is an optional backend (multi-tenant SaaS path); its module and the
+# ``libsql`` package are imported lazily in create_metrics_storage() so the
+# dependency is only required when the backend is actually selected.
+_VALID_METRICS_STORAGE_BACKENDS = {"jsonl", "polars", "libsql"}
 
 
 def resolve_metrics_storage_backend(storage_backend: str | None = None) -> str:
@@ -50,14 +53,16 @@ def create_metrics_storage(
     The backend is resolved via resolve_metrics_storage_backend().
 
     Args:
-        backend: Storage backend type ('jsonl' or 'polars').
+        backend: Storage backend type ('jsonl', 'polars', or 'libsql').
                  If None, uses ASPARA_STORAGE_BACKEND env var or defaults to 'jsonl'.
+                 'libsql' targets a local database file, or a remote Turso database
+                 when ASPARA_LIBSQL_URL / ASPARA_LIBSQL_AUTH_TOKEN are set.
         base_dir: Base directory for data storage.
         project_name: Name of the project.
         run_name: Name of the run.
 
     Returns:
-        MetricsStorage instance (JsonlMetricsStorage or PolarsMetricsStorage).
+        MetricsStorage instance (Jsonl/Polars/Libsql MetricsStorage).
     """
     resolved = resolve_metrics_storage_backend(backend)
     if resolved == "polars":
@@ -65,6 +70,17 @@ def create_metrics_storage(
             base_dir=base_dir,
             project_name=project_name,
             run_name=run_name,
+        )
+    if resolved == "libsql":
+        # Lazy import so the optional ``libsql`` dependency is only required here.
+        from .libsql import LibsqlMetricsStorage
+
+        return LibsqlMetricsStorage(
+            base_dir=base_dir,
+            project_name=project_name,
+            run_name=run_name,
+            database=get_libsql_url(),
+            auth_token=get_libsql_auth_token(),
         )
     return JsonlMetricsStorage(
         base_dir=base_dir,
