@@ -81,7 +81,14 @@ dev = [
     "ty>=0.0.12",
     "httpx>=0.28.1",
     "libsql>=0.1.11",
+    "pytest-timeout>=2.4.0",
 ]
+
+[tool.pytest.ini_options]
+# Safety net: fail (with a traceback pointing at the culprit) instead of
+# hanging indefinitely when a test blocks — e.g. an SSE stream or a file
+# watcher that never terminates. Override per-test with @pytest.mark.timeout.
+timeout = 60
 
 [tool.ruff]
 line-length = 160
