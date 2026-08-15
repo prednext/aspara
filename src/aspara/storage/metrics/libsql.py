@@ -53,6 +53,83 @@ _LONG_SCHEMA = {
 _EMPTY_WIDE_SCHEMA = {"timestamp": pl.Datetime("ms"), "step": pl.Int64}
 
 
+def connect_libsql(
+    base_dir: str | Path | None = None,
+    *,
+    database: str | None = None,
+    auth_token: str | None = None,
+) -> Any:
+    """Connect to a libSQL database (local file or remote Turso).
+
+    Exactly one of ``base_dir`` (local ``{base_dir}/aspara.db``) or ``database``
+    (a ``libsql://`` URL) selects the target. The ``libsql`` package is imported
+    lazily so it is only required when this backend is actually used.
+
+    Args:
+        base_dir: Base directory for the local ``aspara.db`` file (per-tenant).
+        database: Remote libSQL database URL. Takes precedence over ``base_dir``.
+        auth_token: Auth token for a remote database.
+
+    Returns:
+        An open libSQL connection.
+    """
+    try:
+        import libsql  # lazy: only needed for this backend
+    except ImportError as e:  # pragma: no cover - depends on optional install
+        raise ImportError(
+            "The 'libsql' backend requires the 'libsql' package, which is not installed. "
+            "Install it (e.g. `uv add libsql`) or choose another ASPARA_STORAGE_BACKEND."
+        ) from e
+
+    # ``libsql`` is a native extension without type stubs, so the checker can't see ``connect``.
+    if database is not None:
+        return libsql.connect(database, auth_token=auth_token or "")  # ty: ignore[unresolved-attribute]
+    if base_dir is None:
+        raise ValueError("connect_libsql requires either base_dir (local) or database (remote)")
+    base = Path(base_dir)
+    base.mkdir(parents=True, exist_ok=True)
+    return libsql.connect(str(base / "aspara.db"))  # ty: ignore[unresolved-attribute]
+
+
+def ensure_metrics_schema(conn: Any) -> None:
+    """Create the ``metrics`` table and index if they do not already exist."""
+    conn.execute(_CREATE_TABLE)
+    conn.execute(_CREATE_INDEX)
+    conn.commit()
+
+
+def long_rows_to_wide(
+    rows: list[tuple[int, int, str, float]],
+    metric_names: list[str] | None = None,
+) -> pl.DataFrame:
+    """Pivot long-format ``(ts, step, name, value)`` rows into the wide format.
+
+    The result matches the jsonl/polars backends: columns ``timestamp``
+    (Datetime("ms")), ``step`` (Int64), and ``_<metric>`` (Float64) per metric.
+    An empty result (no rows, or none matching ``metric_names``) returns just the
+    ``timestamp``/``step`` columns.
+    """
+    df_long = pl.DataFrame(rows, schema=_LONG_SCHEMA, orient="row")
+
+    if metric_names is not None:
+        df_long = df_long.filter(pl.col("metric_name").is_in(metric_names))
+
+    if df_long.is_empty():
+        return pl.DataFrame(schema=_EMPTY_WIDE_SCHEMA)
+
+    df_long = df_long.with_columns(
+        pl.col("timestamp").cast(pl.Datetime("ms")),
+        pl.concat_str([pl.lit("_"), pl.col("metric_name")]).alias("metric_name"),
+    )
+
+    return df_long.pivot(
+        values="metric_value",
+        index=["timestamp", "step"],
+        on="metric_name",
+        aggregate_function="first",
+    ).sort(["timestamp", "step"])
+
+
 class LibsqlMetricsStorage(MetricsStorage):
     """MetricsStorage backed by a libSQL/Turso database (one database per tenant)."""
 
@@ -76,29 +153,12 @@ class LibsqlMetricsStorage(MetricsStorage):
                 When set, connects remotely instead of using a local file.
             auth_token: Optional auth token for a remote database.
         """
-        try:
-            import libsql  # lazy: only needed for this backend
-        except ImportError as e:  # pragma: no cover - depends on optional install
-            raise ImportError(
-                "The 'libsql' metrics backend requires the 'libsql' package, which is not installed. "
-                "Install it (e.g. `uv add libsql`) or choose another ASPARA_STORAGE_BACKEND."
-            ) from e
-
         self.project_name = project_name
         self.run_name = run_name
 
-        # ``libsql`` is a native extension without type stubs, so the checker can't
-        # see ``connect``; ``self._conn`` is typed Any for the same reason.
-        if database is None:
-            base = Path(base_dir)
-            base.mkdir(parents=True, exist_ok=True)
-            self._conn: Any = libsql.connect(str(base / "aspara.db"))  # ty: ignore[unresolved-attribute]
-        else:
-            self._conn = libsql.connect(database, auth_token=auth_token or "")  # ty: ignore[unresolved-attribute]
-
-        self._conn.execute(_CREATE_TABLE)
-        self._conn.execute(_CREATE_INDEX)
-        self._conn.commit()
+        # ``self._conn`` is typed Any because ``libsql`` ships no type stubs.
+        self._conn: Any = connect_libsql(base_dir if database is None else None, database=database, auth_token=auth_token)
+        ensure_metrics_schema(self._conn)
 
     def save(self, metrics_data: dict[str, Any]) -> str:
         """Insert one step's metrics for this project/run and commit.
@@ -157,25 +217,7 @@ class LibsqlMetricsStorage(MetricsStorage):
         if not rows:
             raise RunNotFoundError(f"Run '{self.run_name}' not found in project '{self.project_name}'")
 
-        df_long = pl.DataFrame(rows, schema=_LONG_SCHEMA, orient="row")
-
-        if metric_names is not None:
-            df_long = df_long.filter(pl.col("metric_name").is_in(metric_names))
-
-        if df_long.is_empty():
-            return pl.DataFrame(schema=_EMPTY_WIDE_SCHEMA)
-
-        df_long = df_long.with_columns(
-            pl.col("timestamp").cast(pl.Datetime("ms")),
-            pl.concat_str([pl.lit("_"), pl.col("metric_name")]).alias("metric_name"),
-        )
-
-        return df_long.pivot(
-            values="metric_value",
-            index=["timestamp", "step"],
-            on="metric_name",
-            aggregate_function="first",
-        ).sort(["timestamp", "step"])
+        return long_rows_to_wide(rows, metric_names)
 
     def finish(self) -> None:
         """Commit any pending writes."""
