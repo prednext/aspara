@@ -18,7 +18,7 @@ import pytest
 pytest.importorskip("libsql")
 
 from aspara.catalog import LibsqlCatalog
-from aspara.exceptions import ProjectNotFoundError
+from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
 from aspara.storage import create_metrics_storage
 
 
@@ -179,6 +179,24 @@ def test_update_run_metadata_validation(tmp_path: Any) -> None:
         cat.close()
 
 
+def test_delete_run_removes_metrics_and_metadata(tmp_path: Any) -> None:
+    _seed(tmp_path, "alpha", "keep", [_md(1000, 0, loss=1.0)])
+    _seed(tmp_path, "alpha", "gone", [_md(1000, 0, loss=2.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat.update_run_metadata("alpha", "gone", {"tags": ["x"]})
+        cat.delete_run("alpha", "gone")
+
+        assert {r.name for r in cat.get_runs("alpha")} == {"keep"}
+        assert len(cat.load_metrics("alpha", "gone")) == 0
+        assert cat.get_run_metadata("alpha", "gone")["tags"] == []  # meta gone -> defaults
+
+        with pytest.raises(RunNotFoundError):
+            cat.delete_run("alpha", "gone")
+    finally:
+        cat.close()
+
+
 def test_project_metadata_roundtrip(tmp_path: Any) -> None:
     _seed(tmp_path, "alpha", "run1", [_md(1000, 0, loss=1.0)])
     cat = LibsqlCatalog(base_dir=str(tmp_path))
@@ -195,5 +213,26 @@ def test_project_metadata_roundtrip(tmp_path: Any) -> None:
 
         assert cat.delete_project_metadata("alpha") is True
         assert cat.delete_project_metadata("alpha") is False
+    finally:
+        cat.close()
+
+
+def test_delete_project_removes_everything(tmp_path: Any) -> None:
+    _seed(tmp_path, "alpha", "run1", [_md(1000, 0, loss=1.0)])
+    _seed(tmp_path, "beta", "run1", [_md(1000, 0, loss=2.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat.update_project_metadata("alpha", {"tags": ["t"]})
+        cat.update_run_metadata("alpha", "run1", {"tags": ["r"]})
+
+        cat.delete_project("alpha")
+
+        assert [p.name for p in cat.get_projects()] == ["beta"]
+        assert cat.get_project_metadata("alpha")["tags"] == []
+        with pytest.raises(RunNotFoundError):
+            cat.delete_run("alpha", "run1")
+
+        with pytest.raises(ProjectNotFoundError):
+            cat.delete_project("alpha")
     finally:
         cat.close()

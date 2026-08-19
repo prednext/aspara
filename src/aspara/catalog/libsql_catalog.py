@@ -11,6 +11,7 @@ keeps everything in one tenant database:
   ``run_meta`` / ``project_meta`` tables as JSON blobs whose shape matches the
   file-based ``*.meta.json`` / ``metadata.json`` payloads, so no migration is
   needed as fields evolve.
+- **Deletes** remove a run's/project's rows from those tables.
 
 Timestamps stored as UNIX milliseconds are surfaced as UTC ``datetime``.
 
@@ -29,7 +30,7 @@ from typing import Any
 
 import polars as pl
 
-from aspara.exceptions import ProjectNotFoundError
+from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
 from aspara.models import RunStatus
 from aspara.storage.metadata.models import validate_metadata
 from aspara.storage.metadata.project import ProjectMetadataStorage
@@ -297,6 +298,23 @@ class LibsqlCatalog:
         self._conn.commit()
         return existed
 
+    def delete_run(self, project: str, run: str) -> None:
+        """Delete a run's metrics and metadata from the tenant database.
+
+        Raises:
+            ValueError: If names are invalid.
+            RunNotFoundError: If the run has neither metrics nor metadata.
+        """
+        validate_name(project, "project name")
+        validate_name(run, "run name")
+
+        if not self._run_exists(project, run):
+            raise RunNotFoundError(f"Run '{run}' does not exist in project '{project}'")
+
+        self._conn.execute("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run))
+        self._conn.execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
+        self._conn.commit()
+
     # -- Project metadata ---------------------------------------------------
 
     def get_project_metadata(self, project: str) -> dict[str, Any]:
@@ -334,6 +352,42 @@ class LibsqlCatalog:
         self._conn.execute("DELETE FROM project_meta WHERE project = ?", (project,))
         self._conn.commit()
         return existed
+
+    def delete_project(self, project: str) -> None:
+        """Delete a project (all its runs' metrics and all metadata).
+
+        Raises:
+            ValueError: If the name is invalid.
+            ProjectNotFoundError: If the project has no data in this database.
+        """
+        validate_name(project, "project name")
+
+        if not self._project_exists(project):
+            raise ProjectNotFoundError(f"Project '{project}' does not exist")
+
+        self._conn.execute("DELETE FROM metrics WHERE project = ?", (project,))
+        self._conn.execute("DELETE FROM run_meta WHERE project = ?", (project,))
+        self._conn.execute("DELETE FROM project_meta WHERE project = ?", (project,))
+        self._conn.commit()
+
+    # -- Existence helpers --------------------------------------------------
+
+    def _run_exists(self, project: str, run: str) -> bool:
+        cur = self._conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM metrics WHERE project = ? AND run = ?) "
+            "OR EXISTS(SELECT 1 FROM run_meta WHERE project = ? AND run = ?)",
+            (project, run, project, run),
+        )
+        return bool(cur.fetchone()[0])
+
+    def _project_exists(self, project: str) -> bool:
+        cur = self._conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM metrics WHERE project = ?) "
+            "OR EXISTS(SELECT 1 FROM run_meta WHERE project = ?) "
+            "OR EXISTS(SELECT 1 FROM project_meta WHERE project = ?)",
+            (project, project, project),
+        )
+        return bool(cur.fetchone()[0])
 
     def close(self) -> None:
         """Close the database connection."""
