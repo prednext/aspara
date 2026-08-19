@@ -5,8 +5,9 @@ This module provides storage for run metadata (params, config, tags, notes, etc.
 used for experiment tracking.
 """
 
+import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from aspara.models import RunStatus
 from aspara.utils.validators import validate_name, validate_safe_path
@@ -20,6 +21,26 @@ class RunMetadataStorage(BaseMetadataStorage):
     Stores run metadata in {run_name}.meta.json files.
     This includes params, config, tags, notes, artifacts, summary, and other run-specific data.
     """
+
+    _DEFAULT_METADATA: ClassVar[dict[str, Any]] = {
+        "run_id": None,
+        "tags": [],
+        "notes": "",
+        "params": {},
+        "config": {},
+        "artifacts": [],
+        "summary": {},
+        "is_finished": False,
+        "exit_code": None,
+        "status": RunStatus.WIP.value,
+        "start_time": None,
+        "finish_time": None,
+    }
+
+    @classmethod
+    def default_metadata(cls) -> dict[str, Any]:
+        """Return a fresh copy of the default run metadata values."""
+        return copy.deepcopy(cls._DEFAULT_METADATA)
 
     def __init__(self, base_dir: str | Path, project_name: str, run_name: str) -> None:
         """Initialize run metadata storage.
@@ -42,20 +63,7 @@ class RunMetadataStorage(BaseMetadataStorage):
         self._metadata_path = self._get_metadata_path()
         validate_safe_path(self._metadata_path, self.base_dir)
 
-        self._metadata: dict[str, Any] = {
-            "run_id": None,
-            "tags": [],
-            "notes": "",
-            "params": {},
-            "config": {},
-            "artifacts": [],
-            "summary": {},
-            "is_finished": False,
-            "exit_code": None,
-            "status": RunStatus.WIP.value,
-            "start_time": None,
-            "finish_time": None,
-        }
+        self._metadata: dict[str, Any] = self.default_metadata()
         self._load()
 
     def _get_metadata_path(self) -> Path:
@@ -209,20 +217,7 @@ class RunMetadataStorage(BaseMetadataStorage):
             self._metadata_path.unlink()
         except FileNotFoundError:
             return False
-        self._metadata = {
-            "run_id": None,
-            "tags": [],
-            "notes": "",
-            "params": {},
-            "config": {},
-            "artifacts": [],
-            "summary": {},
-            "is_finished": False,
-            "exit_code": None,
-            "status": RunStatus.WIP.value,
-            "start_time": None,
-            "finish_time": None,
-        }
+        self._metadata = self.default_metadata()
         return True
 
     def get_params(self) -> dict[str, Any]:

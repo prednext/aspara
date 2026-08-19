@@ -131,3 +131,69 @@ def test_two_tenants_are_isolated(tmp_path: Any) -> None:
     finally:
         cat_a.close()
         cat_b.close()
+
+
+def test_run_metadata_defaults_when_absent(tmp_path: Any) -> None:
+    _seed(tmp_path, "alpha", "run1", [_md(1000, 0, loss=1.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        meta = cat.get_run_metadata("alpha", "run1")
+        assert meta["tags"] == []
+        assert meta["notes"] == ""
+        assert meta["status"] == "wip"
+        # An enriched RunInfo carries the defaults too.
+        run = cat.get_runs("alpha")[0]
+        assert run.tags == []
+        assert run.param_count == 0
+    finally:
+        cat.close()
+
+
+def test_run_metadata_roundtrip_and_enrichment(tmp_path: Any) -> None:
+    _seed(tmp_path, "alpha", "run1", [_md(1000, 0, loss=1.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        updated = cat.update_run_metadata("alpha", "run1", {"tags": ["a", "b"], "notes": "hello"})
+        assert updated["tags"] == ["a", "b"]
+        assert updated["notes"] == "hello"
+
+        # Persisted and reflected in listings.
+        assert cat.get_run_metadata("alpha", "run1")["tags"] == ["a", "b"]
+        run = cat.get_runs("alpha")[0]
+        assert run.tags == ["a", "b"]
+
+        assert cat.delete_run_metadata("alpha", "run1") is True
+        assert cat.delete_run_metadata("alpha", "run1") is False
+        assert cat.get_run_metadata("alpha", "run1")["tags"] == []
+    finally:
+        cat.close()
+
+
+def test_update_run_metadata_validation(tmp_path: Any) -> None:
+    _seed(tmp_path, "alpha", "run1", [_md(1000, 0, loss=1.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        with pytest.raises(ValueError):
+            cat.update_run_metadata("alpha", "run1", {"tags": "not-a-list"})
+    finally:
+        cat.close()
+
+
+def test_project_metadata_roundtrip(tmp_path: Any) -> None:
+    _seed(tmp_path, "alpha", "run1", [_md(1000, 0, loss=1.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        updated = cat.update_project_metadata("alpha", {"notes": "proj notes", "tags": ["t1"]})
+        assert updated["notes"] == "proj notes"
+        assert updated["tags"] == ["t1"]
+        assert updated["created_at"] is not None
+        assert updated["updated_at"] is not None
+
+        pairs = cat.get_projects_with_metadata()
+        by_name = {p.name: meta for p, meta in pairs}
+        assert by_name["alpha"]["tags"] == ["t1"]
+
+        assert cat.delete_project_metadata("alpha") is True
+        assert cat.delete_project_metadata("alpha") is False
+    finally:
+        cat.close()
