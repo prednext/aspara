@@ -207,10 +207,13 @@ async def stream_multiple_runs(
                 pending_metric_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await pending_metric_task
-            # Close the async generator to trigger watcher unsubscribe
+            # Close the async generator to trigger watcher unsubscribe.
+            # Both catalogs' subscribe() return real async generators (with
+            # aclose); the checker only sees the widened AsyncIterator because
+            # the catalog dependency is a union of file/libSQL facades.
             try:
                 await asyncio.wait_for(
-                    metrics_iterator.aclose(),
+                    metrics_iterator.aclose(),  # ty: ignore[unresolved-attribute]
                     timeout=SSE_METRICS_ITERATOR_CLOSE_TIMEOUT,
                 )
             except asyncio.TimeoutError:

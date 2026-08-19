@@ -1,0 +1,130 @@
+"""Adapters exposing the file-catalog method surface over a ``LibsqlCatalog``.
+
+The dashboard injects two distinct dependencies -- a project catalog and a run
+catalog -- and calls them by the method names of the file-based
+:class:`ProjectCatalog` / :class:`RunCatalog`. ``LibsqlCatalog`` is a single
+object with libSQL-specific names, so these thin facades map one shared
+``LibsqlCatalog`` onto those two interfaces, letting the routes stay unchanged
+for libSQL-backed tenants.
+
+A shared re-entrant lock serializes access to the underlying libSQL connection,
+which is not safe for concurrent use across the worker threads the dashboard
+spawns via ``asyncio.to_thread`` (e.g. the metrics endpoint loads runs in
+parallel). Correctness is favored over throughput for this first wiring.
+
+Not yet supported for libSQL tenants (kept as graceful no-ops / gaps):
+- ``subscribe`` (SSE change streaming) yields nothing -- there is no watcher.
+- Artifact *file* bytes / ZIP download; only artifact metadata is available.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+from collections.abc import AsyncGenerator, Mapping
+from datetime import datetime
+from typing import Any
+
+import polars as pl
+
+from aspara.models import MetricRecord, StatusRecord
+
+from .libsql_catalog import LibsqlCatalog
+from .project_catalog import ProjectInfo
+from .run_catalog import RunInfo
+
+
+class LibsqlProjectCatalog:
+    """``ProjectCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""
+
+    def __init__(self, catalog: LibsqlCatalog, lock: threading.RLock | None = None) -> None:
+        self._cat = catalog
+        self._lock = lock or threading.RLock()
+
+    def exists(self, name: str) -> bool:
+        with self._lock:
+            return self._cat.project_exists(name)
+
+    def get_projects(self) -> list[ProjectInfo]:
+        with self._lock:
+            return self._cat.get_projects()
+
+    def get_projects_with_metadata(self) -> list[tuple[ProjectInfo, dict[str, Any]]]:
+        with self._lock:
+            return self._cat.get_projects_with_metadata()
+
+    def get_metadata(self, name: str) -> dict[str, Any]:
+        with self._lock:
+            return self._cat.get_project_metadata(name)
+
+    def update_metadata(self, name: str, metadata: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            return self._cat.update_project_metadata(name, metadata)
+
+    def delete(self, name: str) -> None:
+        with self._lock:
+            self._cat.delete_project(name)
+
+
+class LibsqlRunCatalog:
+    """``RunCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""
+
+    def __init__(self, catalog: LibsqlCatalog, lock: threading.RLock | None = None) -> None:
+        self._cat = catalog
+        self._lock = lock or threading.RLock()
+
+    def get_runs(self, project: str) -> list[RunInfo]:
+        with self._lock:
+            return self._cat.get_runs(project)
+
+    def get(self, project: str, run: str) -> RunInfo:
+        with self._lock:
+            return self._cat.get_run(project, run)
+
+    def load_metrics(self, project: str, run: str, start_time: datetime | None = None) -> pl.DataFrame:
+        with self._lock:
+            return self._cat.load_metrics(project, run, start_time)
+
+    def get_metadata(self, project: str, run: str) -> dict[str, Any]:
+        with self._lock:
+            return self._cat.get_run_metadata(project, run)
+
+    def update_metadata(self, project: str, run: str, metadata: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            return self._cat.update_run_metadata(project, run, metadata)
+
+    def delete(self, project: str, run: str) -> None:
+        with self._lock:
+            self._cat.delete_run(project, run)
+
+    def get_artifacts(self, project: str, run: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._cat.get_run_artifacts(project, run)
+
+    def get_run_config(self, project: str, run: str) -> dict[str, Any]:
+        with self._lock:
+            return self._cat.get_run_config(project, run)
+
+    async def get_artifacts_async(self, project: str, run: str) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self.get_artifacts, project, run)
+
+    async def get_run_config_async(self, project: str, run: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.get_run_config, project, run)
+
+    async def get_metadata_async(self, project: str, run: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.get_metadata, project, run)
+
+    async def subscribe(
+        self,
+        targets: Mapping[str, list[str] | None],
+        since: datetime,
+    ) -> AsyncGenerator[MetricRecord | StatusRecord, None]:
+        """SSE change streaming is not supported for libSQL tenants yet.
+
+        Yields nothing and closes immediately so the endpoint degrades to "no
+        live updates" instead of erroring. The REST metrics endpoint still
+        serves the current data. The element type matches ``RunCatalog.subscribe``
+        so both catalogs present an identical streaming interface.
+        """
+        return
+        yield  # pragma: no cover - makes this an (empty) async generator

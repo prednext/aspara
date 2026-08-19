@@ -216,6 +216,26 @@ class LibsqlCatalog:
 
         return [self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run)) for run, start_ts, last_ts in rows]
 
+    def get_run(self, project: str, run: str) -> RunInfo:
+        """Return a single run's info, enriched with stored metadata.
+
+        Raises:
+            ValueError: If names are invalid.
+            RunNotFoundError: If the run has neither metrics nor metadata.
+        """
+        validate_name(project, "project name")
+        validate_name(run, "run name")
+
+        if not self._run_exists(project, run):
+            raise RunNotFoundError(f"Run '{run}' not found in project '{project}'")
+
+        row = self._conn.execute(
+            "SELECT MIN(ts), MAX(ts) FROM metrics WHERE project = ? AND run = ?",
+            (project, run),
+        ).fetchone()
+        start_ts, last_ts = (row[0], row[1]) if row else (None, None)
+        return self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+
     def load_metrics(
         self,
         project: str,
@@ -371,6 +391,14 @@ class LibsqlCatalog:
         self._conn.commit()
 
     # -- Existence helpers --------------------------------------------------
+
+    def project_exists(self, project: str) -> bool:
+        """Return True if the project has any metrics or metadata; False if the name is invalid."""
+        try:
+            validate_name(project, "project name")
+        except ValueError:
+            return False
+        return self._project_exists(project)
 
     def _run_exists(self, project: str, run: str) -> bool:
         cur = self._conn.execute(
