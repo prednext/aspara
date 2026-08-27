@@ -13,7 +13,9 @@ Skipped automatically when the optional ``libsql`` package is not installed.
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +119,55 @@ def test_filesystem_tenant_unaffected_when_libsql_resolver_returns_none(tmp_path
     finally:
         configure_libsql_tenant_resolver(None)
         configure_data_dir(None)
+
+
+def test_libsql_tenant_local_artifact_zip_download(tmp_path: Path) -> None:
+    """Model files stay on the tenant's local disk; ZIP download reads them.
+
+    A libSQL tenant keeps its metrics/metadata in libSQL but its artifact bytes
+    live locally under ``{base_dir}/{project}/{run}/artifacts`` (the "model files
+    local" design). The download route resolves that local dir via the tenant's
+    data directory, so a ZIP is streamed back for the libSQL tenant.
+    """
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+
+    # Artifact bytes on the tenant's local disk (as a local run would write them).
+    artifacts_dir = tenant_dir / "proj" / "r1" / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "config.json": b'{"lr": 0.01}',
+        "best_model.pt": b"binary-model-bytes",
+    }
+    for fname, body in files.items():
+        (artifacts_dir / fname).write_bytes(body)
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        resp = client.get("/api/projects/proj/runs/r1/artifacts/download", headers=hdr)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/zip"
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            assert sorted(zf.namelist()) == ["best_model.pt", "config.json"]
+            assert zf.read("best_model.pt") == files["best_model.pt"]
+            assert zf.read("config.json") == files["config.json"]
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_libsql_tenant_without_artifacts_returns_404(tmp_path: Path) -> None:
+    """A libSQL tenant run with no local artifacts area yields the historical 404."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    try:
+        resp = client.get("/api/projects/proj/runs/r1/artifacts/download", headers={"X-Aspara-Tenant": "lib"})
+        assert resp.status_code == 404
+    finally:
+        configure_libsql_tenant_resolver(None)
 
 
 def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:

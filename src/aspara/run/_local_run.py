@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -62,9 +60,11 @@ class LocalRun(BaseRun):
         base_dir = os.path.join(data_dir, self.project)
         self._output_path = os.path.join(base_dir, f"{self.name}.jsonl")
 
-        # Set up artifacts directory path
-        run_dir = os.path.dirname(self._output_path)
-        self._artifacts_dir = os.path.join(run_dir, self.name, "artifacts")
+        # Artifact bytes are handled by the artifact store (filesystem-backed
+        # here). It preserves the {data_dir}/{project}/{run}/artifacts layout.
+        from aspara.storage.artifacts import FilesystemArtifactStore
+
+        self._artifact_store = FilesystemArtifactStore(data_dir)
 
         # Initialize metrics storage backend
         self._storage_backend_type = resolved_backend
@@ -257,29 +257,9 @@ class LocalRun(BaseRun):
         # Validate input using shared helper
         abs_file_path, artifact_name = self._validate_artifact_input(file_path, name, category)
 
-        # Ensure artifacts directory exists
-        os.makedirs(self._artifacts_dir, exist_ok=True)
-
-        # Copy file to artifacts directory
-        dest_path = os.path.join(self._artifacts_dir, artifact_name)
-        source_size = os.path.getsize(abs_file_path)
-        try:
-            shutil.copy2(abs_file_path, dest_path)
-        except OSError as e:
-            raise OSError(f"Failed to copy artifact file: {e}") from e
-
-        # Verify the copy succeeded by comparing file sizes. A partial copy
-        # (e.g. disk full mid-write) would leave a truncated file that
-        # silently passes without this check.
-        dest_size = os.path.getsize(dest_path)
-        if dest_size != source_size:
-            # Remove the corrupted destination so a retry can start clean.
-            with contextlib.suppress(OSError):
-                os.remove(dest_path)
-            raise OSError(f"Artifact copy verification failed: size mismatch (source={source_size}, dest={dest_size})")
-
-        # Get file size
-        file_size = dest_size
+        # Store the artifact bytes via the artifact store (copies + verifies).
+        stored = self._artifact_store.put_file(self.project, self.name, artifact_name, abs_file_path)
+        file_size = stored.size
 
         # Log artifact metadata
         artifact_data = {

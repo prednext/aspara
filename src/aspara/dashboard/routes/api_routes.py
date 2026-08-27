@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import shutil
 import tempfile
 import urllib.parse
 import zipfile
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,7 +27,12 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from aspara.config import get_resource_limits, is_read_only
 from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
-from aspara.utils import validators
+from aspara.storage.artifacts import (
+    ArtifactRunNotFoundError,
+    ArtifactStore,
+    FilesystemArtifactStore,
+    StoredArtifact,
+)
 
 from ..dependencies import (
     DataDirDep,
@@ -69,7 +74,10 @@ _ZIP_STREAM_CHUNK_SIZE = 64 * 1024  # 64 KiB
 
 
 def _stream_zip(
-    artifact_entries: list[tuple[str, str, int]],
+    store: ArtifactStore,
+    project: str,
+    run: str,
+    artifact_entries: Sequence[StoredArtifact],
 ) -> Iterator[bytes]:
     """Build a ZIP on a SpooledTemporaryFile and yield it in chunks.
 
@@ -79,17 +87,23 @@ def _stream_zip(
     content is yielded in fixed-size chunks. The temp file is closed in
     the ``finally`` block so it is cleaned up even on client disconnect.
 
+    Each artifact's bytes are read through the store (never a raw path), so
+    the ZIP builder is agnostic to the underlying storage backend.
+
     Args:
-        artifact_entries: List of (name, path, size) tuples for the
-            files to include in the ZIP.
+        store: Artifact store to read the bytes from.
+        project: Project name.
+        run: Run name.
+        artifact_entries: Artifacts to include in the ZIP.
 
     Yields:
         Chunks of the completed ZIP file.
     """
     with tempfile.SpooledTemporaryFile(max_size=_ZIP_SPOOL_MAX_BYTES, suffix=".zip") as buf:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for filename, file_path, _ in artifact_entries:
-                zip_file.write(file_path, filename)
+            for entry in artifact_entries:
+                with store.open(project, run, entry.name) as src, zip_file.open(entry.name, "w") as dst:
+                    shutil.copyfileobj(src, dst, _ZIP_STREAM_CHUNK_SIZE)
         buf.seek(0)
         while True:
             chunk = buf.read(_ZIP_STREAM_CHUNK_SIZE)
@@ -118,40 +132,20 @@ async def download_artifacts_zip(
         HTTPException: 400 if project/run name is invalid or total size exceeds limit,
             404 if no artifacts found.
     """
-    # Get the artifacts directory path
-    artifacts_dir = data_dir / project / run / "artifacts"
-
-    # Validate path to prevent path traversal
+    # Resolve the artifact bytes through the store (filesystem-backed here).
+    store = FilesystemArtifactStore(data_dir)
     try:
-        validators.validate_safe_path(artifacts_dir, data_dir)
+        artifact_entries = store.list(project, run)
+    except ArtifactRunNotFoundError:
+        raise HTTPException(status_code=404, detail="No artifacts found for this run") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid artifacts directory path: {e}") from None
-
-    artifacts_dir_str = str(artifacts_dir)
-
-    if not os.path.exists(artifacts_dir_str):
-        raise HTTPException(status_code=404, detail="No artifacts found for this run")
-
-    # Single-pass: collect file info using scandir (caches stat results).
-    # Use follow_symlinks=False so that symlinks in the artifacts directory
-    # are not followed — this prevents a local attacker from tricking the
-    # ZIP builder into bundling files outside data_dir.
-    artifact_entries: list[tuple[str, str, int]] = []  # (name, path, size)
-    total_size = 0
-
-    with os.scandir(artifacts_dir_str) as entries:
-        for entry in entries:
-            if entry.is_file(follow_symlinks=False):
-                size = entry.stat(follow_symlinks=False).st_size
-                artifact_entries.append((entry.name, entry.path, size))
-                total_size += size
-            elif entry.is_symlink():
-                logger.warning(f"Skipping symlink in artifacts directory: {entry.path}")
 
     if not artifact_entries:
         raise HTTPException(status_code=404, detail="No artifact files found")
 
     # Check total size
+    total_size = sum(entry.size for entry in artifact_entries)
     limits = get_resource_limits()
     if total_size > limits.max_zip_size:
         raise HTTPException(
@@ -174,7 +168,7 @@ async def download_artifacts_zip(
     # regardless of total ZIP size. The temp file is cleaned up in the
     # generator's finally block.
     return StreamingResponse(
-        _stream_zip(artifact_entries),
+        _stream_zip(store, project, run, artifact_entries),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )

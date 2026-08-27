@@ -4,6 +4,7 @@ Aspara Storage module
 Provides MetricsStorage interface and implementations for persisting metrics data.
 """
 
+from .artifacts import ArtifactStore, FilesystemArtifactStore, StoredArtifact
 from .metadata import ProjectMetadataStorage, RunMetadataStorage
 from .metrics import (
     JsonlMetricsStorage,  # noqa: F401
@@ -19,6 +20,9 @@ __all__ = [
     "resolve_metrics_storage_backend",
     "ProjectMetadataStorage",
     "RunMetadataStorage",
+    "ArtifactStore",
+    "FilesystemArtifactStore",
+    "StoredArtifact",
 ]
 # Note: JsonlMetricsStorage, PolarsMetricsStorage are imported but not in __all__
 # Internal code can still use explicit imports
