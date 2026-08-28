@@ -207,6 +207,14 @@ class RunMetadataStorage(BaseMetadataStorage):
         self._save()
         return dict(self._metadata)
 
+    def exists(self) -> bool:
+        """Return True if this run's metadata file exists.
+
+        Mirrors ``LibsqlRunMetadataStorage.exists`` so callers (e.g. the tracker)
+        can check run existence uniformly across filesystem and libSQL tenants.
+        """
+        return self._metadata_path.exists()
+
     def delete_metadata(self) -> bool:
         """Delete metadata file.
 

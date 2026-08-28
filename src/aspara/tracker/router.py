@@ -3,17 +3,15 @@
 RESTful API endpoints using FastAPI APIRouter.
 """
 
-import json
 import logging
 import os
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, UploadFile
 
-from aspara.config import get_data_dir, get_resource_limits, is_read_only
+from aspara.config import get_resource_limits, is_read_only
 from aspara.models import MetricRecord
 from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.storage.artifacts import ArtifactTooLargeError, FilesystemArtifactStore
@@ -71,6 +69,91 @@ def _metrics_storage_for_request(request: Request, project_name: str, run_name: 
     )
 
 
+def _run_metadata_for_request(request: Request, project_name: str, run_name: str) -> RunMetadataStorage:
+    """Build run metadata storage for the request's tenant.
+
+    A libSQL tenant's metadata is persisted to its libSQL ``run_meta`` table (so
+    the dashboard's :class:`LibsqlCatalog` reads it back); other tenants use the
+    filesystem ``*.meta.json`` file. The returned object exposes the same write API
+    either way; callers must ``close()`` it (a no-op for filesystem storage).
+    """
+    tenant_id = tenant_id_from_headers(request.headers)
+    spec = resolve_libsql_tenant(tenant_id)
+    if spec is not None:
+        from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+        return LibsqlRunMetadataStorage(
+            spec.base_dir or "",
+            project_name,
+            run_name,
+            database=spec.database,
+            auth_token=spec.auth_token,
+        )
+    data_dir = resolve_data_dir(tenant_id)
+    return RunMetadataStorage(
+        base_dir=str(data_dir),
+        project_name=project_name,
+        run_name=run_name,
+    )
+
+
+def _merge_tags(existing: list[str] | None, new_tags: list[str]) -> list[str]:
+    """Merge tag lists, keeping only strings and de-duplicating while preserving order."""
+    existing_tags = [t for t in (existing or []) if isinstance(t, str)]
+    added_tags = [t for t in new_tags if isinstance(t, str)]
+    seen: set[str] = set()
+    merged: list[str] = []
+    for tag in existing_tags + added_tags:
+        if tag not in seen:
+            seen.add(tag)
+            merged.append(tag)
+    return merged
+
+
+def _update_project_tags_for_request(request: Request, project_name: str, new_tags: list[str] | None) -> None:
+    """Append project-level tags for the request's tenant (libSQL or filesystem)."""
+    if not new_tags:
+        return
+    tenant_id = tenant_id_from_headers(request.headers)
+    spec = resolve_libsql_tenant(tenant_id)
+    if spec is not None:
+        from aspara.storage.metadata.libsql import LibsqlProjectMetadataStorage
+
+        storage = LibsqlProjectMetadataStorage(
+            spec.base_dir or "",
+            project_name,
+            database=spec.database,
+            auth_token=spec.auth_token,
+        )
+        try:
+            merged = _merge_tags(storage.get_metadata().get("tags"), new_tags)
+            storage.update_metadata({"tags": merged})
+        except Exception as e:  # pragma: no cover - metadata writes must not break tracking
+            logger.warning(f"Failed to update project metadata tags for '{project_name}': {e}")
+        finally:
+            storage.close()
+        return
+    update_project_metadata_tags(
+        base_dir=resolve_data_dir(tenant_id),
+        project_name=project_name,
+        new_tags=new_tags,
+    )
+
+
+def _artifact_base_dir_for_request(request: Request) -> str:
+    """Return the local filesystem base dir for a tenant's artifact *bytes*.
+
+    Artifact metadata may live in libSQL, but the bytes stay on the local
+    filesystem (tenant pinning). A libSQL tenant with a configured ``base_dir``
+    uses it; otherwise the tenant's resolved data directory is used.
+    """
+    tenant_id = tenant_id_from_headers(request.headers)
+    spec = resolve_libsql_tenant(tenant_id)
+    if spec is not None and spec.base_dir:
+        return spec.base_dir
+    return str(resolve_data_dir(tenant_id))
+
+
 def verify_csrf_header(x_requested_with: str | None = Header(None)) -> None:
     """Verify X-Requested-With header for CSRF protection.
 
@@ -108,16 +191,18 @@ async def health_check() -> HealthResponse:
     tags=["Runs"],
     dependencies=[Depends(verify_csrf_header)],
 )
-async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateResponse:
+async def create_run(project_name: str, request: RunCreateRequest, http_request: Request) -> RunCreateResponse:
     """Create a new run and initialize metadata.
 
     This endpoint is used by RemoteRun to create run-level metadata and
     update project-level metadata tags. It mirrors LocalRun behaviour
-    for metadata semantics.
+    for metadata semantics. Metadata is routed to the request's tenant
+    (a libSQL database for a libSQL tenant, else the filesystem data dir).
 
     Args:
         project_name: Target project name
         request: Run creation request containing name, tags, notes, config, and project_tags
+        http_request: Incoming HTTP request (carries the tenant header)
 
     Returns:
         RunCreateResponse: Response containing project, name, and run_id
@@ -139,70 +224,34 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
             run_id="readonly00000000",
         )
 
-    data_dir = get_data_dir()
-    base_dir = Path(data_dir)
-
-    # Detect existing run by checking metadata file
-    metadata_path = base_dir / project_name / f"{request.name}.meta.json"
-    if metadata_path.exists():
-        if not request.resume:
-            raise HTTPException(status_code=409, detail="Run already exists")
-        # Resume path: reuse existing run_id and reset finish state.
-        try:
-            with open(metadata_path) as f:
-                existing_meta = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to read existing run metadata",
-            ) from e
-        run_id = existing_meta.get("run_id") or uuid.uuid4().hex[:16]
-        storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=request.name,
-        )
-        storage.reset_finish()
-        if request.config:
-            storage.update_config(request.config)
-        if request.project_tags:
-            update_project_metadata_tags(
-                base_dir=data_dir,
-                project_name=project_name,
-                new_tags=request.project_tags,
+    storage = _run_metadata_for_request(http_request, project_name, request.name)
+    try:
+        if storage.exists():
+            if not request.resume:
+                raise HTTPException(status_code=409, detail="Run already exists")
+            # Resume path: reuse existing run_id and reset finish state.
+            run_id = storage.get_metadata().get("run_id") or uuid.uuid4().hex[:16]
+            storage.reset_finish()
+            if request.config:
+                storage.update_config(request.config)
+        else:
+            # Initialize run-level metadata. The server always generates run_id.
+            now = int(datetime.now(timezone.utc).timestamp() * 1000)
+            run_id = uuid.uuid4().hex[:16]
+            storage.set_init(
+                run_id=run_id,
+                tags=request.tags,
+                notes=request.notes,
+                timestamp=now,
             )
-        return RunCreateResponse(
-            project=project_name,
-            name=request.name,
-            run_id=run_id,
-        )
+            if request.config:
+                storage.update_config(request.config)
+    finally:
+        storage.close()
 
-    # Initialize run-level metadata using RunMetadataStorage
-    storage = RunMetadataStorage(
-        base_dir=str(data_dir),
-        project_name=project_name,
-        run_name=request.name,
-    )
-
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
-    run_id = uuid.uuid4().hex[:16]  # Server always generates run_id
-    storage.set_init(
-        run_id=run_id,
-        tags=request.tags,
-        notes=request.notes,
-        timestamp=now,
-    )
-
-    if request.config:
-        storage.update_config(request.config)
-
-    # Update project-level metadata.json with project_tags, if provided
+    # Update project-level metadata with project_tags, if provided.
     if request.project_tags:
-        update_project_metadata_tags(
-            base_dir=data_dir,
-            project_name=project_name,
-            new_tags=request.project_tags,
-        )
+        _update_project_tags_for_request(http_request, project_name, request.project_tags)
 
     return RunCreateResponse(
         project=project_name,
@@ -274,6 +323,7 @@ async def upload_artifact(
     project_name: str,
     run_name: str,
     file: UploadFile,
+    http_request: Request,
     name: str | None = Form(None),
     description: str | None = Form(None),
     category: str | None = Form(None),
@@ -284,6 +334,7 @@ async def upload_artifact(
         project_name: Target project name
         run_name: Target run name
         file: File to upload
+        http_request: Incoming HTTP request (carries the tenant header)
         name: Optional custom name for the artifact. If None, uses the filename.
         description: Optional description of the artifact
         category: Optional category ('code', 'model', 'config', 'data', 'other')
@@ -330,9 +381,9 @@ async def upload_artifact(
         # store. UploadFile.size may be None under chunked transfer encoding,
         # so we stream fixed-size chunks and let the store enforce the limit
         # (ASPARA_MAX_FILE_SIZE / ResourceLimits.max_file_size) and clean up
-        # partial files.
-        data_dir = get_data_dir()
-        store = FilesystemArtifactStore(str(data_dir))
+        # partial files. Bytes always land on the local filesystem (tenant
+        # pinning); only the metadata may live in the tenant's libSQL database.
+        store = FilesystemArtifactStore(_artifact_base_dir_for_request(http_request))
         max_file_size = get_resource_limits().max_file_size
 
         def _iter_chunks() -> Iterator[bytes]:
@@ -382,13 +433,12 @@ async def upload_artifact(
         if category:
             artifact_data["category"] = category
 
-        # Save artifact metadata
-        metadata_storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=run_name,
-        )
-        metadata_storage.add_artifact(artifact_data)
+        # Save artifact metadata to the tenant's metadata store (libSQL or file).
+        metadata_storage = _run_metadata_for_request(http_request, project_name, run_name)
+        try:
+            metadata_storage.add_artifact(artifact_data)
+        finally:
+            metadata_storage.close()
 
         return ArtifactUploadResponse(
             artifact_name=artifact_name,
@@ -412,6 +462,7 @@ async def update_config(
     project_name: str,
     run_name: str,
     request: ConfigUpdateRequest,
+    http_request: Request,
 ) -> StatusResponse:
     """Update configuration for a run.
 
@@ -419,6 +470,7 @@ async def update_config(
         project_name: Target project name
         run_name: Target run name
         request: Config update request containing config dict
+        http_request: Incoming HTTP request (carries the tenant header)
 
     Returns:
         StatusResponse: Response with status
@@ -436,25 +488,19 @@ async def update_config(
     if is_read_only():
         return StatusResponse()
 
-    data_dir = get_data_dir()
-    base_dir = Path(data_dir)
-
-    # Check if run exists
-    metadata_path = base_dir / project_name / f"{run_name}.meta.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="Run not found")
-
+    storage = _run_metadata_for_request(http_request, project_name, run_name)
     try:
-        storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=run_name,
-        )
+        if not storage.exists():
+            raise HTTPException(status_code=404, detail="Run not found")
         storage.update_config(request.config)
         return StatusResponse()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating config: {e}")
         raise HTTPException(status_code=500, detail="Failed to update config") from e
+    finally:
+        storage.close()
 
 
 @router.post(
@@ -467,6 +513,7 @@ async def update_summary(
     project_name: str,
     run_name: str,
     request: SummaryUpdateRequest,
+    http_request: Request,
 ) -> StatusResponse:
     """Update summary for a run.
 
@@ -474,6 +521,7 @@ async def update_summary(
         project_name: Target project name
         run_name: Target run name
         request: Summary update request containing summary dict
+        http_request: Incoming HTTP request (carries the tenant header)
 
     Returns:
         StatusResponse: Response with status
@@ -491,25 +539,19 @@ async def update_summary(
     if is_read_only():
         return StatusResponse()
 
-    data_dir = get_data_dir()
-    base_dir = Path(data_dir)
-
-    # Check if run exists
-    metadata_path = base_dir / project_name / f"{run_name}.meta.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="Run not found")
-
+    storage = _run_metadata_for_request(http_request, project_name, run_name)
     try:
-        storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=run_name,
-        )
+        if not storage.exists():
+            raise HTTPException(status_code=404, detail="Run not found")
         storage.update_summary(request.summary)
         return StatusResponse()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to update summary") from e
+    finally:
+        storage.close()
 
 
 @router.post(
@@ -522,6 +564,7 @@ async def finish_run(
     project_name: str,
     run_name: str,
     request: FinishRequest,
+    http_request: Request,
 ) -> StatusResponse:
     """Finish a run.
 
@@ -529,6 +572,7 @@ async def finish_run(
         project_name: Target project name
         run_name: Target run name
         request: Finish request containing exit_code
+        http_request: Incoming HTTP request (carries the tenant header)
 
     Returns:
         StatusResponse: Response with status
@@ -546,26 +590,20 @@ async def finish_run(
     if is_read_only():
         return StatusResponse()
 
-    data_dir = get_data_dir()
-    base_dir = Path(data_dir)
-
-    # Check if run exists
-    metadata_path = base_dir / project_name / f"{run_name}.meta.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="Run not found")
-
+    storage = _run_metadata_for_request(http_request, project_name, run_name)
     try:
-        storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=run_name,
-        )
+        if not storage.exists():
+            raise HTTPException(status_code=404, detail="Run not found")
         now = int(datetime.now(timezone.utc).timestamp() * 1000)
         storage.set_finish(exit_code=request.exit_code, timestamp=now)
         return StatusResponse()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error finishing run: {e}")
         raise HTTPException(status_code=500, detail="Failed to finish run") from e
+    finally:
+        storage.close()
 
 
 @router.post(
@@ -578,6 +616,7 @@ async def update_tags(
     project_name: str,
     run_name: str,
     request: TagsUpdateRequest,
+    http_request: Request,
 ) -> StatusResponse:
     """Update tags for a run.
 
@@ -585,6 +624,7 @@ async def update_tags(
         project_name: Target project name
         run_name: Target run name
         request: Tags update request containing the new tag list
+        http_request: Incoming HTTP request (carries the tenant header)
 
     Returns:
         StatusResponse: Response with status
@@ -602,22 +642,16 @@ async def update_tags(
     if is_read_only():
         return StatusResponse()
 
-    data_dir = get_data_dir()
-    base_dir = Path(data_dir)
-
-    # Check if run exists
-    metadata_path = base_dir / project_name / f"{run_name}.meta.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="Run not found")
-
+    storage = _run_metadata_for_request(http_request, project_name, run_name)
     try:
-        storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=run_name,
-        )
+        if not storage.exists():
+            raise HTTPException(status_code=404, detail="Run not found")
         storage.set_tags(request.tags)
         return StatusResponse()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating tags: {e}")
         raise HTTPException(status_code=500, detail="Failed to update tags") from e
+    finally:
+        storage.close()

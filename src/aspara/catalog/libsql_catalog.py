@@ -32,6 +32,7 @@ import polars as pl
 
 from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
 from aspara.models import RunStatus
+from aspara.storage.metadata.libsql import PROJECT_META_DDL, RUN_META_DDL
 from aspara.storage.metadata.models import validate_metadata
 from aspara.storage.metadata.project import ProjectMetadataStorage
 from aspara.storage.metadata.run import RunMetadataStorage
@@ -42,18 +43,11 @@ from aspara.utils.validators import validate_name
 from .project_catalog import ProjectInfo
 from .run_catalog import RunInfo, _infer_stale_status
 
-# Metadata tables kept alongside the metrics table in the same tenant database.
-# Each row stores the run/project metadata dict as a JSON blob (the same shape the
-# file-based ``*.meta.json`` / ``metadata.json`` files use), keyed by identity.
-_CREATE_RUN_META = (
-    "CREATE TABLE IF NOT EXISTS run_meta ("
-    "  project TEXT NOT NULL,"
-    "  run TEXT NOT NULL,"
-    "  data TEXT NOT NULL,"
-    "  PRIMARY KEY (project, run)"
-    ")"
-)
-_CREATE_PROJECT_META = "CREATE TABLE IF NOT EXISTS project_meta (project TEXT PRIMARY KEY, data TEXT NOT NULL)"
+# Metadata tables (``run_meta`` / ``project_meta``) live alongside the metrics table
+# in the same tenant database. Each row stores the run/project metadata dict as a JSON
+# blob (the same shape the file-based ``*.meta.json`` / ``metadata.json`` files use).
+# The DDL is owned by ``aspara.storage.metadata.libsql`` so the read (this catalog) and
+# write (LibsqlRunMetadataStorage/LibsqlProjectMetadataStorage) paths share one schema.
 
 
 def _ms_to_dt(ms: int | float | None) -> datetime | None:
@@ -89,8 +83,8 @@ class LibsqlCatalog:
         # Ensure the tables exist so discovery over a freshly provisioned (empty)
         # tenant database returns [] instead of raising "no such table".
         ensure_metrics_schema(self._conn)
-        self._conn.execute(_CREATE_RUN_META)
-        self._conn.execute(_CREATE_PROJECT_META)
+        self._conn.execute(RUN_META_DDL)
+        self._conn.execute(PROJECT_META_DDL)
         self._conn.commit()
 
     def _load_run_meta(self, project: str, run: str) -> dict[str, Any]:
