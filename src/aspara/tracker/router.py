@@ -11,12 +11,14 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, UploadFile
 
 from aspara.config import get_data_dir, get_resource_limits, is_read_only
 from aspara.models import MetricRecord
 from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.storage.artifacts import ArtifactTooLargeError, FilesystemArtifactStore
+from aspara.storage.metrics.base import MetricsStorage
+from aspara.tenancy import resolve_data_dir, resolve_libsql_tenant, tenant_id_from_headers
 from aspara.utils import validators
 from aspara.utils.metadata import update_project_metadata_tags
 
@@ -36,6 +38,37 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _metrics_storage_for_request(request: Request, project_name: str, run_name: str) -> MetricsStorage:
+    """Build the metrics storage for the request's tenant.
+
+    The tracker is mounted as its own app (no dashboard middleware), so it reads
+    the tenant from the request header directly and resolves it through the shared
+    :mod:`aspara.tenancy` registry. A libSQL tenant's metrics are written to its
+    libSQL database (unconditionally libSQL, ignoring ASPARA_STORAGE_BACKEND);
+    otherwise writes go to the tenant's filesystem data directory as before.
+    """
+    tenant_id = tenant_id_from_headers(request.headers)
+    spec = resolve_libsql_tenant(tenant_id)
+    if spec is not None:
+        # Lazy import so the optional ``libsql`` dependency is only required here.
+        from aspara.storage.metrics.libsql import LibsqlMetricsStorage
+
+        return LibsqlMetricsStorage(
+            base_dir=spec.base_dir or "",
+            project_name=project_name,
+            run_name=run_name,
+            database=spec.database,
+            auth_token=spec.auth_token,
+        )
+    data_dir = resolve_data_dir(tenant_id)
+    return create_metrics_storage(
+        backend=None,
+        base_dir=str(data_dir),
+        project_name=project_name,
+        run_name=run_name,
+    )
 
 
 def verify_csrf_header(x_requested_with: str | None = Header(None)) -> None:
@@ -188,6 +221,7 @@ async def save_metrics(
     project_name: str,
     run_name: str,
     data: MetricRecord,
+    request: Request,
 ) -> MetricsResponse:
     """Endpoint for saving metrics
 
@@ -215,14 +249,9 @@ async def save_metrics(
         return MetricsResponse()
 
     try:
-        # Create storage instance for this specific project/run
-        data_dir = get_data_dir()
-        storage = create_metrics_storage(
-            backend=None,
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=run_name,
-        )
+        # Create storage for this project/run, routed to the request's tenant
+        # (libSQL database for a libSQL tenant, else the filesystem data dir).
+        storage = _metrics_storage_for_request(request, project_name, run_name)
         # Use mode='json' to convert datetime to ISO format string
         storage.save(data.model_dump(mode="json"))
         return MetricsResponse()

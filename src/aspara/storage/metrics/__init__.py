@@ -46,6 +46,8 @@ def create_metrics_storage(
     base_dir: str,
     project_name: str,
     run_name: str,
+    database: str | None = None,
+    auth_token: str | None = None,
 ) -> MetricsStorage:
     """Create a metrics storage instance.
 
@@ -60,6 +62,12 @@ def create_metrics_storage(
         base_dir: Base directory for data storage.
         project_name: Name of the project.
         run_name: Name of the run.
+        database: Explicit libSQL database URL for a per-tenant remote connection.
+                  When None, falls back to the ASPARA_LIBSQL_URL env var. Only used
+                  by the 'libsql' backend.
+        auth_token: Explicit auth token for a per-tenant remote database. When None,
+                    falls back to the ASPARA_LIBSQL_AUTH_TOKEN env var. Only used by
+                    the 'libsql' backend.
 
     Returns:
         MetricsStorage instance (Jsonl/Polars/Libsql MetricsStorage).
@@ -79,8 +87,8 @@ def create_metrics_storage(
             base_dir=base_dir,
             project_name=project_name,
             run_name=run_name,
-            database=get_libsql_url(),
-            auth_token=get_libsql_auth_token(),
+            database=database if database is not None else get_libsql_url(),
+            auth_token=auth_token if auth_token is not None else get_libsql_auth_token(),
         )
     return JsonlMetricsStorage(
         base_dir=base_dir,

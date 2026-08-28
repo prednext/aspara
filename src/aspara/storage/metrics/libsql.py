@@ -23,6 +23,7 @@ when this backend is actually selected (``ASPARA_STORAGE_BACKEND=libsql``).
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,28 @@ import polars as pl
 from aspara.exceptions import RunNotFoundError
 
 from .base import MetricsStorage
+
+
+def _to_epoch_ms(value: Any) -> int:
+    """Normalize a timestamp to UNIX milliseconds.
+
+    Accepts what the various write paths produce: an ``int``/``float`` already in
+    milliseconds, a ``datetime``, or an ISO-8601 string (as emitted by
+    ``MetricRecord.model_dump(mode="json")``). Naive datetimes are treated as UTC.
+    """
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, dt.datetime):
+        moment = value if value.tzinfo is not None else value.replace(tzinfo=dt.timezone.utc)
+        return int(moment.timestamp() * 1000)
+    if isinstance(value, str):
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    return int(value)
 
 _CREATE_TABLE = (
     "CREATE TABLE IF NOT EXISTS metrics ("
@@ -171,7 +194,7 @@ class LibsqlMetricsStorage(MetricsStorage):
         Returns:
             str: Empty string.
         """
-        ts = int(metrics_data.get("timestamp", 0))
+        ts = _to_epoch_ms(metrics_data.get("timestamp", 0))
         step = int(metrics_data.get("step", 0))
         metrics: dict[str, Any] = metrics_data.get("metrics", {})
 
