@@ -22,10 +22,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aspara.config import get_data_dir
+from aspara.utils.validators import validate_name
 
 # Request header carrying the tenant id. A real deployment may derive the tenant
 # from a subdomain or a JWT claim instead; this header is the minimal seam.
 TENANT_HEADER = "X-Aspara-Tenant"
+
+# Browser-friendly fallbacks so a normal page load (which cannot set custom
+# headers) can still select a tenant. ``?tenant=lib`` also sets the cookie so
+# subsequent same-origin fetches and clicks stay on that tenant.
+TENANT_QUERY_PARAM = "tenant"
+TENANT_COOKIE = "aspara_tenant"
 
 # Tenant id used when no tenant is resolved from the request (single-tenant default).
 DEFAULT_TENANT = "default"
@@ -129,6 +136,40 @@ def resolve_data_dir(tenant_id: str) -> Path:
     return Path(get_data_dir())
 
 
+def safe_tenant_id(value: str | None) -> str | None:
+    """Return ``value`` if it is a safe tenant id, otherwise None."""
+    if not value:
+        return None
+    try:
+        validate_name(value, "tenant")
+    except ValueError:
+        return None
+    return value
+
+
+def tenant_id_from_request(
+    headers: Mapping[str, str],
+    *,
+    query: Mapping[str, str] | None = None,
+    cookies: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the tenant id: header, then ``?tenant=``, then cookie, then default.
+
+    The header remains the primary seam (APIs, curl). Query and cookie exist so a
+    browser can open the dashboard without a header-injecting extension.
+    """
+    candidates = (
+        headers.get(TENANT_HEADER),
+        (query or {}).get(TENANT_QUERY_PARAM),
+        (cookies or {}).get(TENANT_COOKIE),
+    )
+    for candidate in candidates:
+        tenant = safe_tenant_id(candidate)
+        if tenant is not None:
+            return tenant
+    return DEFAULT_TENANT
+
+
 def tenant_id_from_headers(headers: Mapping[str, str]) -> str:
     """Read the tenant id from request headers, defaulting to DEFAULT_TENANT."""
-    return headers.get(TENANT_HEADER) or DEFAULT_TENANT
+    return tenant_id_from_request(headers)

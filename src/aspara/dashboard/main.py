@@ -16,16 +16,16 @@ from starlette.responses import Response
 
 from aspara.catalog import DataDirWatcher
 from aspara.config import get_sse_dev_shutdown_timeout, is_dev_mode
+from aspara.tenancy import (
+    TENANT_COOKIE,
+    TENANT_QUERY_PARAM,
+    safe_tenant_id,
+    tenant_id_from_request,
+)
 
-from .dependencies import DEFAULT_TENANT
 from .router import router
 
 logger = logging.getLogger(__name__)
-
-# Request header carrying the tenant id. This is a minimal seam for multi-tenant
-# serving; a real deployment may derive the tenant from a subdomain or a JWT claim
-# instead. When absent, requests fall back to the single default tenant.
-TENANT_HEADER = "X-Aspara-Tenant"
 
 
 # Global state for SSE connection management
@@ -47,11 +47,29 @@ class TenantMiddleware(BaseHTTPMiddleware):
     Downstream catalog/storage dependencies read ``request.state.tenant_id`` to
     serve the correct tenant's data. With no tenant resolver configured, the id is
     informational only and all requests still map to the single data directory.
+
+    Resolution order: ``X-Aspara-Tenant`` header, ``?tenant=``, ``aspara_tenant``
+    cookie, then the default tenant. A valid ``?tenant=`` also sets the cookie so
+    browser navigations and same-origin ``fetch`` keep the chosen tenant.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        request.state.tenant_id = request.headers.get(TENANT_HEADER) or DEFAULT_TENANT
-        return await call_next(request)
+        request.state.tenant_id = tenant_id_from_request(
+            request.headers,
+            query=request.query_params,
+            cookies=request.cookies,
+        )
+        response = await call_next(request)
+        queried = safe_tenant_id(request.query_params.get(TENANT_QUERY_PARAM))
+        if queried is not None:
+            response.set_cookie(
+                TENANT_COOKIE,
+                queried,
+                httponly=True,
+                samesite="lax",
+                path="/",
+            )
+        return response
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

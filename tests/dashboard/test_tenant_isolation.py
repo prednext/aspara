@@ -81,6 +81,36 @@ def test_dashboard_isolates_tenants(tmp_path: Path) -> None:
         configure_data_dir(None)
 
 
+def test_tenant_query_param_sets_cookie_for_browser(tmp_path: Path) -> None:
+    """A browser cannot send X-Aspara-Tenant; ?tenant= plus the cookie must work."""
+    tenant_a = tmp_path / "tenant_a"
+    tenant_b = tmp_path / "tenant_b"
+    _write_run(tenant_a, "proj", "shared", [(1000, 0, {"loss": 1.0})])
+    _write_run(tenant_b, "proj", "shared", [(1000, 0, {"loss": 9.0})])
+    mapping = {"a": str(tenant_a), "b": str(tenant_b)}
+    configure_tenant_resolver(lambda t: mapping.get(t, str(tmp_path / "missing")))
+    browser = TestClient(app)
+    try:
+        via_query = browser.get("/api/projects/proj/runs/metrics?runs=shared&tenant=a")
+        assert via_query.status_code == 200
+        assert _values(via_query.json(), "loss", "shared") == [1.0]
+        assert via_query.cookies.get("aspara_tenant") == "a"
+
+        # Later same-origin requests (no query, no header) keep the cookie tenant.
+        via_cookie = browser.get("/api/projects/proj/runs/metrics?runs=shared")
+        assert _values(via_cookie.json(), "loss", "shared") == [1.0]
+
+        # Header still wins over the cookie.
+        via_header = browser.get(
+            "/api/projects/proj/runs/metrics?runs=shared",
+            headers={"X-Aspara-Tenant": "b"},
+        )
+        assert _values(via_header.json(), "loss", "shared") == [9.0]
+    finally:
+        configure_tenant_resolver(None)
+        configure_data_dir(None)
+
+
 def test_default_tenant_behavior_unchanged_without_resolver(tmp_path: Path) -> None:
     """With no resolver, the tenant header is informational and the single
     configured data directory is always used (backward compatible)."""
