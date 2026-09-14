@@ -301,9 +301,12 @@ async def save_metrics(
         # Create storage for this project/run, routed to the request's tenant
         # (libSQL database for a libSQL tenant, else the filesystem data dir).
         storage = _metrics_storage_for_request(request, project_name, run_name)
-        # Use mode='json' to convert datetime to ISO format string
-        storage.save(data.model_dump(mode="json"))
-        return MetricsResponse()
+        try:
+            # Use mode='json' to convert datetime to ISO format string
+            storage.save(data.model_dump(mode="json"))
+            return MetricsResponse()
+        finally:
+            storage.close()
     except ValueError as e:
         # Validation errors are safe to return
         raise HTTPException(status_code=400, detail=str(e)) from e

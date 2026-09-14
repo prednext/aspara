@@ -51,6 +51,10 @@ class LibsqlTenant:
     database: str | None = None
     auth_token: str | None = None
 
+    def __post_init__(self) -> None:
+        if not (self.base_dir or "").strip() and not (self.database or "").strip():
+            raise ValueError("LibsqlTenant requires base_dir (local) or database (remote)")
+
 
 # Mutable container for the single configured data directory (single-tenant default).
 _custom_data_dir: list[str | None] = [None]

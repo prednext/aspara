@@ -4,9 +4,9 @@ Stage 2 of the multi-tenant SaaS direction. Where ``ProjectCatalog`` and
 ``RunCatalog`` discover projects/runs by scanning the filesystem, this catalog
 keeps everything in one tenant database:
 
-- **Discovery / metrics** derive from the ``metrics`` table written by
-  :class:`LibsqlMetricsStorage` (``project``, ``run``, ``ts``, ``step``, ``name``,
-  ``value``) via ``SELECT ... GROUP BY`` queries.
+- **Discovery** unions the ``metrics`` table with ``run_meta`` / ``project_meta``,
+  so a ``create_run`` that has not yet logged a metric still appears in project
+  and run listings. Metric timestamps still come from ``metrics`` when present.
 - **Metadata** (tags, notes, params, status, artifacts, timestamps) lives in
   ``run_meta`` / ``project_meta`` tables as JSON blobs whose shape matches the
   file-based ``*.meta.json`` / ``metadata.json`` payloads, so no migration is
@@ -161,12 +161,22 @@ class LibsqlCatalog:
     def get_projects(self) -> list[ProjectInfo]:
         """List all projects, with run counts and last-update times.
 
+        A project is listed if it has metric rows, run metadata, or project
+        metadata. ``run_count`` is the number of distinct runs across metrics
+        and ``run_meta`` (a metadata-only init counts as a run).
+
         Returns:
             ``ProjectInfo`` list sorted by project name.
         """
         cur = self._conn.execute(
-            "SELECT project, COUNT(DISTINCT run) AS run_count, MAX(ts) AS last_ts "
-            "FROM metrics GROUP BY project ORDER BY project"
+            "SELECT project, COUNT(DISTINCT run) AS run_count, MAX(last_ts) AS last_ts "
+            "FROM ("
+            "  SELECT project, run, ts AS last_ts FROM metrics "
+            "  UNION ALL "
+            "  SELECT project, run, NULL AS last_ts FROM run_meta "
+            "  UNION ALL "
+            "  SELECT project, NULL AS run, NULL AS last_ts FROM project_meta"
+            ") GROUP BY project ORDER BY project"
         )
         projects: list[ProjectInfo] = []
         for name, run_count, last_ts in cur.fetchall():
@@ -190,25 +200,31 @@ class LibsqlCatalog:
             project: Project name.
 
         Returns:
-            ``RunInfo`` list sorted by run name. Timestamps come from metric rows;
-            tags, params, status, and finish state come from ``run_meta`` when present.
+            ``RunInfo`` list sorted by run name. Timestamps come from metric rows
+            when present; tags, params, status, and finish state come from
+            ``run_meta``. A metadata-only run (no metric rows yet) is included.
 
         Raises:
             ValueError: If the project name is invalid.
             ProjectNotFoundError: If the project has no data in this database.
         """
         validate_name(project, "project name")
-
-        cur = self._conn.execute(
-            "SELECT run, MIN(ts) AS start_ts, MAX(ts) AS last_ts "
-            "FROM metrics WHERE project = ? GROUP BY run ORDER BY run",
-            (project,),
-        )
-        rows = cur.fetchall()
-        if not rows:
+        if not self._project_exists(project):
             raise ProjectNotFoundError(f"Project '{project}' not found")
 
-        return [self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run)) for run, start_ts, last_ts in rows]
+        cur = self._conn.execute(
+            "SELECT run, MIN(start_ts) AS start_ts, MAX(last_ts) AS last_ts "
+            "FROM ("
+            "  SELECT run, ts AS start_ts, ts AS last_ts FROM metrics WHERE project = ? "
+            "  UNION ALL "
+            "  SELECT run, NULL AS start_ts, NULL AS last_ts FROM run_meta WHERE project = ?"
+            ") GROUP BY run ORDER BY run",
+            (project, project),
+        )
+        return [
+            self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+            for run, start_ts, last_ts in cur.fetchall()
+        ]
 
     def get_run(self, project: str, run: str) -> RunInfo:
         """Return a single run's info, enriched with stored metadata.

@@ -105,6 +105,15 @@ def test_libsql_tenant_metadata_ingested_and_served(tmp_path: Path) -> None:
         run_id = created.json()["run_id"]
         assert run_id
 
+        # Discovery must include this metadata-only run (no metric rows yet),
+        # otherwise home stays empty and /projects/proj 500s via get_runs.
+        home = dashboard.get("/", headers=hdr)
+        assert home.status_code == 200
+        assert "proj" in home.text
+        detail = dashboard.get("/projects/proj", headers=hdr)
+        assert detail.status_code == 200
+        assert "r1" in detail.text
+
         # No filesystem metadata file for a libSQL tenant; it lives in the DB.
         assert not (tenant_dir / "proj" / "r1.meta.json").exists()
 

@@ -86,6 +86,54 @@ def test_get_runs_unknown_project_raises(tmp_path: Any) -> None:
         cat.close()
 
 
+def test_metadata_only_run_is_discoverable(tmp_path: Any) -> None:
+    """create_run writes run_meta with no metric rows; listings must still show it."""
+    from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+    storage = LibsqlRunMetadataStorage(str(tmp_path), "alpha", "init_only")
+    try:
+        storage.set_init(run_id="abc123", tags=["exp"], notes="", timestamp=1000)
+    finally:
+        storage.close()
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        projects = cat.get_projects()
+        assert [p.name for p in projects] == ["alpha"]
+        assert projects[0].run_count == 1
+        assert cat.project_exists("alpha")
+
+        runs = cat.get_runs("alpha")
+        assert [r.name for r in runs] == ["init_only"]
+        assert runs[0].run_id == "abc123"
+        assert runs[0].tags == ["exp"]
+
+        run = cat.get_run("alpha", "init_only")
+        assert run.name == "init_only"
+    finally:
+        cat.close()
+
+
+def test_metadata_only_run_does_not_double_count_metrics(tmp_path: Any) -> None:
+    """A run with both metrics and metadata still counts once; a sibling init is extra."""
+    from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+    _seed(tmp_path, "alpha", "logged", [_md(1000, 0, loss=1.0)])
+    storage = LibsqlRunMetadataStorage(str(tmp_path), "alpha", "init_only")
+    try:
+        storage.set_init(run_id="only", tags=[], notes="", timestamp=2000)
+    finally:
+        storage.close()
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        by_name = {p.name: p for p in cat.get_projects()}
+        assert by_name["alpha"].run_count == 2
+        assert {r.name for r in cat.get_runs("alpha")} == {"logged", "init_only"}
+    finally:
+        cat.close()
+
+
 def test_load_metrics_wide_and_start_time_filter(tmp_path: Any) -> None:
     _seed(
         tmp_path,
