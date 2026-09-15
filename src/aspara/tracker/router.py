@@ -461,15 +461,19 @@ async def upload_artifact(
         if category:
             artifact_data["category"] = category
 
-        # Save artifact metadata to the tenant's metadata store (libSQL or file).
-        metadata_storage = _run_metadata_for_request(http_request, project_name, run_name)
+        # Publish bytes, then record them in metadata. If opening the metadata
+        # store or add_artifact fails, drop the published file so a later ZIP
+        # cannot mix in an unlisted artifact.
+        metadata_storage = None
         try:
+            metadata_storage = _run_metadata_for_request(http_request, project_name, run_name)
             metadata_storage.add_artifact(artifact_data)
         except Exception:
             store.delete_file(project_name, run_name, artifact_name)
             raise
         finally:
-            metadata_storage.close()
+            if metadata_storage is not None:
+                metadata_storage.close()
 
         return ArtifactUploadResponse(
             artifact_name=artifact_name,

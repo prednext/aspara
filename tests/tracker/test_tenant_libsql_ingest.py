@@ -329,6 +329,38 @@ def test_artifact_bytes_removed_when_metadata_write_fails(tmp_path: Path, monkey
         configure_libsql_tenant_resolver(None)
 
 
+def test_artifact_bytes_removed_when_metadata_connect_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        created = tracker.post(
+            "/api/v1/projects/proj/runs",
+            json={"name": "r1"},
+            headers={**hdr, **_CSRF},
+        )
+        assert created.status_code == 200
+
+        def _boom(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("connect failed")
+
+        monkeypatch.setattr("aspara.tracker.router._run_metadata_for_request", _boom)
+        files = {"file": ("model.pt", io.BytesIO(b"weights"), "application/octet-stream")}
+        resp = tracker.post(
+            "/api/v1/projects/proj/runs/r1/artifacts",
+            files=files,
+            headers={**hdr, **_CSRF},
+        )
+        assert resp.status_code == 500
+        artifact_path = tenant_dir / "proj" / "r1" / "artifacts" / "model.pt"
+        assert not artifact_path.exists()
+        assert not artifact_path.with_name("model.pt.partial").exists()
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
 def test_invalid_tenant_header_is_rejected() -> None:
     r = tracker.post(
         "/api/v1/projects/proj/runs/r1/metrics",
