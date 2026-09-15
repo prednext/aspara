@@ -9,6 +9,8 @@ This module provides reusable dependencies for:
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
+from collections.abc import Callable, Iterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -18,7 +20,8 @@ from fastapi import Path as PathParam
 
 from aspara.catalog import LibsqlCatalog, ProjectCatalog, RunCatalog
 from aspara.catalog.libsql_adapters import LibsqlProjectCatalog, LibsqlRunCatalog
-from aspara.storage.artifacts import FilesystemArtifactStore
+from aspara.storage.artifacts import ArtifactStore
+from aspara.storage.tenant import artifact_store_for_tenant
 from aspara.tenancy import (
     DEFAULT_TENANT,
     LibsqlTenant,
@@ -47,6 +50,7 @@ __all__ = [
     "ProjectCatalogDep",
     "RunCatalogDep",
     "DataDirDep",
+    "ArtifactStoreDep",
     "ValidatedProject",
     "ValidatedRun",
 ]
@@ -64,47 +68,80 @@ def _catalogs_for_dir(data_dir: str) -> tuple[ProjectCatalog, RunCatalog, Path]:
     return ProjectCatalog(str(path)), RunCatalog(str(path)), path
 
 
-_libsql_catalog_cache: dict[
+class _LibsqlCatalogEntry:
+    """Cached libSQL catalogs plus a borrow count so eviction cannot close in-use connections."""
+
+    __slots__ = ("project_cat", "run_cat", "data_dir", "refs")
+
+    def __init__(
+        self,
+        project_cat: LibsqlProjectCatalog,
+        run_cat: LibsqlRunCatalog,
+        data_dir: Path,
+    ) -> None:
+        self.project_cat = project_cat
+        self.run_cat = run_cat
+        self.data_dir = data_dir
+        self.refs = 0
+
+
+_libsql_catalog_lock = threading.Lock()
+_libsql_catalog_cache: OrderedDict[
     tuple[str | None, str | None, str | None],
-    tuple[LibsqlProjectCatalog, LibsqlRunCatalog, Path],
-] = {}
+    _LibsqlCatalogEntry,
+] = OrderedDict()
 _LIBSQL_CATALOG_CACHE_MAX = 32
 
 
-def _libsql_catalogs_for_key(
+def _borrow_libsql_catalogs(
     base_dir: str | None,
     database: str | None,
     auth_token: str | None,
-) -> tuple[LibsqlProjectCatalog, LibsqlRunCatalog, Path]:
-    """Build and cache libSQL-backed catalog facades for one tenant database.
+    artifact_store: ArtifactStore | None,
+) -> tuple[tuple[LibsqlProjectCatalog, LibsqlRunCatalog, Path], Callable[[], None]]:
+    """Borrow cached libSQL catalogs for one tenant database.
 
-    The shared ``LibsqlCatalog`` (and its connection) is kept alive by this cache
-    for the tenant's lifetime; a single re-entrant lock serializes access.
+    Concurrent first access shares one connection. Eviction closes only idle
+    entries (``refs == 0``). The caller must invoke the returned release
+    function exactly once.
     """
     key = (base_dir, database, auth_token)
-    cached = _libsql_catalog_cache.get(key)
-    if cached is not None:
-        return cached
+    with _libsql_catalog_lock:
+        entry = _libsql_catalog_cache.get(key)
+        if entry is None:
+            while len(_libsql_catalog_cache) >= _LIBSQL_CATALOG_CACHE_MAX:
+                victim_key = next((k for k, v in _libsql_catalog_cache.items() if v.refs == 0), None)
+                if victim_key is None:
+                    break
+                victim = _libsql_catalog_cache.pop(victim_key)
+                victim.project_cat.close()
+            catalog = LibsqlCatalog(base_dir=base_dir, database=database, auth_token=auth_token)
+            lock = threading.RLock()
+            data_dir = Path(base_dir) if base_dir else Path(".")
+            entry = _LibsqlCatalogEntry(
+                LibsqlProjectCatalog(catalog, lock, artifact_store),
+                LibsqlRunCatalog(catalog, lock, artifact_store),
+                data_dir,
+            )
+            _libsql_catalog_cache[key] = entry
+        else:
+            _libsql_catalog_cache.move_to_end(key)
+        entry.refs += 1
+        catalogs = (entry.project_cat, entry.run_cat, entry.data_dir)
 
-    catalog = LibsqlCatalog(base_dir=base_dir, database=database, auth_token=auth_token)
-    lock = threading.RLock()
-    # Local libSQL tenants pin artifact bytes under ``base_dir``; remote tenants
-    # (a database URL) do not, so delete/ZIP must not touch a shared data_dir.
-    artifact_store = (
-        FilesystemArtifactStore(base_dir) if base_dir and not (database or "").strip() else None
-    )
-    data_dir = Path(base_dir) if base_dir else Path(".")
-    result = (
-        LibsqlProjectCatalog(catalog, lock, artifact_store),
-        LibsqlRunCatalog(catalog, lock, artifact_store),
-        data_dir,
-    )
-    if len(_libsql_catalog_cache) >= _LIBSQL_CATALOG_CACHE_MAX:
-        old_key = next(iter(_libsql_catalog_cache))
-        old_project_cat, _, _ = _libsql_catalog_cache.pop(old_key)
-        old_project_cat.close()
-    _libsql_catalog_cache[key] = result
-    return result
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        with _libsql_catalog_lock:
+            current = _libsql_catalog_cache.get(key)
+            if current is not None:
+                current.refs = max(0, current.refs - 1)
+
+    return catalogs, release
 
 
 def _tenant_id_from_request(request: Request | None) -> str:
@@ -116,21 +153,23 @@ def _tenant_id_from_request(request: Request | None) -> str:
     return DEFAULT_TENANT
 
 
-def _catalogs_for_request(request: Request | None) -> tuple[ProjectCatalogLike, RunCatalogLike, Path]:
-    """Resolve the catalogs for the request's tenant.
-
-    A libSQL tenant (when a libSQL resolver is installed and returns a spec) is
-    served by the libSQL-backed facades; otherwise the file-based catalogs are
-    used, exactly as before.
-    """
+def _borrow_catalogs_for_request(
+    request: Request | None,
+) -> tuple[tuple[ProjectCatalogLike, RunCatalogLike, Path], Callable[[], None]]:
+    """Resolve catalogs for the request's tenant and a matching release callback."""
     tenant_id = _tenant_id_from_request(request)
 
     spec = resolve_libsql_tenant(tenant_id)
     if spec is not None:
-        return _libsql_catalogs_for_key(spec.base_dir, spec.database, spec.auth_token)
+        return _borrow_libsql_catalogs(
+            spec.base_dir,
+            spec.database,
+            spec.auth_token,
+            artifact_store_for_tenant(tenant_id),
+        )
 
     data_dir = resolve_data_dir(tenant_id)
-    return _catalogs_for_dir(str(data_dir))
+    return _catalogs_for_dir(str(data_dir)), lambda: None
 
 
 def _get_catalogs() -> tuple[ProjectCatalog, RunCatalog, Path]:
@@ -138,14 +177,22 @@ def _get_catalogs() -> tuple[ProjectCatalog, RunCatalog, Path]:
     return _catalogs_for_dir(str(resolve_data_dir(DEFAULT_TENANT)))
 
 
-def get_project_catalog(request: Request) -> ProjectCatalogLike:
+def get_project_catalog(request: Request) -> Iterator[ProjectCatalogLike]:
     """Get the project catalog for the request's tenant."""
-    return _catalogs_for_request(request)[0]
+    catalogs, release = _borrow_catalogs_for_request(request)
+    try:
+        yield catalogs[0]
+    finally:
+        release()
 
 
-def get_run_catalog(request: Request) -> RunCatalogLike:
+def get_run_catalog(request: Request) -> Iterator[RunCatalogLike]:
     """Get the run catalog for the request's tenant."""
-    return _catalogs_for_request(request)[1]
+    catalogs, release = _borrow_catalogs_for_request(request)
+    try:
+        yield catalogs[1]
+    finally:
+        release()
 
 
 def get_data_dir_path(request: Request) -> Path:
@@ -161,12 +208,25 @@ def get_data_dir_path(request: Request) -> Path:
     return root
 
 
+def get_artifact_store(request: Request) -> ArtifactStore:
+    """Get the artifact-byte store for the request's tenant.
+
+    Remote libSQL tenants have no local bytes, so this raises 404.
+    """
+    store = artifact_store_for_tenant(_tenant_id_from_request(request))
+    if store is None:
+        raise HTTPException(status_code=404, detail="No artifacts found for this run")
+    return store
+
+
 def _clear_catalog_caches() -> None:
     """Drop all cached catalog instances (file-based and libSQL-backed)."""
     _catalogs_for_dir.cache_clear()
-    for project_cat, _, _ in _libsql_catalog_cache.values():
-        project_cat.close()
-    _libsql_catalog_cache.clear()
+    with _libsql_catalog_lock:
+        entries = list(_libsql_catalog_cache.values())
+        _libsql_catalog_cache.clear()
+    for entry in entries:
+        entry.project_cat.close()
 
 
 # Invalidate cached catalogs whenever the tenant resolver configuration changes.
@@ -217,3 +277,4 @@ ValidatedRun = Annotated[str, Depends(get_validated_run)]
 ProjectCatalogDep = Annotated[ProjectCatalogLike, Depends(get_project_catalog)]
 RunCatalogDep = Annotated[RunCatalogLike, Depends(get_run_catalog)]
 DataDirDep = Annotated[Path, Depends(get_data_dir_path)]
+ArtifactStoreDep = Annotated[ArtifactStore, Depends(get_artifact_store)]

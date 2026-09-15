@@ -370,3 +370,50 @@ def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:
         assert _values(rb.json(), "loss", "shared") == [9.0]
     finally:
         configure_libsql_tenant_resolver(None)
+
+
+def test_libsql_catalog_cache_shares_one_connection_on_concurrent_miss(tmp_path: Path) -> None:
+    """Two overlapping first requests for the same tenant must not leak a connection."""
+    import threading
+
+    from aspara.catalog import libsql_catalog as catalog_mod
+    from aspara.dashboard import dependencies as deps
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+
+    connects = {"n": 0}
+    orig_connect = catalog_mod.connect_libsql
+
+    def _connect(*args: Any, **kwargs: Any) -> Any:
+        connects["n"] += 1
+        return orig_connect(*args, **kwargs)
+
+    catalog_mod.connect_libsql = _connect  # type: ignore[method-assign]
+    deps._clear_catalog_caches()
+    try:
+        results: list[Any] = []
+        errors: list[BaseException] = []
+
+        def _borrow() -> None:
+            try:
+                catalogs, release = deps._borrow_libsql_catalogs(str(tenant_dir), None, None, None)
+                results.append((catalogs, release))
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_borrow) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+        assert errors == []
+        assert connects["n"] == 1
+        assert len(results) == 8
+        first = results[0][0][0]
+        assert all(catalogs[0] is first for catalogs, _ in results)
+        for _, release in results:
+            release()
+    finally:
+        catalog_mod.connect_libsql = orig_connect  # type: ignore[method-assign]
+        deps._clear_catalog_caches()

@@ -82,7 +82,8 @@ class LibsqlProjectCatalog:
 
     def close(self) -> None:
         """Close the shared tenant database connection."""
-        self._cat.close()
+        with self._lock:
+            self._cat.close()
 
 
 class LibsqlRunCatalog:

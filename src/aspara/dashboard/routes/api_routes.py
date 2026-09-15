@@ -30,12 +30,11 @@ from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
 from aspara.storage.artifacts import (
     ArtifactRunNotFoundError,
     ArtifactStore,
-    FilesystemArtifactStore,
     StoredArtifact,
 )
 
 from ..dependencies import (
-    DataDirDep,
+    ArtifactStoreDep,
     ProjectCatalogDep,
     RunCatalogDep,
     ValidatedProject,
@@ -116,7 +115,7 @@ def _stream_zip(
 async def download_artifacts_zip(
     project: ValidatedProject,
     run: ValidatedRun,
-    data_dir: DataDirDep,
+    store: ArtifactStoreDep,
 ) -> StreamingResponse:
     """Download all artifacts for a run as a ZIP file.
 
@@ -132,8 +131,6 @@ async def download_artifacts_zip(
         HTTPException: 400 if project/run name is invalid or total size exceeds limit,
             404 if no artifacts found.
     """
-    # Resolve the artifact bytes through the store (filesystem-backed here).
-    store = FilesystemArtifactStore(data_dir)
     try:
         artifact_entries = store.list(project, run)
     except ArtifactRunNotFoundError:
