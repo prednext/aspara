@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from aspara.storage.artifacts import FilesystemArtifactStore
+from aspara.storage.artifacts import ArtifactTooLargeError, FilesystemArtifactStore
 
 
 def test_delete_run_removes_run_dir_and_leaves_sibling(tmp_path: Path) -> None:
@@ -54,3 +54,42 @@ def test_delete_rejects_unsafe_names(tmp_path: Path) -> None:
         store.delete_run("proj", "../etc")
     with pytest.raises(ValueError):
         store.delete_project("..")
+
+
+def test_delete_file_removes_one_artifact(tmp_path: Path) -> None:
+    store = FilesystemArtifactStore(tmp_path)
+    artifacts = tmp_path / "proj" / "r1" / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "a.pt").write_bytes(b"a")
+    (artifacts / "b.pt").write_bytes(b"b")
+    store.delete_file("proj", "r1", "a.pt")
+    assert not (artifacts / "a.pt").exists()
+    assert (artifacts / "b.pt").read_bytes() == b"b"
+
+
+def test_put_stream_publishes_via_replace_and_cleans_partial(tmp_path: Path) -> None:
+    store = FilesystemArtifactStore(tmp_path)
+    stored = store.put_stream("proj", "r1", "model.pt", [b"abc", b"def"], max_size=100)
+    dest = tmp_path / "proj" / "r1" / "artifacts" / "model.pt"
+    assert stored.size == 6
+    assert dest.read_bytes() == b"abcdef"
+    assert not dest.with_name("model.pt.partial").exists()
+
+
+def test_put_stream_oversize_leaves_no_partial_or_dest(tmp_path: Path) -> None:
+    store = FilesystemArtifactStore(tmp_path)
+    with pytest.raises(ArtifactTooLargeError):
+        store.put_stream("proj", "r1", "model.pt", [b"abcdef"], max_size=3)
+    artifacts = tmp_path / "proj" / "r1" / "artifacts"
+    assert not (artifacts / "model.pt").exists()
+    assert not (artifacts / "model.pt.partial").exists()
+
+
+def test_list_skips_partial_temp_files(tmp_path: Path) -> None:
+    store = FilesystemArtifactStore(tmp_path)
+    artifacts = tmp_path / "proj" / "r1" / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "ok.pt").write_bytes(b"ok")
+    (artifacts / "ok.pt.partial").write_bytes(b"tmp")
+    names = {entry.name for entry in store.list("proj", "r1")}
+    assert names == {"ok.pt"}

@@ -130,3 +130,7 @@ class ArtifactStore(ABC):
         Missing storage is a no-op. Must not delete the store's root (where a
         local libSQL tenant keeps ``aspara.db``).
         """
+
+    @abstractmethod
+    def delete_file(self, project: str, run: str, name: str) -> None:
+        """Remove one stored artifact file. Missing files are a no-op."""

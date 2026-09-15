@@ -454,6 +454,9 @@ async def upload_artifact(
         metadata_storage = _run_metadata_for_request(http_request, project_name, run_name)
         try:
             metadata_storage.add_artifact(artifact_data)
+        except Exception:
+            store.delete_file(project_name, run_name, artifact_name)
+            raise
         finally:
             metadata_storage.close()
 

@@ -78,24 +78,25 @@ class FilesystemArtifactStore(ArtifactStore):
 
         dest = artifacts_dir / name
         validators.validate_safe_path(dest, artifacts_dir)
+        partial = dest.with_name(dest.name + ".partial")
+        validators.validate_safe_path(partial, artifacts_dir)
 
         written = 0
         try:
-            with open(dest, "wb") as f:
+            with open(partial, "wb") as f:
                 for chunk in chunks:
                     if not chunk:
                         continue
                     written += len(chunk)
                     if written > max_size:
-                        f.close()
-                        dest.unlink(missing_ok=True)
                         raise ArtifactTooLargeError(max_size)
                     f.write(chunk)
+            os.replace(partial, dest)
         except ArtifactTooLargeError:
+            partial.unlink(missing_ok=True)
             raise
         except Exception:
-            # Clean up the partial file on any write error.
-            dest.unlink(missing_ok=True)
+            partial.unlink(missing_ok=True)
             raise
 
         return StoredArtifact(name=name, size=written)
@@ -113,6 +114,10 @@ class FilesystemArtifactStore(ArtifactStore):
         with os.scandir(artifacts_dir) as it:
             for entry in it:
                 if entry.is_file(follow_symlinks=False):
+                    # put_stream writes to ``{name}.partial`` then replaces;
+                    # leftover temps must not appear in ZIP listings.
+                    if entry.name.endswith(".partial"):
+                        continue
                     size = entry.stat(follow_symlinks=False).st_size
                     entries.append(StoredArtifact(name=entry.name, size=size))
                 elif entry.is_symlink():
@@ -139,3 +144,11 @@ class FilesystemArtifactStore(ArtifactStore):
         validators.validate_safe_path(project_dir, self._base_dir)
         if project_dir.exists():
             shutil.rmtree(project_dir)
+
+    def delete_file(self, project: str, run: str, name: str) -> None:
+        validators.validate_name(project, "project name")
+        validators.validate_name(run, "run name")
+        validators.validate_artifact_name(name)
+        path = self._artifacts_dir(project, run) / name
+        validators.validate_safe_path(path, self._base_dir)
+        path.unlink(missing_ok=True)
