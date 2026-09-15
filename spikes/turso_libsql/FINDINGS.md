@@ -108,8 +108,8 @@ dashboards read from the local replica. Turso remains the durable, per-tenant so
    `BEGIN … COMMIT` collapse many inserts into one round trip? (The `executemany` path did not.)
 4. **Schema tuning:** compare long-format vs wide vs compressed-blob on size, and index on/off.
 5. **Compare against the `polars` backend**, not just `jsonl`, for a fair disk-size baseline.
-6. **Provisioning model:** tenant → DB mapping, region placement near users, connection warm-keeping.
-   → drafted in [`PROVISIONING.md`](./PROVISIONING.md).
+6. **Provisioning model:** tenant → DB mapping landed in `aspara.tenancy` and the libSQL backend.
+   Region placement at sign-up and control-plane DB create are still later.
 
 ## Reproduce
 
