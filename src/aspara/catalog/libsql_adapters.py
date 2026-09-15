@@ -13,7 +13,8 @@ spawns via ``asyncio.to_thread`` (e.g. the metrics endpoint loads runs in
 parallel). Correctness is favored over throughput for this first wiring.
 
 Not yet supported for libSQL tenants (kept as graceful no-ops / gaps):
-- ``subscribe`` (SSE change streaming) yields nothing -- there is no watcher.
+- ``subscribe`` (SSE change streaming) has no watcher; the generator stays
+  open until cancelled so EventSource does not reconnect in a loop.
 - Artifact *bytes* for *remote* tenants (a ``database`` URL). Local libSQL
   tenants still pin files under ``base_dir``; remote tenants keep only
   artifact metadata until object storage exists. ZIP download 404s for them.
@@ -140,10 +141,14 @@ class LibsqlRunCatalog:
     ) -> AsyncGenerator[MetricRecord | StatusRecord, None]:
         """SSE change streaming is not supported for libSQL tenants yet.
 
-        Yields nothing and closes immediately so the endpoint degrades to "no
-        live updates" instead of erroring. The REST metrics endpoint still
-        serves the current data. The element type matches ``RunCatalog.subscribe``
+        Yields nothing and stays open until cancelled so the SSE endpoint
+        degrades to "no live updates" instead of closing (which would make
+        EventSource reconnect forever). The REST metrics endpoint still serves
+        the current data. The element type matches ``RunCatalog.subscribe``
         so both catalogs present an identical streaming interface.
         """
-        return
-        yield  # pragma: no cover - makes this an (empty) async generator
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise
+        yield  # pragma: no cover - cancelled before any record

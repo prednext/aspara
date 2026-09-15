@@ -10,6 +10,7 @@ Skipped automatically when the optional ``libsql`` package is not installed.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -313,4 +314,20 @@ def test_null_tags_and_artifacts_do_not_crash_listing(tmp_path: Any) -> None:
         assert by_name["broken"].is_corrupted is True
         assert cat.get_run("alpha", "broken").is_corrupted is True
     finally:
+        cat.close()
+
+
+@pytest.mark.asyncio
+async def test_libsql_subscribe_stays_open_until_cancelled(tmp_path: Any) -> None:
+    """Empty subscribe must not return immediately (that retriggers EventSource)."""
+    from aspara.catalog import LibsqlRunCatalog
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    adapter = LibsqlRunCatalog(cat)
+    gen = adapter.subscribe({"alpha": ["r1"]}, datetime.now(timezone.utc))
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(anext(gen), timeout=0.05)
+    finally:
+        await gen.aclose()
         cat.close()
