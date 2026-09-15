@@ -97,6 +97,10 @@ response = requests.post(
 print(response.json())  # {"status": "ok"}
 ```
 
+Metric values must be numeric for a libSQL tenant. A non-numeric value returns **400**. Filesystem tenants (jsonl/polars) still store non-numeric values and return 200. An omitted `step` is stored as 0 on libSQL.
+
+RemoteRun / `aspara.init(tracker_uri=...)` does not send `X-Aspara-Tenant`; those clients write the default tenant.
+
 ### Uploading Artifacts
 
 ```python
