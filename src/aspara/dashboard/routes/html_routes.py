@@ -38,6 +38,14 @@ from ..services.template_service import (
 router = APIRouter()
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 def _format_duration_ms(duration_ms: float | int | None) -> str:
     """Format a duration given in milliseconds into a human-readable string.
 
@@ -211,8 +219,8 @@ async def get_run(
 
     # Extract params from metadata
     params: dict[str, Any] = {}
-    params.update(metadata.get("params", {}))
-    params.update(metadata.get("config", {}))
+    params.update(_as_dict(metadata.get("params")))
+    params.update(_as_dict(metadata.get("config")))
 
     # Format data for template
     formatted_params = [{"key": k, "value": v} for k, v in params.items()]
@@ -316,7 +324,7 @@ async def get_run(
         "is_maybe_failed": status == RunStatus.MAYBE_FAILED,
         "has_tags": len(run_tags) > 0,
         "tags": run_tags,
-        "artifacts": [TemplateService.format_artifact_for_template(artifact) for artifact in artifacts],
+        "artifacts": [TemplateService.format_artifact_for_template(artifact) for artifact in _as_list(artifacts)],
         "has_artifacts": len(artifacts) > 0,
         "is_corrupted": is_corrupted,
         "error_message": error_message,

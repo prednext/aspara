@@ -401,7 +401,8 @@ class LibsqlCatalog:
 
     def get_run_artifacts(self, project: str, run: str) -> list[dict[str, Any]]:
         """Return a run's artifact list from its metadata."""
-        return list(self.get_run_metadata(project, run).get("artifacts", []))
+        artifacts = self.get_run_metadata(project, run).get("artifacts", [])
+        return artifacts if isinstance(artifacts, list) else []
 
     def update_run_metadata(self, project: str, run: str, metadata: dict[str, Any]) -> dict[str, Any]:
         """Update a run's ``notes``/``tags`` and return the full metadata dict.

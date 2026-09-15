@@ -591,7 +591,8 @@ class RunCatalog:
             try:
                 with open(metadata_file) as f:
                     metadata = json.load(f)
-                    return metadata.get("artifacts", [])
+                    artifacts = metadata.get("artifacts", [])
+                    return artifacts if isinstance(artifacts, list) else []
             except Exception as e:
                 logger.warning(f"Error reading artifacts from metadata file for {run}: {e}")
 

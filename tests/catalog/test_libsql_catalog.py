@@ -303,7 +303,7 @@ def test_null_tags_and_artifacts_do_not_crash_listing(tmp_path: Any) -> None:
     try:
         cat._execute(
             "UPDATE run_meta SET data = ? WHERE project = ? AND run = ?",
-            ('{"run_id": "x", "tags": null, "artifacts": null}', "alpha", "broken"),
+            ('{"run_id": "x", "tags": null, "artifacts": null, "params": null, "config": null}', "alpha", "broken"),
         )
         cat._conn.commit()
         runs = cat.get_runs("alpha")
@@ -313,6 +313,11 @@ def test_null_tags_and_artifacts_do_not_crash_listing(tmp_path: Any) -> None:
         assert by_name["broken"].artifact_count == 0
         assert by_name["broken"].is_corrupted is True
         assert cat.get_run("alpha", "broken").is_corrupted is True
+        assert cat.get_run_artifacts("alpha", "broken") == []
+        meta = cat.get_run_config("alpha", "broken")
+        assert meta["run_id"] == "x"
+        assert meta["artifacts"] is None
+        assert meta["params"] is None
     finally:
         cat.close()
 

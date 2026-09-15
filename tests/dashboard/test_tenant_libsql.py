@@ -263,7 +263,33 @@ def test_local_libsql_delete_project_removes_artifact_dirs_not_db(tmp_path: Path
         configure_libsql_tenant_resolver(None)
 
 
-def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:
+def test_null_artifacts_do_not_500_run_detail(tmp_path: Path) -> None:
+    """A run_meta row with null artifacts/params must still render the run page."""
+    from aspara.catalog import LibsqlCatalog
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "broken", [(1000, 0, {"loss": 1.0})])
+    cat = LibsqlCatalog(base_dir=str(tenant_dir))
+    try:
+        cat._execute(
+            "INSERT INTO run_meta (project, run, data) VALUES (?, ?, ?)",
+            (
+                "proj",
+                "broken",
+                '{"run_id": "x", "tags": null, "artifacts": null, "params": null, "config": null}',
+            ),
+        )
+        cat._conn.commit()
+    finally:
+        cat.close()
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    try:
+        page = client.get("/projects/proj/runs/broken", headers={"X-Aspara-Tenant": "lib"})
+        assert page.status_code == 200
+        assert "broken" in page.text
+    finally:
+        configure_libsql_tenant_resolver(None)
     dir_a = tmp_path / "a"
     dir_b = tmp_path / "b"
     _seed_libsql(dir_a, "proj", "shared", [(1000, 0, {"loss": 1.0})])
