@@ -163,13 +163,20 @@ class LibsqlCatalog:
         """Build a RunInfo from metric timestamps and stored metadata."""
         is_finished = bool(meta.get("is_finished", False))
         exit_code = meta.get("exit_code")
-        params = meta.get("params", {})
-        param_count = len(params) if isinstance(params, dict) else 0
+        params = meta.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        param_count = len(params)
 
-        start_time = None
-        if meta.get("start_time") is not None:
-            with contextlib.suppress(ValueError):
-                start_time = parse_to_datetime(meta["start_time"])
+        artifacts = meta.get("artifacts")
+        if not isinstance(artifacts, list):
+            artifacts = []
+        tags = meta.get("tags")
+        if not isinstance(tags, list):
+            tags = []
+        is_corrupted = not isinstance(meta.get("artifacts", []), list) or not isinstance(meta.get("tags", []), list)
+
+        start_time = _meta_time(meta.get("start_time"))
         if start_time is None:
             start_time = _ms_to_dt(start_ts)
 
@@ -185,8 +192,9 @@ class LibsqlCatalog:
             start_time=start_time,
             last_update=_ms_to_dt(last_ts) or _meta_time(meta.get("finish_time")) or start_time,
             param_count=param_count,
-            artifact_count=len(meta.get("artifacts", [])),
-            tags=list(meta.get("tags", [])),
+            artifact_count=len(artifacts),
+            tags=[t for t in tags if isinstance(t, str)],
+            is_corrupted=is_corrupted,
             is_finished=is_finished,
             exit_code=exit_code,
             status=status,
@@ -256,9 +264,22 @@ class LibsqlCatalog:
             (project, project),
         )
         return [
-            self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+            self._safe_run_info(project, run, start_ts, last_ts)
             for run, start_ts, last_ts in cur.fetchall()
         ]
+
+    def _safe_run_info(self, project: str, run: str, start_ts: int | None, last_ts: int | None) -> RunInfo:
+        try:
+            return self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+        except Exception as e:
+            return RunInfo(
+                name=run,
+                param_count=0,
+                is_corrupted=True,
+                error_message=str(e),
+                start_time=_ms_to_dt(start_ts),
+                last_update=_ms_to_dt(last_ts),
+            )
 
     def get_run(self, project: str, run: str) -> RunInfo:
         """Return a single run's info, enriched with stored metadata.
@@ -278,7 +299,7 @@ class LibsqlCatalog:
             (project, run),
         ).fetchone()
         start_ts, last_ts = (row[0], row[1]) if row else (None, None)
-        return self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+        return self._safe_run_info(project, run, start_ts, last_ts)
 
     def load_metrics(
         self,

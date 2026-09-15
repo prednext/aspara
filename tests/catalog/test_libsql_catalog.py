@@ -285,3 +285,32 @@ def test_delete_project_removes_everything(tmp_path: Any) -> None:
             cat.delete_project("alpha")
     finally:
         cat.close()
+
+
+def test_null_tags_and_artifacts_do_not_crash_listing(tmp_path: Any) -> None:
+    """A parseable run_meta row with tags/artifacts null must not 500 the project page."""
+    from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+    storage = LibsqlRunMetadataStorage(str(tmp_path), "alpha", "broken")
+    try:
+        storage.set_init(run_id="x", tags=["ok"], notes="", timestamp=1000)
+    finally:
+        storage.close()
+    _seed(tmp_path, "alpha", "healthy", [_md(2000, 0, loss=1.0)])
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat._conn.execute(
+            "UPDATE run_meta SET data = ? WHERE project = ? AND run = ?",
+            ('{"run_id": "x", "tags": null, "artifacts": null}', "alpha", "broken"),
+        )
+        cat._conn.commit()
+        runs = cat.get_runs("alpha")
+        by_name = {r.name: r for r in runs}
+        assert "healthy" in by_name
+        assert by_name["broken"].tags == []
+        assert by_name["broken"].artifact_count == 0
+        assert by_name["broken"].is_corrupted is True
+        assert cat.get_run("alpha", "broken").is_corrupted is True
+    finally:
+        cat.close()
