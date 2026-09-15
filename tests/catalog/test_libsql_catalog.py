@@ -333,6 +333,38 @@ async def test_libsql_subscribe_stays_open_until_cancelled(tmp_path: Any) -> Non
         cat.close()
 
 
+def test_delete_run_retries_all_statements_after_dead_connection(tmp_path: Any) -> None:
+    """A dead connection mid-delete must not leave metrics without run_meta."""
+    _seed(tmp_path, "alpha", "gone", [_md(1000, 0, loss=2.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat.update_run_metadata("alpha", "gone", {"tags": ["x"]})
+
+        inner = cat._conn
+
+        class _DieOnMetaDelete:
+            def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+                if isinstance(sql, str) and "DELETE FROM run_meta" in sql:
+                    raise RuntimeError("connection closed")
+                return inner.execute(sql, params)
+
+            def commit(self) -> Any:
+                return inner.commit()
+
+            def close(self) -> None:
+                inner.close()
+
+        cat._conn = _DieOnMetaDelete()
+        cat.delete_run("alpha", "gone")
+
+        with pytest.raises(ProjectNotFoundError):
+            cat.get_runs("alpha")
+        assert len(cat.load_metrics("alpha", "gone")) == 0
+        assert cat.get_run_metadata("alpha", "gone")["tags"] == []
+    finally:
+        cat.close()
+
+
 def test_execute_reopens_dead_connection(tmp_path: Any) -> None:
     class _Dead:
         def execute(self, *_args: Any, **_kwargs: Any) -> Any:

@@ -126,6 +126,25 @@ class LibsqlCatalog:
             self._reopen()
             return self._conn.execute(sql, params)
 
+    def _execute_commit(self, statements: list[tuple[str, tuple[Any, ...]]]) -> None:
+        """Execute ``statements`` then commit, retrying the whole list after reconnect.
+
+        ``_execute`` reconnects per statement. A multi-statement write that
+        reconnects in the middle would commit only the suffix on the new
+        connection and drop the prefix with the old one.
+        """
+
+        def run() -> None:
+            for sql, params in statements:
+                self._conn.execute(sql, params)
+            self._conn.commit()
+
+        try:
+            run()
+        except Exception:
+            self._reopen()
+            run()
+
     def _load_run_meta(self, project: str, run: str) -> dict[str, Any]:
         """Return the stored run metadata (defaults filled) for a run."""
         cur = self._execute(
@@ -426,9 +445,10 @@ class LibsqlCatalog:
         if not self._run_exists(project, run):
             raise RunNotFoundError(f"Run '{run}' does not exist in project '{project}'")
 
-        self._execute("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run))
-        self._execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
-        self._conn.commit()
+        self._execute_commit([
+            ("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run)),
+            ("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run)),
+        ])
 
     # -- Project metadata ---------------------------------------------------
 
@@ -480,10 +500,11 @@ class LibsqlCatalog:
         if not self._project_exists(project):
             raise ProjectNotFoundError(f"Project '{project}' does not exist")
 
-        self._execute("DELETE FROM metrics WHERE project = ?", (project,))
-        self._execute("DELETE FROM run_meta WHERE project = ?", (project,))
-        self._execute("DELETE FROM project_meta WHERE project = ?", (project,))
-        self._conn.commit()
+        self._execute_commit([
+            ("DELETE FROM metrics WHERE project = ?", (project,)),
+            ("DELETE FROM run_meta WHERE project = ?", (project,)),
+            ("DELETE FROM project_meta WHERE project = ?", (project,)),
+        ])
 
     # -- Existence helpers --------------------------------------------------
 
