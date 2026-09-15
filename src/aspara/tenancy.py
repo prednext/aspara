@@ -9,6 +9,11 @@ A tenant resolves to one of:
 - a :class:`LibsqlTenant` spec (served from a libSQL/Turso database), or
 - a filesystem data directory (the single-tenant default, or a per-tenant dir).
 
+Artifact *bytes* (model snapshots, configs, …) are a separate location from the
+metrics/metadata database. Remote libSQL tenants (a ``database`` URL) do not
+store them locally — object storage comes later. Local libSQL tenants pin them
+under ``base_dir``; filesystem tenants use :func:`resolve_data_dir`.
+
 Resolvers are process-global and installed once at startup via the
 ``configure_*`` functions. When no resolver is installed, every request maps to
 the single configured (or default) data directory, i.e. behavior is identical to
@@ -54,6 +59,10 @@ class LibsqlTenant:
     def __post_init__(self) -> None:
         if not (self.base_dir or "").strip() and not (self.database or "").strip():
             raise ValueError("LibsqlTenant requires base_dir (local) or database (remote)")
+
+    def is_remote(self) -> bool:
+        """True when this tenant is served from a remote libSQL URL (Turso, sqld, …)."""
+        return bool((self.database or "").strip())
 
 
 # Mutable container for the single configured data directory (single-tenant default).
@@ -138,6 +147,25 @@ def resolve_data_dir(tenant_id: str) -> Path:
     if _custom_data_dir[0] is not None:
         return Path(_custom_data_dir[0])
     return Path(get_data_dir())
+
+
+def resolve_artifact_base_dir(tenant_id: str) -> Path | None:
+    """Return the local filesystem root for a tenant's artifact *bytes*, or None.
+
+    Remote libSQL tenants keep metrics and metadata in the tenant database.
+    Artifact bytes are not written to a shared local data directory in the
+    meantime (they will go to object storage later). Local libSQL tenants
+    (``base_dir`` only) pin bytes under that directory. Filesystem tenants use
+    :func:`resolve_data_dir`.
+    """
+    spec = resolve_libsql_tenant(tenant_id)
+    if spec is not None:
+        if spec.is_remote():
+            return None
+        if spec.base_dir:
+            return Path(spec.base_dir)
+        return None
+    return resolve_data_dir(tenant_id)
 
 
 def safe_tenant_id(value: str | None) -> str | None:

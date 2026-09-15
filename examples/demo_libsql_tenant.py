@@ -5,7 +5,8 @@ Two tenants are served side by side, selected per request by the
 
 - ``lib``: libSQL-backed. By default its metrics/metadata live in a local
   ``{demo_dir}/lib/aspara.db``. With ``--cloud`` they go to a Turso Cloud
-  database instead (``TURSO_DATABASE_URL`` + ``TURSO_AUTH_TOKEN``).
+  database instead (``TURSO_DATABASE_URL`` + ``TURSO_AUTH_TOKEN``); remote
+  tenants do not store artifact bytes.
 - ``fs``: filesystem-backed. Its data lives as ``*.jsonl`` / ``*.meta.json``
   files under ``{demo_dir}/fs/fs``.
 
@@ -50,7 +51,8 @@ from aspara.tenancy import (
     configure_tenant_resolver,
 )
 
-# Local demo files (fs tenant + optional artifact dir). Cloud metrics do not land here.
+# Local demo files (fs tenant + local-libSQL artifacts). Cloud metrics do not land here;
+# remote tenants do not store artifact bytes.
 DEMO_DIR = Path(__file__).resolve().parent.parent / ".aspara_demo"
 LIB_DIR = DEMO_DIR / "lib"
 FS_BASE_DIR = DEMO_DIR / "fs"
@@ -101,9 +103,7 @@ def configure_tenants(*, cloud: bool = False) -> str | None:
         url, token = _cloud_creds()
         configure_libsql_tenant_resolver(
             lambda t, database=url, auth_token=token: (
-                LibsqlTenant(base_dir=str(LIB_DIR), database=database, auth_token=auth_token)
-                if t == "lib"
-                else None
+                LibsqlTenant(database=database, auth_token=auth_token) if t == "lib" else None
             )
         )
         configure_tenant_resolver(lambda t: str(FS_BASE_DIR / t))
