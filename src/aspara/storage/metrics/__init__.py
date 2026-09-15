@@ -40,6 +40,48 @@ def resolve_metrics_storage_backend(storage_backend: str | None = None) -> str:
     return DEFAULT_METRICS_STORAGE_BACKEND
 
 
+def create_metrics_storage_with_backend(
+    backend: str,
+    *,
+    base_dir: str,
+    project_name: str,
+    run_name: str,
+    database: str | None = None,
+    auth_token: str | None = None,
+    reuse_connection: bool = False,
+) -> MetricsStorage:
+    """Create storage for an already-chosen backend name (env is not consulted).
+
+    ``backend`` must be one of jsonl, polars, or libsql. Used when the tenant
+    layer has already decided which implementation to use.
+    """
+    if backend not in _VALID_METRICS_STORAGE_BACKENDS:
+        msg = f"Invalid storage_backend value: {backend!r}. Valid values are: {sorted(_VALID_METRICS_STORAGE_BACKENDS)}"
+        raise ValueError(msg)
+    if backend == "polars":
+        return PolarsMetricsStorage(
+            base_dir=base_dir,
+            project_name=project_name,
+            run_name=run_name,
+        )
+    if backend == "libsql":
+        from .libsql import LibsqlMetricsStorage
+
+        return LibsqlMetricsStorage(
+            base_dir=base_dir,
+            project_name=project_name,
+            run_name=run_name,
+            database=database,
+            auth_token=auth_token,
+            reuse_connection=reuse_connection,
+        )
+    return JsonlMetricsStorage(
+        base_dir=base_dir,
+        project_name=project_name,
+        run_name=run_name,
+    )
+
+
 def create_metrics_storage(
     backend: str | None = None,
     *,
@@ -73,27 +115,15 @@ def create_metrics_storage(
         MetricsStorage instance (Jsonl/Polars/Libsql MetricsStorage).
     """
     resolved = resolve_metrics_storage_backend(backend)
-    if resolved == "polars":
-        return PolarsMetricsStorage(
-            base_dir=base_dir,
-            project_name=project_name,
-            run_name=run_name,
-        )
-    if resolved == "libsql":
-        # Lazy import so the optional ``libsql`` dependency is only required here.
-        from .libsql import LibsqlMetricsStorage
-
-        return LibsqlMetricsStorage(
-            base_dir=base_dir,
-            project_name=project_name,
-            run_name=run_name,
-            database=database if database is not None else get_libsql_url(),
-            auth_token=auth_token if auth_token is not None else get_libsql_auth_token(),
-        )
-    return JsonlMetricsStorage(
+    libsql_database = database if database is not None else get_libsql_url()
+    libsql_token = auth_token if auth_token is not None else get_libsql_auth_token()
+    return create_metrics_storage_with_backend(
+        resolved,
         base_dir=base_dir,
         project_name=project_name,
         run_name=run_name,
+        database=libsql_database,
+        auth_token=libsql_token,
     )
 
 
@@ -102,5 +132,6 @@ __all__ = [
     "JsonlMetricsStorage",
     "PolarsMetricsStorage",
     "create_metrics_storage",
+    "create_metrics_storage_with_backend",
     "resolve_metrics_storage_backend",
 ]
