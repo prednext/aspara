@@ -85,6 +85,17 @@ def test_put_stream_oversize_leaves_no_partial_or_dest(tmp_path: Path) -> None:
     assert not (artifacts / "model.pt.partial").exists()
 
 
+def test_abort_put_after_stage_leaves_existing_dest(tmp_path: Path) -> None:
+    store = FilesystemArtifactStore(tmp_path)
+    store.put_stream("proj", "r1", "model.pt", [b"old"], max_size=100)
+    dest = tmp_path / "proj" / "r1" / "artifacts" / "model.pt"
+    store.stage_stream("proj", "r1", "model.pt", [b"newbytes"], max_size=100)
+    assert dest.read_bytes() == b"old"
+    store.abort_put("proj", "r1", "model.pt")
+    assert dest.read_bytes() == b"old"
+    assert not dest.with_name("model.pt.partial").exists()
+
+
 def test_list_skips_partial_temp_files(tmp_path: Path) -> None:
     store = FilesystemArtifactStore(tmp_path)
     artifacts = tmp_path / "proj" / "r1" / "artifacts"

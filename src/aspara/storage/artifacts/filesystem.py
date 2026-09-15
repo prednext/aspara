@@ -64,7 +64,7 @@ class FilesystemArtifactStore(ArtifactStore):
 
         return StoredArtifact(name=name, size=dest_size)
 
-    def put_stream(
+    def stage_stream(
         self,
         project: str,
         run: str,
@@ -91,7 +91,6 @@ class FilesystemArtifactStore(ArtifactStore):
                     if written > max_size:
                         raise ArtifactTooLargeError(max_size)
                     f.write(chunk)
-            os.replace(partial, dest)
         except ArtifactTooLargeError:
             partial.unlink(missing_ok=True)
             raise
@@ -100,6 +99,20 @@ class FilesystemArtifactStore(ArtifactStore):
             raise
 
         return StoredArtifact(name=name, size=written)
+
+    def commit_put(self, project: str, run: str, name: str) -> None:
+        dest = self._artifacts_dir(project, run) / name
+        validators.validate_safe_path(dest, self._base_dir)
+        partial = dest.with_name(dest.name + ".partial")
+        validators.validate_safe_path(partial, self._base_dir)
+        os.replace(partial, dest)
+
+    def abort_put(self, project: str, run: str, name: str) -> None:
+        dest = self._artifacts_dir(project, run) / name
+        validators.validate_safe_path(dest, self._base_dir)
+        partial = dest.with_name(dest.name + ".partial")
+        validators.validate_safe_path(partial, self._base_dir)
+        partial.unlink(missing_ok=True)
 
     def list(self, project: str, run: str) -> Sequence[StoredArtifact]:
         artifacts_dir = self._artifacts_dir(project, run)
@@ -114,7 +127,6 @@ class FilesystemArtifactStore(ArtifactStore):
         with os.scandir(artifacts_dir) as it:
             for entry in it:
                 if entry.is_file(follow_symlinks=False):
-                    # put_stream writes to ``{name}.partial`` then replaces;
                     # leftover temps must not appear in ZIP listings.
                     if entry.name.endswith(".partial"):
                         continue
