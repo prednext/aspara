@@ -47,6 +47,8 @@ response = requests.get(f"{BASE_URL}/api/v1/health")
 print(response.json())  # {"status": "ok"}
 ```
 
+The tracker reads the tenant from `X-Aspara-Tenant` only (not `?tenant=` or the cookie). A present value that is not a safe name (alphanumeric, underscore, hyphen) returns **400** and does not fall back to the default tenant.
+
 ### Creating a Run
 
 ```python

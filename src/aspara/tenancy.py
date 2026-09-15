@@ -43,6 +43,10 @@ TENANT_COOKIE = "aspara_tenant"
 DEFAULT_TENANT = "default"
 
 
+class InvalidTenantIdError(ValueError):
+    """Raised when a request names a tenant id that is not a safe identifier."""
+
+
 @dataclass(frozen=True)
 class LibsqlTenant:
     """Connection spec for a libSQL-backed tenant.
@@ -189,6 +193,10 @@ def tenant_id_from_request(
 
     The header remains the primary seam (APIs, curl). Query and cookie exist so a
     browser can open the dashboard without a header-injecting extension.
+
+    A present value that is not a safe tenant id raises
+    :class:`InvalidTenantIdError` instead of falling through to another source
+    or to :data:`DEFAULT_TENANT`.
     """
     candidates = (
         headers.get(TENANT_HEADER),
@@ -196,9 +204,12 @@ def tenant_id_from_request(
         (cookies or {}).get(TENANT_COOKIE),
     )
     for candidate in candidates:
+        if not candidate:
+            continue
         tenant = safe_tenant_id(candidate)
-        if tenant is not None:
-            return tenant
+        if tenant is None:
+            raise InvalidTenantIdError("Invalid tenant. Only alphanumeric characters, underscores, and hyphens are allowed.")
+        return tenant
     return DEFAULT_TENANT
 
 

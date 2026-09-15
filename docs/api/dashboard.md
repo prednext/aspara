@@ -177,6 +177,17 @@ response = requests.delete(f"{BASE_URL}/api/projects/{project_name}")
 print(response.json())  # {"message": "Project 'project' deleted successfully"}
 ```
 
+## Tenant selection
+
+When a tenant resolver is installed, the dashboard picks a tenant from, in order:
+
+1. `X-Aspara-Tenant` header
+2. `?tenant=` query parameter
+3. `aspara_tenant` cookie
+4. the default tenant (`default`)
+
+A present value that is not a safe name (alphanumeric, underscore, hyphen) returns **400** and does not fall back to another tenant. A valid `?tenant=` also sets the cookie so later same-origin requests stay on that tenant.
+
 ## API Reference
 
 ::: aspara.dashboard.router

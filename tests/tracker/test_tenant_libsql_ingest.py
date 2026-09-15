@@ -327,3 +327,13 @@ def test_artifact_bytes_removed_when_metadata_write_fails(tmp_path: Path, monkey
         assert not artifact_path.with_name("model.pt.partial").exists()
     finally:
         configure_libsql_tenant_resolver(None)
+
+
+def test_invalid_tenant_header_is_rejected() -> None:
+    r = tracker.post(
+        "/api/v1/projects/proj/runs/r1/metrics",
+        json={"metrics": {"loss": 1.0}, "step": 0},
+        headers={"X-Aspara-Tenant": "../etc", **_CSRF},
+    )
+    assert r.status_code == 400
+    assert "Invalid tenant" in r.json()["detail"]

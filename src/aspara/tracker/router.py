@@ -18,6 +18,7 @@ from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.storage.artifacts import ArtifactTooLargeError, FilesystemArtifactStore
 from aspara.storage.metrics.base import MetricsStorage
 from aspara.tenancy import (
+    InvalidTenantIdError,
     resolve_artifact_base_dir,
     resolve_data_dir,
     resolve_libsql_tenant,
@@ -44,6 +45,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _tenant_id(request: Request) -> str:
+    """Read the tenant id from headers, or 400 if the value is not a safe id."""
+    try:
+        return tenant_id_from_headers(request.headers)
+    except InvalidTenantIdError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 def _metrics_storage_for_request(request: Request, project_name: str, run_name: str) -> MetricsStorage:
     """Build the metrics storage for the request's tenant.
 
@@ -53,7 +62,7 @@ def _metrics_storage_for_request(request: Request, project_name: str, run_name: 
     libSQL database (unconditionally libSQL, ignoring ASPARA_STORAGE_BACKEND);
     otherwise writes go to the tenant's filesystem data directory as before.
     """
-    tenant_id = tenant_id_from_headers(request.headers)
+    tenant_id = _tenant_id(request)
     spec = resolve_libsql_tenant(tenant_id)
     if spec is not None:
         # Lazy import so the optional ``libsql`` dependency is only required here.
@@ -83,7 +92,7 @@ def _run_metadata_for_request(request: Request, project_name: str, run_name: str
     filesystem ``*.meta.json`` file. The returned object exposes the same write API
     either way; callers must ``close()`` it (a no-op for filesystem storage).
     """
-    tenant_id = tenant_id_from_headers(request.headers)
+    tenant_id = _tenant_id(request)
     spec = resolve_libsql_tenant(tenant_id)
     if spec is not None:
         from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
@@ -120,7 +129,7 @@ def _update_project_tags_for_request(request: Request, project_name: str, new_ta
     """Append project-level tags for the request's tenant (libSQL or filesystem)."""
     if not new_tags:
         return
-    tenant_id = tenant_id_from_headers(request.headers)
+    tenant_id = _tenant_id(request)
     spec = resolve_libsql_tenant(tenant_id)
     if spec is not None:
         from aspara.storage.metadata.libsql import LibsqlProjectMetadataStorage
@@ -153,7 +162,7 @@ def _artifact_base_dir_for_request(request: Request) -> str | None:
     comes later). ``None`` means the upload must be rejected — never fall back
     to the shared default data directory.
     """
-    tenant_id = tenant_id_from_headers(request.headers)
+    tenant_id = _tenant_id(request)
     root = resolve_artifact_base_dir(tenant_id)
     return str(root) if root is not None else None
 
@@ -315,6 +324,8 @@ async def save_metrics(
     except ValueError as e:
         # Validation errors are safe to return
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         # Log the error but don't expose internal details
         logger.error(f"Error saving metrics: {e}")

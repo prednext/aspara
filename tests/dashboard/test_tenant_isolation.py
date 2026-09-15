@@ -128,3 +128,27 @@ def test_default_tenant_behavior_unchanged_without_resolver(tmp_path: Path) -> N
         assert _values(r2.json(), "loss", "r") == [1.0]
     finally:
         configure_data_dir(None)
+
+
+def test_invalid_tenant_id_is_rejected(tmp_path: Path) -> None:
+    """A present but unsafe tenant id is 400, not silently the default tenant."""
+    _write_run(tmp_path, "proj", "r", [(1000, 0, {"loss": 1.0})])
+    configure_data_dir(str(tmp_path))
+    browser = TestClient(app)
+    try:
+        via_query = browser.get("/api/projects/proj/runs/metrics?runs=r&tenant=../etc")
+        assert via_query.status_code == 400
+        assert "Invalid tenant" in via_query.json()["detail"]
+
+        via_header = browser.get(
+            "/api/projects/proj/runs/metrics?runs=r",
+            headers={"X-Aspara-Tenant": "my.tenant"},
+        )
+        assert via_header.status_code == 400
+
+        # After the 400, a request with no tenant still reaches the default data.
+        ok = browser.get("/api/projects/proj/runs/metrics?runs=r")
+        assert ok.status_code == 200
+        assert _values(ok.json(), "loss", "r") == [1.0]
+    finally:
+        configure_data_dir(None)

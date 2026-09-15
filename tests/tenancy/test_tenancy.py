@@ -33,7 +33,20 @@ def test_tenant_id_precedence_header_then_query_then_cookie() -> None:
     assert tenant_id_from_request({}, query={"tenant": "q"}, cookies={"aspara_tenant": "c"}) == "q"
     assert tenant_id_from_request({"X-Aspara-Tenant": "h"}, query={"tenant": "q"}) == "h"
     assert tenant_id_from_request({}, cookies={"aspara_tenant": "c"}) == "c"
-    assert tenant_id_from_request({}, query={"tenant": "../etc"}) == DEFAULT_TENANT
+
+
+def test_invalid_tenant_id_is_rejected() -> None:
+    from aspara.tenancy import InvalidTenantIdError
+
+    with pytest.raises(InvalidTenantIdError):
+        tenant_id_from_request({}, query={"tenant": "../etc"})
+    with pytest.raises(InvalidTenantIdError):
+        tenant_id_from_request({"X-Aspara-Tenant": "my.tenant"})
+    with pytest.raises(InvalidTenantIdError):
+        tenant_id_from_request({}, cookies={"aspara_tenant": "../etc"})
+    # A valid later source must not hide an invalid earlier one.
+    with pytest.raises(InvalidTenantIdError):
+        tenant_id_from_request({"X-Aspara-Tenant": "../etc"}, cookies={"aspara_tenant": "ok"})
 
 
 def test_resolve_artifact_base_dir_skips_remote_libsql(tmp_path: Path) -> None:

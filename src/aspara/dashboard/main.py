@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from aspara.catalog import DataDirWatcher
 from aspara.config import get_sse_dev_shutdown_timeout, is_dev_mode
@@ -20,6 +20,7 @@ from aspara.dashboard.dependencies import _clear_catalog_caches
 from aspara.tenancy import (
     TENANT_COOKIE,
     TENANT_QUERY_PARAM,
+    InvalidTenantIdError,
     safe_tenant_id,
     tenant_id_from_request,
 )
@@ -55,11 +56,16 @@ class TenantMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        request.state.tenant_id = tenant_id_from_request(
-            request.headers,
-            query=request.query_params,
-            cookies=request.cookies,
-        )
+        try:
+            request.state.tenant_id = tenant_id_from_request(
+                request.headers,
+                query=request.query_params,
+                cookies=request.cookies,
+            )
+        except InvalidTenantIdError as e:
+            response = JSONResponse({"detail": str(e)}, status_code=400)
+            response.delete_cookie(TENANT_COOKIE, path="/")
+            return response
         response = await call_next(request)
         queried = safe_tenant_id(request.query_params.get(TENANT_QUERY_PARAM))
         if queried is not None:
