@@ -107,6 +107,7 @@ def test_metadata_only_run_is_discoverable(tmp_path: Any) -> None:
         assert [r.name for r in runs] == ["init_only"]
         assert runs[0].run_id == "abc123"
         assert runs[0].tags == ["exp"]
+        assert projects[0].last_update == datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
         run = cat.get_run("alpha", "init_only")
         assert run.name == "init_only"

@@ -57,6 +57,15 @@ def _ms_to_dt(ms: int | float | None) -> datetime | None:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
 
 
+def _meta_time(value: Any) -> datetime | None:
+    """Parse a metadata timestamp (UNIX ms or ISO string) to UTC, or None."""
+    if value is None or isinstance(value, bool):
+        return None
+    with contextlib.suppress(ValueError, TypeError, OSError):
+        return parse_to_datetime(value)
+    return None
+
+
 class LibsqlCatalog:
     """Discover projects and runs from a single libSQL/Turso tenant database."""
 
@@ -99,6 +108,31 @@ class LibsqlCatalog:
             with contextlib.suppress(json.JSONDecodeError, TypeError):
                 meta.update(json.loads(row[0]))
         return meta
+
+    def _last_update_from_meta(self, project: str) -> datetime | None:
+        """Best-effort last_update for a project that has no metric rows.
+
+        Uses ``project_meta.updated_at`` / ``created_at``, then run_meta
+        ``finish_time`` / ``start_time``. Never substitutes ``datetime.now()``.
+        """
+        project_meta = self._load_project_meta(project)
+        for key in ("updated_at", "created_at"):
+            parsed = _meta_time(project_meta.get(key))
+            if parsed is not None:
+                return parsed
+        cur = self._conn.execute("SELECT data FROM run_meta WHERE project = ?", (project,))
+        latest: datetime | None = None
+        for (raw,) in cur.fetchall():
+            data: Any = None
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
+                data = json.loads(raw)
+            if not isinstance(data, dict):
+                continue
+            for key in ("finish_time", "start_time"):
+                parsed = _meta_time(data.get(key))
+                if parsed is not None and (latest is None or parsed > latest):
+                    latest = parsed
+        return latest
 
     def _upsert_run_meta(self, project: str, run: str, meta: dict[str, Any]) -> None:
         self._conn.execute(
@@ -149,7 +183,7 @@ class LibsqlCatalog:
             name=run,
             run_id=meta.get("run_id"),
             start_time=start_time,
-            last_update=_ms_to_dt(last_ts),
+            last_update=_ms_to_dt(last_ts) or _meta_time(meta.get("finish_time")) or start_time,
             param_count=param_count,
             artifact_count=len(meta.get("artifacts", [])),
             tags=list(meta.get("tags", [])),
@@ -184,7 +218,7 @@ class LibsqlCatalog:
                 ProjectInfo(
                     name=name,
                     run_count=int(run_count),
-                    last_update=_ms_to_dt(last_ts) or datetime.now(timezone.utc),
+                    last_update=_ms_to_dt(last_ts) or self._last_update_from_meta(name),
                 )
             )
         return projects
