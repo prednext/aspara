@@ -114,3 +114,19 @@ class ArtifactStore(ABC):
         Returns:
             A binary file-like object positioned at the start.
         """
+
+    @abstractmethod
+    def delete_run(self, project: str, run: str) -> None:
+        """Remove all artifact bytes stored for a run.
+
+        Missing storage is a no-op. Names must be validated so a bad project
+        or run cannot escape the store's root.
+        """
+
+    @abstractmethod
+    def delete_project(self, project: str) -> None:
+        """Remove all artifact bytes stored for a project (every run).
+
+        Missing storage is a no-op. Must not delete the store's root (where a
+        local libSQL tenant keeps ``aspara.db``).
+        """

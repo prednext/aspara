@@ -124,3 +124,18 @@ class FilesystemArtifactStore(ArtifactStore):
         path = artifacts_dir / name
         validators.validate_safe_path(path, artifacts_dir)
         return open(path, "rb")
+
+    def delete_run(self, project: str, run: str) -> None:
+        validators.validate_name(project, "project name")
+        validators.validate_name(run, "run name")
+        run_dir = self._base_dir / project / run
+        validators.validate_safe_path(run_dir, self._base_dir)
+        if run_dir.exists():
+            shutil.rmtree(run_dir)
+
+    def delete_project(self, project: str) -> None:
+        validators.validate_name(project, "project name")
+        project_dir = self._base_dir / project
+        validators.validate_safe_path(project_dir, self._base_dir)
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
