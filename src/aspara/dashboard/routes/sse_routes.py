@@ -87,7 +87,7 @@ async def stream_multiple_runs(
         shutdown_queue: asyncio.Queue[None] = asyncio.Queue()
         app_state.active_sse_connections.add(shutdown_queue)
 
-        # Use new subscribe() method with singleton watcher
+        # Use subscribe() (one watcher per tenant data_dir)
         targets = {project: run_list}
         metrics_iterator = run_catalog.subscribe(targets, since=since_dt).__aiter__()
         logger.info("[SSE] Created metrics_iterator using subscribe()")

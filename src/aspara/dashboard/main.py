@@ -166,8 +166,8 @@ async def lifespan(app: FastAPI):
         # Production mode: graceful shutdown with 30 second timeout
         await asyncio.sleep(0.5)
 
-    # Tear down the DataDirWatcher singleton so that the underlying
-    # awatch/inotify FD is closed and a subsequent reload (e.g. --dev
+    # Tear down DataDirWatcher instances so that the underlying
+    # awatch/inotify FDs are closed and a subsequent reload (e.g. --dev
     # auto-reload) does not reuse a stale watcher — which would leak
     # inotify FDs and deliver duplicate events.
     await DataDirWatcher.shutdown()
