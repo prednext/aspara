@@ -170,6 +170,99 @@ def test_libsql_tenant_without_artifacts_returns_404(tmp_path: Path) -> None:
         configure_libsql_tenant_resolver(None)
 
 
+def test_remote_libsql_tenant_artifact_zip_is_404(tmp_path: Path) -> None:
+    """Remote tenants have no local artifact bytes; ZIP must not read the default data_dir."""
+    configure_data_dir(str(tmp_path))
+    leaked = tmp_path / "proj" / "r1" / "artifacts"
+    leaked.mkdir(parents=True, exist_ok=True)
+    (leaked / "secret.pt").write_bytes(b"should-not-be-served")
+
+    configure_libsql_tenant_resolver(
+        lambda t: LibsqlTenant(database="libsql://example") if t == "lib" else None
+    )
+    try:
+        resp = client.get(
+            "/api/projects/proj/runs/r1/artifacts/download",
+            headers={"X-Aspara-Tenant": "lib"},
+        )
+        assert resp.status_code == 404
+    finally:
+        configure_libsql_tenant_resolver(None)
+        configure_data_dir(None)
+
+
+def _write_artifacts(base: Path, project: str, run: str, files: dict[str, bytes]) -> Path:
+    artifacts_dir = base / project / run / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    for name, body in files.items():
+        (artifacts_dir / name).write_bytes(body)
+    return artifacts_dir
+
+
+def test_local_libsql_delete_run_removes_artifact_bytes(tmp_path: Path) -> None:
+    """DELETE a local libSQL run must remove its artifact dir, not aspara.db."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    _seed_libsql(tenant_dir, "proj", "keep", [(1000, 0, {"loss": 2.0})])
+    artifacts_dir = _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+    keep_dir = _write_artifacts(tenant_dir, "proj", "keep", {"ok.pt": b"keep"})
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib", **_XHR}
+    try:
+        resp = client.delete("/api/projects/proj/runs/r1", headers=hdr)
+        assert resp.status_code == 204
+        assert not artifacts_dir.exists()
+        assert not (tenant_dir / "proj" / "r1").exists()
+        assert (keep_dir / "ok.pt").read_bytes() == b"keep"
+        assert (tenant_dir / "aspara.db").exists()
+        zip_resp = client.get("/api/projects/proj/runs/r1/artifacts/download", headers={"X-Aspara-Tenant": "lib"})
+        assert zip_resp.status_code == 404
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_run_same_name_recreate_does_not_mix_artifacts(tmp_path: Path) -> None:
+    """Recreating a deleted run must not ZIP leftover model files from the old run."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        dele = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert dele.status_code == 204
+
+        _seed_libsql(tenant_dir, "proj", "r1", [(2000, 0, {"loss": 0.1})])
+        zip_resp = client.get("/api/projects/proj/runs/r1/artifacts/download", headers=hdr)
+        assert zip_resp.status_code == 404
+        assert not (tenant_dir / "proj" / "r1" / "artifacts" / "old.pt").exists()
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_project_removes_artifact_dirs_not_db(tmp_path: Path) -> None:
+    """DELETE a local libSQL project removes every run's files and leaves aspara.db."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    _seed_libsql(tenant_dir, "proj", "r2", [(1000, 0, {"loss": 2.0})])
+    _seed_libsql(tenant_dir, "other", "r1", [(1000, 0, {"loss": 9.0})])
+    _write_artifacts(tenant_dir, "proj", "r1", {"a.pt": b"a"})
+    _write_artifacts(tenant_dir, "proj", "r2", {"b.pt": b"b"})
+    other_dir = _write_artifacts(tenant_dir, "other", "r1", {"c.pt": b"c"})
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    try:
+        resp = client.delete("/api/projects/proj", headers={"X-Aspara-Tenant": "lib", **_XHR})
+        assert resp.status_code == 204
+        assert not (tenant_dir / "proj").exists()
+        assert (tenant_dir / "aspara.db").exists()
+        assert (other_dir / "c.pt").read_bytes() == b"c"
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
 def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:
     dir_a = tmp_path / "a"
     dir_b = tmp_path / "b"

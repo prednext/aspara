@@ -16,7 +16,12 @@ from aspara.models import MetricRecord
 from aspara.storage import RunMetadataStorage, create_metrics_storage
 from aspara.storage.artifacts import ArtifactTooLargeError, FilesystemArtifactStore
 from aspara.storage.metrics.base import MetricsStorage
-from aspara.tenancy import resolve_data_dir, resolve_libsql_tenant, tenant_id_from_headers
+from aspara.tenancy import (
+    resolve_artifact_base_dir,
+    resolve_data_dir,
+    resolve_libsql_tenant,
+    tenant_id_from_headers,
+)
 from aspara.utils import validators
 from aspara.utils.metadata import update_project_metadata_tags
 
@@ -140,18 +145,16 @@ def _update_project_tags_for_request(request: Request, project_name: str, new_ta
     )
 
 
-def _artifact_base_dir_for_request(request: Request) -> str:
+def _artifact_base_dir_for_request(request: Request) -> str | None:
     """Return the local filesystem base dir for a tenant's artifact *bytes*.
 
-    Artifact metadata may live in libSQL, but the bytes stay on the local
-    filesystem (tenant pinning). A libSQL tenant with a configured ``base_dir``
-    uses it; otherwise the tenant's resolved data directory is used.
+    Remote libSQL tenants do not store artifact bytes locally (object storage
+    comes later). ``None`` means the upload must be rejected — never fall back
+    to the shared default data directory.
     """
     tenant_id = tenant_id_from_headers(request.headers)
-    spec = resolve_libsql_tenant(tenant_id)
-    if spec is not None and spec.base_dir:
-        return spec.base_dir
-    return str(resolve_data_dir(tenant_id))
+    root = resolve_artifact_base_dir(tenant_id)
+    return str(root) if root is not None else None
 
 
 def verify_csrf_header(x_requested_with: str | None = Header(None)) -> None:
@@ -380,13 +383,22 @@ async def upload_artifact(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
 
+        # Remote libSQL tenants have no local artifact root. Do not fall back
+        # to the shared data_dir (that would mix tenants); object storage later.
+        artifact_root = _artifact_base_dir_for_request(http_request)
+        if artifact_root is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Artifact uploads are not supported for remote tenants",
+            )
+
         # Save uploaded file with streaming size enforcement via the artifact
         # store. UploadFile.size may be None under chunked transfer encoding,
         # so we stream fixed-size chunks and let the store enforce the limit
         # (ASPARA_MAX_FILE_SIZE / ResourceLimits.max_file_size) and clean up
-        # partial files. Bytes always land on the local filesystem (tenant
-        # pinning); only the metadata may live in the tenant's libSQL database.
-        store = FilesystemArtifactStore(_artifact_base_dir_for_request(http_request))
+        # partial files. Local libSQL tenants pin bytes under ``base_dir``;
+        # metadata still lives in the tenant's libSQL database.
+        store = FilesystemArtifactStore(artifact_root)
         max_file_size = get_resource_limits().max_file_size
 
         def _iter_chunks() -> Iterator[bytes]:

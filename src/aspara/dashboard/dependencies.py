@@ -18,6 +18,7 @@ from fastapi import Path as PathParam
 
 from aspara.catalog import LibsqlCatalog, ProjectCatalog, RunCatalog
 from aspara.catalog.libsql_adapters import LibsqlProjectCatalog, LibsqlRunCatalog
+from aspara.storage.artifacts import FilesystemArtifactStore
 from aspara.tenancy import (
     DEFAULT_TENANT,
     LibsqlTenant,
@@ -25,6 +26,7 @@ from aspara.tenancy import (
     configure_libsql_tenant_resolver,
     configure_tenant_resolver,
     register_config_change_callback,
+    resolve_artifact_base_dir,
     resolve_data_dir,
     resolve_libsql_tenant,
 )
@@ -75,11 +77,17 @@ def _libsql_catalogs_for_key(
     """
     catalog = LibsqlCatalog(base_dir=base_dir, database=database, auth_token=auth_token)
     lock = threading.RLock()
-    # A local libSQL tenant has a real directory (used only by the artifact-ZIP
-    # route, which will simply 404 when no artifacts dir exists); a remote tenant
-    # has none, so point at a sentinel path that never resolves.
-    data_dir = Path(base_dir) if base_dir else Path("__aspara_libsql_no_local_dir__")
-    return LibsqlProjectCatalog(catalog, lock), LibsqlRunCatalog(catalog, lock), data_dir
+    # Local libSQL tenants pin artifact bytes under ``base_dir``; remote tenants
+    # (a database URL) do not, so delete/ZIP must not touch a shared data_dir.
+    artifact_store = (
+        FilesystemArtifactStore(base_dir) if base_dir and not (database or "").strip() else None
+    )
+    data_dir = Path(base_dir) if base_dir else Path(".")
+    return (
+        LibsqlProjectCatalog(catalog, lock, artifact_store),
+        LibsqlRunCatalog(catalog, lock, artifact_store),
+        data_dir,
+    )
 
 
 def _tenant_id_from_request(request: Request | None) -> str:
@@ -124,8 +132,16 @@ def get_run_catalog(request: Request) -> RunCatalogLike:
 
 
 def get_data_dir_path(request: Request) -> Path:
-    """Get the data directory for the request's tenant."""
-    return _catalogs_for_request(request)[2]
+    """Get the local artifact-bytes directory for the request's tenant.
+
+    Remote libSQL tenants do not store artifact bytes locally, so this raises
+    404 and the ZIP route never falls back to the shared default data_dir.
+    """
+    tenant_id = _tenant_id_from_request(request)
+    root = resolve_artifact_base_dir(tenant_id)
+    if root is None:
+        raise HTTPException(status_code=404, detail="No artifacts found for this run")
+    return root
 
 
 def _clear_catalog_caches() -> None:

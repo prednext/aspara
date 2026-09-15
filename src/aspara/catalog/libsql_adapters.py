@@ -14,7 +14,9 @@ parallel). Correctness is favored over throughput for this first wiring.
 
 Not yet supported for libSQL tenants (kept as graceful no-ops / gaps):
 - ``subscribe`` (SSE change streaming) yields nothing -- there is no watcher.
-- Artifact *file* bytes / ZIP download; only artifact metadata is available.
+- Artifact *bytes* for *remote* tenants (a ``database`` URL). Local libSQL
+  tenants still pin files under ``base_dir``; remote tenants keep only
+  artifact metadata until object storage exists. ZIP download 404s for them.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from typing import Any
 import polars as pl
 
 from aspara.models import MetricRecord, StatusRecord
+from aspara.storage.artifacts.base import ArtifactStore
 
 from .libsql_catalog import LibsqlCatalog
 from .project_catalog import ProjectInfo
@@ -37,9 +40,15 @@ from .run_catalog import RunInfo
 class LibsqlProjectCatalog:
     """``ProjectCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""
 
-    def __init__(self, catalog: LibsqlCatalog, lock: threading.RLock | None = None) -> None:
+    def __init__(
+        self,
+        catalog: LibsqlCatalog,
+        lock: threading.RLock | None = None,
+        artifact_store: ArtifactStore | None = None,
+    ) -> None:
         self._cat = catalog
         self._lock = lock or threading.RLock()
+        self._artifacts = artifact_store
 
     def exists(self, name: str) -> bool:
         with self._lock:
@@ -64,14 +73,22 @@ class LibsqlProjectCatalog:
     def delete(self, name: str) -> None:
         with self._lock:
             self._cat.delete_project(name)
+            if self._artifacts is not None:
+                self._artifacts.delete_project(name)
 
 
 class LibsqlRunCatalog:
     """``RunCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""
 
-    def __init__(self, catalog: LibsqlCatalog, lock: threading.RLock | None = None) -> None:
+    def __init__(
+        self,
+        catalog: LibsqlCatalog,
+        lock: threading.RLock | None = None,
+        artifact_store: ArtifactStore | None = None,
+    ) -> None:
         self._cat = catalog
         self._lock = lock or threading.RLock()
+        self._artifacts = artifact_store
 
     def get_runs(self, project: str) -> list[RunInfo]:
         with self._lock:
@@ -96,6 +113,8 @@ class LibsqlRunCatalog:
     def delete(self, project: str, run: str) -> None:
         with self._lock:
             self._cat.delete_run(project, run)
+            if self._artifacts is not None:
+                self._artifacts.delete_run(project, run)
 
     def get_artifacts(self, project: str, run: str) -> list[dict[str, Any]]:
         with self._lock:

@@ -13,6 +13,7 @@ Skipped automatically when the optional ``libsql`` package is not installed.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ pytest.importorskip("libsql")
 from fastapi.testclient import TestClient
 
 from aspara.dashboard.main import app as dashboard_app
-from aspara.tenancy import LibsqlTenant, configure_libsql_tenant_resolver
+from aspara.tenancy import LibsqlTenant, configure_data_dir, configure_libsql_tenant_resolver
 from aspara.tracker.main import app as tracker_app
 
 tracker = TestClient(tracker_app)
@@ -211,5 +212,54 @@ def test_filesystem_tenant_metadata_unaffected(tmp_path: Path, monkeypatch: pyte
         assert created.status_code == 200
         assert (tmp_path / "proj" / "r.meta.json").exists()
         assert not (tmp_path / "aspara.db").exists()
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_remote_libsql_tenant_rejects_artifact_upload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remote tenants must not write artifact bytes into the shared data_dir."""
+    monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+    configure_data_dir(str(tmp_path))
+    configure_libsql_tenant_resolver(
+        lambda t: LibsqlTenant(database="libsql://example") if t == "lib" else None
+    )
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        files = {"file": ("model.pt", io.BytesIO(b"weights"), "application/octet-stream")}
+        resp = tracker.post(
+            "/api/v1/projects/proj/runs/r1/artifacts",
+            files=files,
+            headers={**hdr, **_CSRF},
+        )
+        assert resp.status_code == 501
+        assert not (tmp_path / "proj" / "r1" / "artifacts" / "model.pt").exists()
+        assert list(tmp_path.rglob("model.pt")) == []
+    finally:
+        configure_libsql_tenant_resolver(None)
+        configure_data_dir(None)
+
+
+def test_local_libsql_tenant_artifact_upload_lands_in_base_dir(tmp_path: Path) -> None:
+    """A local libSQL tenant still pins artifact bytes under its base_dir."""
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        created = tracker.post(
+            "/api/v1/projects/proj/runs",
+            json={"name": "r1"},
+            headers={**hdr, **_CSRF},
+        )
+        assert created.status_code == 200
+
+        files = {"file": ("model.pt", io.BytesIO(b"weights"), "application/octet-stream")}
+        resp = tracker.post(
+            "/api/v1/projects/proj/runs/r1/artifacts",
+            files=files,
+            headers={**hdr, **_CSRF},
+        )
+        assert resp.status_code == 200
+        artifact_path = tenant_dir / "proj" / "r1" / "artifacts" / "model.pt"
+        assert artifact_path.read_bytes() == b"weights"
     finally:
         configure_libsql_tenant_resolver(None)
