@@ -14,18 +14,20 @@ from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, Up
 
 from aspara.config import get_resource_limits, is_read_only
 from aspara.models import MetricRecord
-from aspara.storage import RunMetadataStorage, create_metrics_storage
-from aspara.storage.artifacts import ArtifactTooLargeError, FilesystemArtifactStore
+from aspara.storage import RunMetadataStorage
+from aspara.storage.artifacts import ArtifactStore, ArtifactTooLargeError
 from aspara.storage.metrics.base import MetricsStorage
+from aspara.storage.tenant import (
+    artifact_store_for_tenant,
+    metrics_storage_for_tenant,
+    project_metadata_for_tenant,
+    run_metadata_for_tenant,
+)
 from aspara.tenancy import (
     InvalidTenantIdError,
-    resolve_artifact_base_dir,
-    resolve_data_dir,
-    resolve_libsql_tenant,
     tenant_id_from_headers,
 )
 from aspara.utils import validators
-from aspara.utils.metadata import update_project_metadata_tags
 
 from .models import (
     ArtifactUploadResponse,
@@ -56,29 +58,11 @@ def _tenant_id(request: Request) -> str:
 def _metrics_storage_for_tenant(tenant_id: str, project_name: str, run_name: str) -> MetricsStorage:
     """Build the metrics storage for a tenant.
 
-    A libSQL tenant's metrics are written to its libSQL database (unconditionally
-    libSQL, ignoring ASPARA_STORAGE_BACKEND); otherwise writes go to the tenant's
-    filesystem data directory as before.
+    LibSQL tenants write to their database (pooled connection). Filesystem
+    tenants write jsonl/polars under the tenant data dir — never a process-wide
+    ``ASPARA_LIBSQL_URL``.
     """
-    spec = resolve_libsql_tenant(tenant_id)
-    if spec is not None:
-        # Lazy import so the optional ``libsql`` dependency is only required here.
-        from aspara.storage.metrics.libsql import LibsqlMetricsStorage
-
-        return LibsqlMetricsStorage(
-            base_dir=spec.base_dir or "",
-            project_name=project_name,
-            run_name=run_name,
-            database=spec.database,
-            auth_token=spec.auth_token,
-        )
-    data_dir = resolve_data_dir(tenant_id)
-    return create_metrics_storage(
-        backend=None,
-        base_dir=str(data_dir),
-        project_name=project_name,
-        run_name=run_name,
-    )
+    return metrics_storage_for_tenant(tenant_id, project_name, run_name)
 
 
 def _run_metadata_for_request(request: Request, project_name: str, run_name: str) -> RunMetadataStorage:
@@ -89,24 +73,7 @@ def _run_metadata_for_request(request: Request, project_name: str, run_name: str
     filesystem ``*.meta.json`` file. The returned object exposes the same write API
     either way; callers must ``close()`` it (a no-op for filesystem storage).
     """
-    tenant_id = _tenant_id(request)
-    spec = resolve_libsql_tenant(tenant_id)
-    if spec is not None:
-        from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
-
-        return LibsqlRunMetadataStorage(
-            spec.base_dir or "",
-            project_name,
-            run_name,
-            database=spec.database,
-            auth_token=spec.auth_token,
-        )
-    data_dir = resolve_data_dir(tenant_id)
-    return RunMetadataStorage(
-        base_dir=str(data_dir),
-        project_name=project_name,
-        run_name=run_name,
-    )
+    return run_metadata_for_tenant(_tenant_id(request), project_name, run_name)
 
 
 def _merge_tags(existing: list[str] | None, new_tags: list[str]) -> list[str]:
@@ -127,41 +94,24 @@ def _update_project_tags_for_request(request: Request, project_name: str, new_ta
     if not new_tags:
         return
     tenant_id = _tenant_id(request)
-    spec = resolve_libsql_tenant(tenant_id)
-    if spec is not None:
-        from aspara.storage.metadata.libsql import LibsqlProjectMetadataStorage
-
-        storage = LibsqlProjectMetadataStorage(
-            spec.base_dir or "",
-            project_name,
-            database=spec.database,
-            auth_token=spec.auth_token,
-        )
-        try:
-            merged = _merge_tags(storage.get_metadata().get("tags"), new_tags)
-            storage.update_metadata({"tags": merged})
-        except Exception as e:  # pragma: no cover - metadata writes must not break tracking
-            logger.warning(f"Failed to update project metadata tags for '{project_name}': {e}")
-        finally:
-            storage.close()
-        return
-    update_project_metadata_tags(
-        base_dir=resolve_data_dir(tenant_id),
-        project_name=project_name,
-        new_tags=new_tags,
-    )
+    storage = project_metadata_for_tenant(tenant_id, project_name)
+    try:
+        merged = _merge_tags(storage.get_metadata().get("tags"), new_tags)
+        storage.update_metadata({"tags": merged})
+    except Exception as e:  # pragma: no cover - metadata writes must not break tracking
+        logger.warning(f"Failed to update project metadata tags for '{project_name}': {e}")
+    finally:
+        storage.close()
 
 
-def _artifact_base_dir_for_request(request: Request) -> str | None:
-    """Return the local filesystem base dir for a tenant's artifact *bytes*.
+def _artifact_store_for_request(request: Request) -> ArtifactStore | None:
+    """Return the artifact-byte store for this tenant, or None if remote-only.
 
     Remote libSQL tenants do not store artifact bytes locally (object storage
     comes later). ``None`` means the upload must be rejected — never fall back
     to the shared default data directory.
     """
-    tenant_id = _tenant_id(request)
-    root = resolve_artifact_base_dir(tenant_id)
-    return str(root) if root is not None else None
+    return artifact_store_for_tenant(_tenant_id(request))
 
 
 def verify_csrf_header(x_requested_with: str | None = Header(None)) -> None:
@@ -398,8 +348,8 @@ async def upload_artifact(
 
         # Remote libSQL tenants have no local artifact root. Do not fall back
         # to the shared data_dir (that would mix tenants); object storage later.
-        artifact_root = _artifact_base_dir_for_request(http_request)
-        if artifact_root is None:
+        store = _artifact_store_for_request(http_request)
+        if store is None:
             raise HTTPException(
                 status_code=501,
                 detail="Artifact uploads are not supported for remote tenants",
@@ -411,7 +361,6 @@ async def upload_artifact(
         # (ASPARA_MAX_FILE_SIZE / ResourceLimits.max_file_size) and clean up
         # partial files. Local libSQL tenants pin bytes under ``base_dir``;
         # metadata still lives in the tenant's libSQL database.
-        store = FilesystemArtifactStore(artifact_root)
         max_file_size = get_resource_limits().max_file_size
 
         def _iter_chunks() -> Iterator[bytes]:
@@ -422,14 +371,16 @@ async def upload_artifact(
                     break
                 yield chunk
 
+        staged = False
         try:
-            stored = store.put_stream(
+            stored = store.stage_stream(
                 project_name,
                 run_name,
                 artifact_name,
                 _iter_chunks(),
                 max_size=max_file_size,
             )
+            staged = True
         except ArtifactTooLargeError:
             raise HTTPException(
                 status_code=413,
@@ -461,15 +412,17 @@ async def upload_artifact(
         if category:
             artifact_data["category"] = category
 
-        # Publish bytes, then record them in metadata. If opening the metadata
-        # store or add_artifact fails, drop the published file so a later ZIP
-        # cannot mix in an unlisted artifact.
+        # Record metadata, then publish staged bytes. If metadata fails, abort
+        # the temp file only — an existing artifact of the same name stays.
         metadata_storage = None
         try:
             metadata_storage = _run_metadata_for_request(http_request, project_name, run_name)
             metadata_storage.add_artifact(artifact_data)
+            store.commit_put(project_name, run_name, artifact_name)
+            staged = False
         except Exception:
-            store.delete_file(project_name, run_name, artifact_name)
+            if staged:
+                store.abort_put(project_name, run_name, artifact_name)
             raise
         finally:
             if metadata_storage is not None:

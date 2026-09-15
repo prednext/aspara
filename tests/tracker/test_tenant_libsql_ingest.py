@@ -99,6 +99,62 @@ def test_libsql_ingest_connects_inside_to_thread(tmp_path: Path, monkeypatch: py
         configure_libsql_tenant_resolver(None)
 
 
+def test_libsql_ingest_reuses_pooled_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second metric POST for the same tenant must not open a new libSQL connection."""
+    import aspara.storage.metrics.libsql as libsql_mod
+
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    connects = {"n": 0}
+    orig_connect = libsql_mod.connect_libsql
+
+    def _connect(*args: Any, **kwargs: Any) -> Any:
+        connects["n"] += 1
+        return orig_connect(*args, **kwargs)
+
+    monkeypatch.setattr(libsql_mod, "connect_libsql", _connect)
+    hdr = {"X-Aspara-Tenant": "lib", **_CSRF}
+    try:
+        for step in (0, 1):
+            r = tracker.post(
+                "/api/v1/projects/proj/runs/r1/metrics",
+                json={"metrics": {"loss": 1.0}, "step": step},
+                headers=hdr,
+            )
+            assert r.status_code == 200
+        assert connects["n"] == 1
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_filesystem_tenant_ignores_process_libsql_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Filesystem ingest must not fall through to ASPARA_LIBSQL_URL."""
+    import aspara.storage.metrics.libsql as libsql_mod
+
+    monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ASPARA_STORAGE_BACKEND", "libsql")
+    monkeypatch.setenv("ASPARA_LIBSQL_URL", "libsql://should-not-connect")
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir="/nope") if t == "lib" else None)
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("filesystem tenant must not connect via ASPARA_LIBSQL_URL")
+
+    monkeypatch.setattr(libsql_mod, "connect_libsql", _boom)
+    try:
+        r = tracker.post(
+            "/api/v1/projects/proj/runs/r/metrics",
+            json={"metrics": {"loss": 7.0}, "step": 0},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200
+        assert (tmp_path / "proj" / "r.jsonl").exists()
+        assert not (tmp_path / "aspara.db").exists()
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
 def test_filesystem_tenant_unaffected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With a libSQL resolver that returns None for the default tenant, writes stay on disk."""
     monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
@@ -360,6 +416,44 @@ def test_artifact_bytes_removed_when_metadata_write_fails(tmp_path: Path, monkey
         assert resp.status_code == 500
         artifact_path = tenant_dir / "proj" / "r1" / "artifacts" / "model.pt"
         assert not artifact_path.exists()
+        assert not artifact_path.with_name("model.pt.partial").exists()
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_reupload_keeps_existing_bytes_when_metadata_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        assert tracker.post(
+            "/api/v1/projects/proj/runs",
+            json={"name": "r1"},
+            headers={**hdr, **_CSRF},
+        ).status_code == 200
+        files = {"file": ("model.pt", io.BytesIO(b"old"), "application/octet-stream")}
+        assert tracker.post(
+            "/api/v1/projects/proj/runs/r1/artifacts",
+            files=files,
+            headers={**hdr, **_CSRF},
+        ).status_code == 200
+        artifact_path = tenant_dir / "proj" / "r1" / "artifacts" / "model.pt"
+        assert artifact_path.read_bytes() == b"old"
+
+        def _boom(self: Any, artifact_data: Any) -> None:
+            raise RuntimeError("meta down")
+
+        monkeypatch.setattr("aspara.storage.metadata.libsql.LibsqlRunMetadataStorage.add_artifact", _boom)
+        files = {"file": ("model.pt", io.BytesIO(b"new"), "application/octet-stream")}
+        resp = tracker.post(
+            "/api/v1/projects/proj/runs/r1/artifacts",
+            files=files,
+            headers={**hdr, **_CSRF},
+        )
+        assert resp.status_code == 500
+        assert artifact_path.read_bytes() == b"old"
         assert not artifact_path.with_name("model.pt.partial").exists()
     finally:
         configure_libsql_tenant_resolver(None)
