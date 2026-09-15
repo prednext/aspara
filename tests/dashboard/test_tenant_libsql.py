@@ -263,6 +263,69 @@ def test_local_libsql_delete_project_removes_artifact_dirs_not_db(tmp_path: Path
         configure_libsql_tenant_resolver(None)
 
 
+def test_local_libsql_delete_keeps_run_when_artifact_bytes_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If rmtree fails, the DB row must still be there so delete can be retried."""
+    from aspara.storage.artifacts.filesystem import FilesystemArtifactStore
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    artifacts_dir = _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+
+    def _boom(self: FilesystemArtifactStore, project: str, run: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(FilesystemArtifactStore, "delete_run", _boom)
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        resp = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert resp.status_code == 500
+        assert (artifacts_dir / "old.pt").read_bytes() == b"stale-weights"
+        got = client.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert _values(got.json(), "loss", "r1") == [1.0]
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_retries_after_db_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bytes are removed first; a later DB failure must not block a retry."""
+    from aspara.catalog.libsql_catalog import LibsqlCatalog
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    artifacts_dir = _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+
+    calls = {"n": 0}
+    real = LibsqlCatalog.delete_run
+
+    def _flaky(self: LibsqlCatalog, project: str, run: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("db down")
+        return real(self, project, run)
+
+    monkeypatch.setattr(LibsqlCatalog, "delete_run", _flaky)
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        first = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert first.status_code == 500
+        assert not artifacts_dir.exists()
+        got = client.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert _values(got.json(), "loss", "r1") == [1.0]
+
+        second = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert second.status_code == 204
+        gone = client.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert gone.json()["metrics"] == {}
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
 def test_null_artifacts_do_not_500_run_detail(tmp_path: Path) -> None:
     """A run_meta row with null artifacts/params must still render the run page."""
     from aspara.catalog import LibsqlCatalog
@@ -290,6 +353,9 @@ def test_null_artifacts_do_not_500_run_detail(tmp_path: Path) -> None:
         assert "broken" in page.text
     finally:
         configure_libsql_tenant_resolver(None)
+
+
+def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:
     dir_a = tmp_path / "a"
     dir_b = tmp_path / "b"
     _seed_libsql(dir_a, "proj", "shared", [(1000, 0, {"loss": 1.0})])

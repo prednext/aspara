@@ -73,9 +73,12 @@ class LibsqlProjectCatalog:
 
     def delete(self, name: str) -> None:
         with self._lock:
-            self._cat.delete_project(name)
+            # Bytes first: if the DB delete fails, the project row remains and
+            # delete can be retried. DB-first would leave files that a same-name
+            # recreate would mix into ZIP.
             if self._artifacts is not None:
                 self._artifacts.delete_project(name)
+            self._cat.delete_project(name)
 
     def close(self) -> None:
         """Close the shared tenant database connection."""
@@ -117,9 +120,11 @@ class LibsqlRunCatalog:
 
     def delete(self, project: str, run: str) -> None:
         with self._lock:
-            self._cat.delete_run(project, run)
+            # Bytes first so a failed DB delete can be retried without mixing
+            # leftover files into a same-name recreate.
             if self._artifacts is not None:
                 self._artifacts.delete_run(project, run)
+            self._cat.delete_run(project, run)
 
     def get_artifacts(self, project: str, run: str) -> list[dict[str, Any]]:
         with self._lock:
