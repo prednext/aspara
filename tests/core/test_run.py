@@ -694,6 +694,11 @@ class TestRunFactory:
             assert run.name == "test_run"
             assert run.project == "default"
 
+    def test_localrun_rejects_libsql_backend(self):
+        """LocalRun must not write libSQL while the default dashboard still reads JSONL."""
+        with tempfile.TemporaryDirectory() as temp_dir, pytest.raises(ValueError, match="libsql"):
+            LocalRun(name="test_run", dir=temp_dir, storage_backend="libsql")
+
     def test_localrun_has_same_functionality_as_old_run(self):
         """Test that LocalRun has the same functionality as the old Run class."""
         with tempfile.TemporaryDirectory() as temp_dir:
