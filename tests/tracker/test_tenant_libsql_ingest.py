@@ -63,6 +63,42 @@ def test_libsql_tenant_metrics_ingested_and_served(tmp_path: Path) -> None:
         configure_libsql_tenant_resolver(None)
 
 
+def test_libsql_ingest_connects_inside_to_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """connect/DDL must run in the worker passed to to_thread, not on the loop."""
+    import aspara.tracker.router as tracker_router
+    from aspara.storage.metrics.libsql import LibsqlMetricsStorage
+
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    connected_in_worker = {"value": False}
+    orig_init = LibsqlMetricsStorage.__init__
+
+    def _init(self: Any, *args: Any, **kwargs: Any) -> None:
+        connected_in_worker["value"] = True
+        orig_init(self, *args, **kwargs)
+
+    orig_to_thread = tracker_router.asyncio.to_thread
+
+    async def _to_thread(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        connected_in_worker["value"] = False
+        result = await orig_to_thread(fn, *args, **kwargs)
+        assert connected_in_worker["value"] is True
+        return result
+
+    monkeypatch.setattr(LibsqlMetricsStorage, "__init__", _init)
+    monkeypatch.setattr(tracker_router.asyncio, "to_thread", _to_thread)
+    try:
+        r = tracker.post(
+            "/api/v1/projects/proj/runs/r1/metrics",
+            json={"metrics": {"loss": 1.0}, "step": 0},
+            headers={"X-Aspara-Tenant": "lib", **_CSRF},
+        )
+        assert r.status_code == 200
+        assert connected_in_worker["value"] is True
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
 def test_filesystem_tenant_unaffected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With a libSQL resolver that returns None for the default tenant, writes stay on disk."""
     monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))

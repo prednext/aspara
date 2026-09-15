@@ -53,16 +53,13 @@ def _tenant_id(request: Request) -> str:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-def _metrics_storage_for_request(request: Request, project_name: str, run_name: str) -> MetricsStorage:
-    """Build the metrics storage for the request's tenant.
+def _metrics_storage_for_tenant(tenant_id: str, project_name: str, run_name: str) -> MetricsStorage:
+    """Build the metrics storage for a tenant.
 
-    The tracker is mounted as its own app (no dashboard middleware), so it reads
-    the tenant from the request header directly and resolves it through the shared
-    :mod:`aspara.tenancy` registry. A libSQL tenant's metrics are written to its
-    libSQL database (unconditionally libSQL, ignoring ASPARA_STORAGE_BACKEND);
-    otherwise writes go to the tenant's filesystem data directory as before.
+    A libSQL tenant's metrics are written to its libSQL database (unconditionally
+    libSQL, ignoring ASPARA_STORAGE_BACKEND); otherwise writes go to the tenant's
+    filesystem data directory as before.
     """
-    tenant_id = _tenant_id(request)
     spec = resolve_libsql_tenant(tenant_id)
     if spec is not None:
         # Lazy import so the optional ``libsql`` dependency is only required here.
@@ -310,22 +307,25 @@ async def save_metrics(
     if is_read_only():
         return MetricsResponse()
 
-    try:
-        # Create storage for this project/run, routed to the request's tenant
-        # (libSQL database for a libSQL tenant, else the filesystem data dir).
-        storage = _metrics_storage_for_request(request, project_name, run_name)
+    # Tenant id is resolved here so an invalid header stays a 400 on the loop.
+    # libSQL connect/DDL/INSERT/close is sync and can RTT; run the whole write
+    # off the event loop (connect was previously built before to_thread).
+    tenant_id = _tenant_id(request)
+    payload = data.model_dump(mode="json")
+
+    def _write() -> None:
+        storage = _metrics_storage_for_tenant(tenant_id, project_name, run_name)
         try:
-            # Use mode='json' to convert datetime to ISO format string.
-            # libSQL connect/DDL/INSERT is sync and can RTT; don't block the loop.
-            await asyncio.to_thread(storage.save, data.model_dump(mode="json"))
-            return MetricsResponse()
+            storage.save(payload)
         finally:
             storage.close()
+
+    try:
+        await asyncio.to_thread(_write)
+        return MetricsResponse()
     except ValueError as e:
         # Validation errors are safe to return
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except HTTPException:
-        raise
     except Exception as e:
         # Log the error but don't expose internal details
         logger.error(f"Error saving metrics: {e}")
