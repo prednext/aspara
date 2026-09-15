@@ -3,6 +3,7 @@
 RESTful API endpoints using FastAPI APIRouter.
 """
 
+import asyncio
 import logging
 import os
 import uuid
@@ -305,8 +306,9 @@ async def save_metrics(
         # (libSQL database for a libSQL tenant, else the filesystem data dir).
         storage = _metrics_storage_for_request(request, project_name, run_name)
         try:
-            # Use mode='json' to convert datetime to ISO format string
-            storage.save(data.model_dump(mode="json"))
+            # Use mode='json' to convert datetime to ISO format string.
+            # libSQL connect/DDL/INSERT is sync and can RTT; don't block the loop.
+            await asyncio.to_thread(storage.save, data.model_dump(mode="json"))
             return MetricsResponse()
         finally:
             storage.close()

@@ -69,16 +69,21 @@ class LibsqlRunMetadataStorage(RunMetadataStorage):
         self.project_name = project_name
         self.run_name = run_name
 
-        self._conn: Any = connect_libsql(
+        conn = connect_libsql(
             base_dir if database is None else None,
             database=database,
             auth_token=auth_token,
         )
-        self._conn.execute(RUN_META_DDL)
-        self._conn.commit()
-
-        self._metadata: dict[str, Any] = self.default_metadata()
-        self._load()
+        try:
+            conn.execute(RUN_META_DDL)
+            conn.commit()
+            self._conn = conn
+            self._metadata: dict[str, Any] = self.default_metadata()
+            self._load()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                conn.close()
+            raise
 
     def _load(self) -> None:
         cur = self._conn.execute(
@@ -137,16 +142,21 @@ class LibsqlProjectMetadataStorage(ProjectMetadataStorage):
 
         self.project_name = project_name
 
-        self._conn: Any = connect_libsql(
+        conn = connect_libsql(
             base_dir if database is None else None,
             database=database,
             auth_token=auth_token,
         )
-        self._conn.execute(PROJECT_META_DDL)
-        self._conn.commit()
-
-        self._metadata: dict[str, Any] = self.default_metadata()
-        self._load()
+        try:
+            conn.execute(PROJECT_META_DDL)
+            conn.commit()
+            self._conn = conn
+            self._metadata: dict[str, Any] = self.default_metadata()
+            self._load()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                conn.close()
+            raise
 
     def _load(self) -> None:
         cur = self._conn.execute("SELECT data FROM project_meta WHERE project = ?", (self.project_name,))

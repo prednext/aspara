@@ -11,7 +11,8 @@ keeps everything in one tenant database:
   ``run_meta`` / ``project_meta`` tables as JSON blobs whose shape matches the
   file-based ``*.meta.json`` / ``metadata.json`` payloads, so no migration is
   needed as fields evolve.
-- **Deletes** remove a run's/project's rows from those tables.
+- **Deletes** remove a run's/project's rows from those tables. Local artifact
+  bytes under ``base_dir`` are removed by the dashboard facades, not here.
 
 Timestamps stored as UNIX milliseconds are surfaced as UTC ``datetime``.
 
@@ -84,21 +85,50 @@ class LibsqlCatalog:
             database: Optional remote libSQL URL (``libsql://...turso.io``).
             auth_token: Optional auth token for a remote database.
         """
-        self._conn: Any = connect_libsql(
-            base_dir if database is None else None,
-            database=database,
-            auth_token=auth_token,
+        self._base_dir = base_dir
+        self._database = database
+        self._auth_token = auth_token
+        self._conn: Any = None
+        self._open()
+
+    def _open(self) -> None:
+        """Connect and ensure schema. Close the connection if schema setup fails."""
+        conn = connect_libsql(
+            self._base_dir if self._database is None else None,
+            database=self._database,
+            auth_token=self._auth_token,
         )
-        # Ensure the tables exist so discovery over a freshly provisioned (empty)
-        # tenant database returns [] instead of raising "no such table".
-        ensure_metrics_schema(self._conn)
-        self._conn.execute(RUN_META_DDL)
-        self._conn.execute(PROJECT_META_DDL)
-        self._conn.commit()
+        try:
+            # Ensure the tables exist so discovery over a freshly provisioned
+            # (empty) tenant database returns [] instead of raising "no such table".
+            ensure_metrics_schema(conn)
+            conn.execute(RUN_META_DDL)
+            conn.execute(PROJECT_META_DDL)
+            conn.commit()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                conn.close()
+            raise
+        self._conn = conn
+
+    def _reopen(self) -> None:
+        with contextlib.suppress(Exception):
+            if self._conn is not None:
+                self._conn.close()
+        self._conn = None
+        self._open()
+
+    def _execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+        """Run a statement, reconnecting once if the cached connection is dead."""
+        try:
+            return self._conn.execute(sql, params)
+        except Exception:
+            self._reopen()
+            return self._conn.execute(sql, params)
 
     def _load_run_meta(self, project: str, run: str) -> dict[str, Any]:
         """Return the stored run metadata (defaults filled) for a run."""
-        cur = self._conn.execute(
+        cur = self._execute(
             "SELECT data FROM run_meta WHERE project = ? AND run = ?",
             (project, run),
         )
@@ -120,7 +150,7 @@ class LibsqlCatalog:
             parsed = _meta_time(project_meta.get(key))
             if parsed is not None:
                 return parsed
-        cur = self._conn.execute("SELECT data FROM run_meta WHERE project = ?", (project,))
+        cur = self._execute("SELECT data FROM run_meta WHERE project = ?", (project,))
         latest: datetime | None = None
         for (raw,) in cur.fetchall():
             data: Any = None
@@ -135,7 +165,7 @@ class LibsqlCatalog:
         return latest
 
     def _upsert_run_meta(self, project: str, run: str, meta: dict[str, Any]) -> None:
-        self._conn.execute(
+        self._execute(
             "INSERT INTO run_meta (project, run, data) VALUES (?, ?, ?) "
             "ON CONFLICT(project, run) DO UPDATE SET data = excluded.data",
             (project, run, json.dumps(meta)),
@@ -144,7 +174,7 @@ class LibsqlCatalog:
 
     def _load_project_meta(self, project: str) -> dict[str, Any]:
         """Return the stored project metadata (defaults filled) for a project."""
-        cur = self._conn.execute("SELECT data FROM project_meta WHERE project = ?", (project,))
+        cur = self._execute("SELECT data FROM project_meta WHERE project = ?", (project,))
         row = cur.fetchone()
         meta = ProjectMetadataStorage.default_metadata()
         if row is not None:
@@ -153,7 +183,7 @@ class LibsqlCatalog:
         return meta
 
     def _upsert_project_meta(self, project: str, meta: dict[str, Any]) -> None:
-        self._conn.execute(
+        self._execute(
             "INSERT INTO project_meta (project, data) VALUES (?, ?) ON CONFLICT(project) DO UPDATE SET data = excluded.data",
             (project, json.dumps(meta)),
         )
@@ -210,7 +240,7 @@ class LibsqlCatalog:
         Returns:
             ``ProjectInfo`` list sorted by project name.
         """
-        cur = self._conn.execute(
+        cur = self._execute(
             "SELECT project, COUNT(DISTINCT run) AS run_count, MAX(last_ts) AS last_ts "
             "FROM ("
             "  SELECT project, run, ts AS last_ts FROM metrics "
@@ -254,7 +284,7 @@ class LibsqlCatalog:
         if not self._project_exists(project):
             raise ProjectNotFoundError(f"Project '{project}' not found")
 
-        cur = self._conn.execute(
+        cur = self._execute(
             "SELECT run, MIN(start_ts) AS start_ts, MAX(last_ts) AS last_ts "
             "FROM ("
             "  SELECT run, ts AS start_ts, ts AS last_ts FROM metrics WHERE project = ? "
@@ -294,7 +324,7 @@ class LibsqlCatalog:
         if not self._run_exists(project, run):
             raise RunNotFoundError(f"Run '{run}' not found in project '{project}'")
 
-        row = self._conn.execute(
+        row = self._execute(
             "SELECT MIN(ts), MAX(ts) FROM metrics WHERE project = ? AND run = ?",
             (project, run),
         ).fetchone()
@@ -325,7 +355,7 @@ class LibsqlCatalog:
         validate_name(project, "project name")
         validate_name(run, "run name")
 
-        cur = self._conn.execute(
+        cur = self._execute(
             "SELECT ts, step, name, value FROM metrics WHERE project = ? AND run = ? ORDER BY ts, step",
             (project, run),
         )
@@ -376,10 +406,10 @@ class LibsqlCatalog:
         """Delete a run's metadata row. Returns True if a row existed."""
         validate_name(project, "project name")
         validate_name(run, "run name")
-        existed = self._conn.execute(
+        existed = self._execute(
             "SELECT 1 FROM run_meta WHERE project = ? AND run = ? LIMIT 1", (project, run)
         ).fetchone() is not None
-        self._conn.execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
+        self._execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
         self._conn.commit()
         return existed
 
@@ -396,8 +426,8 @@ class LibsqlCatalog:
         if not self._run_exists(project, run):
             raise RunNotFoundError(f"Run '{run}' does not exist in project '{project}'")
 
-        self._conn.execute("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run))
-        self._conn.execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
+        self._execute("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run))
+        self._execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
         self._conn.commit()
 
     # -- Project metadata ---------------------------------------------------
@@ -431,10 +461,10 @@ class LibsqlCatalog:
     def delete_project_metadata(self, project: str) -> bool:
         """Delete a project's metadata row. Returns True if a row existed."""
         validate_name(project, "project name")
-        existed = self._conn.execute(
+        existed = self._execute(
             "SELECT 1 FROM project_meta WHERE project = ? LIMIT 1", (project,)
         ).fetchone() is not None
-        self._conn.execute("DELETE FROM project_meta WHERE project = ?", (project,))
+        self._execute("DELETE FROM project_meta WHERE project = ?", (project,))
         self._conn.commit()
         return existed
 
@@ -450,9 +480,9 @@ class LibsqlCatalog:
         if not self._project_exists(project):
             raise ProjectNotFoundError(f"Project '{project}' does not exist")
 
-        self._conn.execute("DELETE FROM metrics WHERE project = ?", (project,))
-        self._conn.execute("DELETE FROM run_meta WHERE project = ?", (project,))
-        self._conn.execute("DELETE FROM project_meta WHERE project = ?", (project,))
+        self._execute("DELETE FROM metrics WHERE project = ?", (project,))
+        self._execute("DELETE FROM run_meta WHERE project = ?", (project,))
+        self._execute("DELETE FROM project_meta WHERE project = ?", (project,))
         self._conn.commit()
 
     # -- Existence helpers --------------------------------------------------
@@ -466,7 +496,7 @@ class LibsqlCatalog:
         return self._project_exists(project)
 
     def _run_exists(self, project: str, run: str) -> bool:
-        cur = self._conn.execute(
+        cur = self._execute(
             "SELECT EXISTS(SELECT 1 FROM metrics WHERE project = ? AND run = ?) "
             "OR EXISTS(SELECT 1 FROM run_meta WHERE project = ? AND run = ?)",
             (project, run, project, run),
@@ -474,7 +504,7 @@ class LibsqlCatalog:
         return bool(cur.fetchone()[0])
 
     def _project_exists(self, project: str) -> bool:
-        cur = self._conn.execute(
+        cur = self._execute(
             "SELECT EXISTS(SELECT 1 FROM metrics WHERE project = ?) "
             "OR EXISTS(SELECT 1 FROM run_meta WHERE project = ?) "
             "OR EXISTS(SELECT 1 FROM project_meta WHERE project = ?)",
@@ -484,4 +514,8 @@ class LibsqlCatalog:
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        conn = self._conn
+        self._conn = None
+        if conn is not None:
+            with contextlib.suppress(Exception):
+                conn.close()

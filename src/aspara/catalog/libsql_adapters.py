@@ -77,6 +77,10 @@ class LibsqlProjectCatalog:
             if self._artifacts is not None:
                 self._artifacts.delete_project(name)
 
+    def close(self) -> None:
+        """Close the shared tenant database connection."""
+        self._cat.close()
+
 
 class LibsqlRunCatalog:
     """``RunCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""

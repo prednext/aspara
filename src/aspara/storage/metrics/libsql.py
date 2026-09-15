@@ -23,6 +23,7 @@ when this backend is actually selected (``ASPARA_STORAGE_BACKEND=libsql``).
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 from pathlib import Path
 from typing import Any
@@ -180,8 +181,14 @@ class LibsqlMetricsStorage(MetricsStorage):
         self.run_name = run_name
 
         # ``self._conn`` is typed Any because ``libsql`` ships no type stubs.
-        self._conn: Any = connect_libsql(base_dir if database is None else None, database=database, auth_token=auth_token)
-        ensure_metrics_schema(self._conn)
+        conn = connect_libsql(base_dir if database is None else None, database=database, auth_token=auth_token)
+        try:
+            ensure_metrics_schema(conn)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                conn.close()
+            raise
+        self._conn = conn
 
     def save(self, metrics_data: dict[str, Any]) -> str:
         """Insert one step's metrics for this project/run and commit.

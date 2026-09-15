@@ -301,7 +301,7 @@ def test_null_tags_and_artifacts_do_not_crash_listing(tmp_path: Any) -> None:
 
     cat = LibsqlCatalog(base_dir=str(tmp_path))
     try:
-        cat._conn.execute(
+        cat._execute(
             "UPDATE run_meta SET data = ? WHERE project = ? AND run = ?",
             ('{"run_id": "x", "tags": null, "artifacts": null}', "alpha", "broken"),
         )
@@ -330,4 +330,21 @@ async def test_libsql_subscribe_stays_open_until_cancelled(tmp_path: Any) -> Non
             await asyncio.wait_for(anext(gen), timeout=0.05)
     finally:
         await gen.aclose()
+        cat.close()
+
+
+def test_execute_reopens_dead_connection(tmp_path: Any) -> None:
+    class _Dead:
+        def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("connection closed")
+
+        def close(self) -> None:
+            return None
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat._conn = _Dead()
+        assert cat.get_projects() == []
+        assert cat.get_projects() == []
+    finally:
         cat.close()

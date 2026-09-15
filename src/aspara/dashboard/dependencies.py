@@ -64,7 +64,13 @@ def _catalogs_for_dir(data_dir: str) -> tuple[ProjectCatalog, RunCatalog, Path]:
     return ProjectCatalog(str(path)), RunCatalog(str(path)), path
 
 
-@lru_cache(maxsize=32)
+_libsql_catalog_cache: dict[
+    tuple[str | None, str | None, str | None],
+    tuple[LibsqlProjectCatalog, LibsqlRunCatalog, Path],
+] = {}
+_LIBSQL_CATALOG_CACHE_MAX = 32
+
+
 def _libsql_catalogs_for_key(
     base_dir: str | None,
     database: str | None,
@@ -75,6 +81,11 @@ def _libsql_catalogs_for_key(
     The shared ``LibsqlCatalog`` (and its connection) is kept alive by this cache
     for the tenant's lifetime; a single re-entrant lock serializes access.
     """
+    key = (base_dir, database, auth_token)
+    cached = _libsql_catalog_cache.get(key)
+    if cached is not None:
+        return cached
+
     catalog = LibsqlCatalog(base_dir=base_dir, database=database, auth_token=auth_token)
     lock = threading.RLock()
     # Local libSQL tenants pin artifact bytes under ``base_dir``; remote tenants
@@ -83,11 +94,17 @@ def _libsql_catalogs_for_key(
         FilesystemArtifactStore(base_dir) if base_dir and not (database or "").strip() else None
     )
     data_dir = Path(base_dir) if base_dir else Path(".")
-    return (
+    result = (
         LibsqlProjectCatalog(catalog, lock, artifact_store),
         LibsqlRunCatalog(catalog, lock, artifact_store),
         data_dir,
     )
+    if len(_libsql_catalog_cache) >= _LIBSQL_CATALOG_CACHE_MAX:
+        old_key = next(iter(_libsql_catalog_cache))
+        old_project_cat, _, _ = _libsql_catalog_cache.pop(old_key)
+        old_project_cat.close()
+    _libsql_catalog_cache[key] = result
+    return result
 
 
 def _tenant_id_from_request(request: Request | None) -> str:
@@ -147,7 +164,9 @@ def get_data_dir_path(request: Request) -> Path:
 def _clear_catalog_caches() -> None:
     """Drop all cached catalog instances (file-based and libSQL-backed)."""
     _catalogs_for_dir.cache_clear()
-    _libsql_catalogs_for_key.cache_clear()
+    for project_cat, _, _ in _libsql_catalog_cache.values():
+        project_cat.close()
+    _libsql_catalog_cache.clear()
 
 
 # Invalidate cached catalogs whenever the tenant resolver configuration changes.

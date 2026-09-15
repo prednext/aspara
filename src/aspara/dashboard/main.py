@@ -16,6 +16,7 @@ from starlette.responses import Response
 
 from aspara.catalog import DataDirWatcher
 from aspara.config import get_sse_dev_shutdown_timeout, is_dev_mode
+from aspara.dashboard.dependencies import _clear_catalog_caches
 from aspara.tenancy import (
     TENANT_COOKIE,
     TENANT_QUERY_PARAM,
@@ -170,6 +171,7 @@ async def lifespan(app: FastAPI):
     # auto-reload) does not reuse a stale watcher — which would leak
     # inotify FDs and deliver duplicate events.
     await DataDirWatcher.shutdown()
+    _clear_catalog_caches()
 
 
 app = FastAPI(
