@@ -263,3 +263,36 @@ def test_local_libsql_tenant_artifact_upload_lands_in_base_dir(tmp_path: Path) -
         assert artifact_path.read_bytes() == b"weights"
     finally:
         configure_libsql_tenant_resolver(None)
+
+
+def test_libsql_omitted_step_is_stored_as_zero(tmp_path: Path) -> None:
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        r = tracker.post(
+            "/api/v1/projects/proj/runs/r1/metrics",
+            json={"metrics": {"loss": 1.0}},
+            headers={**hdr, **_CSRF},
+        )
+        assert r.status_code == 200
+        got = dashboard.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert got.status_code == 200
+        assert _values(got.json(), "loss", "r1") == [1.0]
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_libsql_non_numeric_metric_is_400(tmp_path: Path) -> None:
+    tenant_dir = tmp_path / "lib"
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        r = tracker.post(
+            "/api/v1/projects/proj/runs/r1/metrics",
+            json={"metrics": {"loss": "nope"}, "step": 0},
+            headers={**hdr, **_CSRF},
+        )
+        assert r.status_code == 400
+    finally:
+        configure_libsql_tenant_resolver(None)

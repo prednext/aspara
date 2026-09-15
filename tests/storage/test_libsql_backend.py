@@ -105,3 +105,26 @@ def test_run_not_found(tmp_path: Any) -> None:
     storage = create_metrics_storage(backend="libsql", base_dir=str(tmp_path), project_name="p", run_name="missing")
     with pytest.raises(RunNotFoundError):
         storage.load()
+
+
+def test_null_step_is_stored_as_zero(tmp_path: Any) -> None:
+    storage = create_metrics_storage(backend="libsql", base_dir=str(tmp_path), project_name="p", run_name="r")
+    storage.save({"timestamp": 1000, "step": None, "metrics": {"loss": 1.0}})
+    df = storage.load()
+    assert df["step"].to_list() == [0]
+    assert df["_loss"].to_list() == [1.0]
+
+
+def test_non_numeric_metric_raises(tmp_path: Any) -> None:
+    storage = create_metrics_storage(backend="libsql", base_dir=str(tmp_path), project_name="p", run_name="r")
+    with pytest.raises(ValueError, match="numeric"):
+        storage.save({"timestamp": 1000, "step": 0, "metrics": {"loss": "nope"}})
+
+
+def test_duplicate_timestamp_and_step_keeps_first_value(tmp_path: Any) -> None:
+    """Wide load pivots on (timestamp, step) with first-wins; lock that here."""
+    storage = create_metrics_storage(backend="libsql", base_dir=str(tmp_path), project_name="p", run_name="r")
+    storage.save({"timestamp": 1000, "step": 0, "metrics": {"loss": 1.0}})
+    storage.save({"timestamp": 1000, "step": 0, "metrics": {"loss": 2.0}})
+    df = storage.load()
+    assert df["_loss"].to_list() == [1.0]

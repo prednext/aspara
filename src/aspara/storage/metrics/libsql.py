@@ -195,15 +195,16 @@ class LibsqlMetricsStorage(MetricsStorage):
             str: Empty string.
         """
         ts = _to_epoch_ms(metrics_data.get("timestamp", 0))
-        step = int(metrics_data.get("step", 0))
+        raw_step = metrics_data.get("step")
+        step = 0 if raw_step is None else int(raw_step)
         metrics: dict[str, Any] = metrics_data.get("metrics", {})
 
         rows: list[tuple[str, str, int, int, str, float]] = []
         for name, value in metrics.items():
             try:
                 numeric = float(value)
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Metric '{name}' must be numeric, got {type(value).__name__}") from e
             rows.append((self.project_name, self.run_name, ts, step, name, numeric))
 
         if rows:
