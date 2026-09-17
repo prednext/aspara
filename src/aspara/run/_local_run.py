@@ -55,6 +55,12 @@ class LocalRun(BaseRun):
 
         # Determine storage backend using central resolver
         resolved_backend = resolve_metrics_storage_backend(storage_backend)
+        if resolved_backend == "libsql":
+            raise ValueError(
+                "LocalRun does not support the 'libsql' backend. Metrics would be written to "
+                "aspara.db while the default dashboard still reads JSONL. Use jsonl or polars "
+                "for local runs, or send metrics to a libSQL tenant through the tracker."
+            )
 
         # Build path within data directory (project/run structure)
         base_dir = os.path.join(data_dir, self.project)

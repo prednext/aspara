@@ -10,6 +10,7 @@ Skipped automatically when the optional ``libsql`` package is not installed.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -82,6 +83,55 @@ def test_get_runs_unknown_project_raises(tmp_path: Any) -> None:
     try:
         with pytest.raises(ProjectNotFoundError):
             cat.get_runs("does_not_exist")
+    finally:
+        cat.close()
+
+
+def test_metadata_only_run_is_discoverable(tmp_path: Any) -> None:
+    """create_run writes run_meta with no metric rows; listings must still show it."""
+    from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+    storage = LibsqlRunMetadataStorage(str(tmp_path), "alpha", "init_only")
+    try:
+        storage.set_init(run_id="abc123", tags=["exp"], notes="", timestamp=1000)
+    finally:
+        storage.close()
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        projects = cat.get_projects()
+        assert [p.name for p in projects] == ["alpha"]
+        assert projects[0].run_count == 1
+        assert cat.project_exists("alpha")
+
+        runs = cat.get_runs("alpha")
+        assert [r.name for r in runs] == ["init_only"]
+        assert runs[0].run_id == "abc123"
+        assert runs[0].tags == ["exp"]
+        assert projects[0].last_update == datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+
+        run = cat.get_run("alpha", "init_only")
+        assert run.name == "init_only"
+    finally:
+        cat.close()
+
+
+def test_metadata_only_run_does_not_double_count_metrics(tmp_path: Any) -> None:
+    """A run with both metrics and metadata still counts once; a sibling init is extra."""
+    from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+    _seed(tmp_path, "alpha", "logged", [_md(1000, 0, loss=1.0)])
+    storage = LibsqlRunMetadataStorage(str(tmp_path), "alpha", "init_only")
+    try:
+        storage.set_init(run_id="only", tags=[], notes="", timestamp=2000)
+    finally:
+        storage.close()
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        by_name = {p.name: p for p in cat.get_projects()}
+        assert by_name["alpha"].run_count == 2
+        assert {r.name for r in cat.get_runs("alpha")} == {"logged", "init_only"}
     finally:
         cat.close()
 
@@ -234,5 +284,104 @@ def test_delete_project_removes_everything(tmp_path: Any) -> None:
 
         with pytest.raises(ProjectNotFoundError):
             cat.delete_project("alpha")
+    finally:
+        cat.close()
+
+
+def test_null_tags_and_artifacts_do_not_crash_listing(tmp_path: Any) -> None:
+    """A parseable run_meta row with tags/artifacts null must not 500 the project page."""
+    from aspara.storage.metadata.libsql import LibsqlRunMetadataStorage
+
+    storage = LibsqlRunMetadataStorage(str(tmp_path), "alpha", "broken")
+    try:
+        storage.set_init(run_id="x", tags=["ok"], notes="", timestamp=1000)
+    finally:
+        storage.close()
+    _seed(tmp_path, "alpha", "healthy", [_md(2000, 0, loss=1.0)])
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat._execute(
+            "UPDATE run_meta SET data = ? WHERE project = ? AND run = ?",
+            ('{"run_id": "x", "tags": null, "artifacts": null, "params": null, "config": null}', "alpha", "broken"),
+        )
+        cat._conn.commit()
+        runs = cat.get_runs("alpha")
+        by_name = {r.name: r for r in runs}
+        assert "healthy" in by_name
+        assert by_name["broken"].tags == []
+        assert by_name["broken"].artifact_count == 0
+        assert by_name["broken"].is_corrupted is True
+        assert cat.get_run("alpha", "broken").is_corrupted is True
+        assert cat.get_run_artifacts("alpha", "broken") == []
+        meta = cat.get_run_config("alpha", "broken")
+        assert meta["run_id"] == "x"
+        assert meta["artifacts"] is None
+        assert meta["params"] is None
+    finally:
+        cat.close()
+
+
+@pytest.mark.asyncio
+async def test_libsql_subscribe_stays_open_until_cancelled(tmp_path: Any) -> None:
+    """Empty subscribe must not return immediately (that retriggers EventSource)."""
+    from aspara.catalog import LibsqlRunCatalog
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    adapter = LibsqlRunCatalog(cat)
+    gen = adapter.subscribe({"alpha": ["r1"]}, datetime.now(timezone.utc))
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(anext(gen), timeout=0.05)
+    finally:
+        await gen.aclose()
+        cat.close()
+
+
+def test_delete_run_retries_all_statements_after_dead_connection(tmp_path: Any) -> None:
+    """A dead connection mid-delete must not leave metrics without run_meta."""
+    _seed(tmp_path, "alpha", "gone", [_md(1000, 0, loss=2.0)])
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat.update_run_metadata("alpha", "gone", {"tags": ["x"]})
+
+        inner = cat._conn
+
+        class _DieOnMetaDelete:
+            def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+                if isinstance(sql, str) and "DELETE FROM run_meta" in sql:
+                    raise RuntimeError("connection closed")
+                return inner.execute(sql, params)
+
+            def commit(self) -> Any:
+                return inner.commit()
+
+            def close(self) -> None:
+                inner.close()
+
+        cat._conn = _DieOnMetaDelete()
+        cat.delete_run("alpha", "gone")
+
+        with pytest.raises(ProjectNotFoundError):
+            cat.get_runs("alpha")
+        assert len(cat.load_metrics("alpha", "gone")) == 0
+        assert cat.get_run_metadata("alpha", "gone")["tags"] == []
+    finally:
+        cat.close()
+
+
+def test_execute_reopens_dead_connection(tmp_path: Any) -> None:
+    class _Dead:
+        def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("connection closed")
+
+        def close(self) -> None:
+            return None
+
+    cat = LibsqlCatalog(base_dir=str(tmp_path))
+    try:
+        cat._conn = _Dead()
+        assert cat.get_projects() == []
+        assert cat.get_projects() == []
     finally:
         cat.close()

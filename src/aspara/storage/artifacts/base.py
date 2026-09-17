@@ -60,6 +60,32 @@ class ArtifactStore(ABC):
         """
 
     @abstractmethod
+    def stage_stream(
+        self,
+        project: str,
+        run: str,
+        name: str,
+        chunks: Iterable[bytes],
+        *,
+        max_size: int,
+    ) -> StoredArtifact:
+        """Write artifact bytes to a temporary location without replacing an existing file.
+
+        Call :meth:`commit_put` after metadata is recorded so a failed metadata
+        write cannot delete a previously published artifact of the same name.
+
+        Raises:
+            ArtifactTooLargeError: If the cumulative size exceeds ``max_size``.
+        """
+
+    @abstractmethod
+    def commit_put(self, project: str, run: str, name: str) -> None:
+        """Publish staged bytes, replacing any existing artifact of this name."""
+
+    @abstractmethod
+    def abort_put(self, project: str, run: str, name: str) -> None:
+        """Discard staged bytes. Existing published artifacts are left in place."""
+
     def put_stream(
         self,
         project: str,
@@ -71,19 +97,19 @@ class ArtifactStore(ABC):
     ) -> StoredArtifact:
         """Store an artifact from a stream of byte chunks.
 
-        Args:
-            project: Project name.
-            run: Run name.
-            name: Destination artifact name.
-            chunks: Iterable yielding the file body in chunks.
-            max_size: Maximum allowed total size in bytes.
-
-        Returns:
-            The stored artifact's name and size.
+        Stages then immediately publishes. Prefer :meth:`stage_stream` plus
+        :meth:`commit_put` when a metadata write must succeed first.
 
         Raises:
             ArtifactTooLargeError: If the cumulative size exceeds ``max_size``.
         """
+        try:
+            stored = self.stage_stream(project, run, name, chunks, max_size=max_size)
+            self.commit_put(project, run, name)
+            return stored
+        except Exception:
+            self.abort_put(project, run, name)
+            raise
 
     @abstractmethod
     def list(self, project: str, run: str) -> Sequence[StoredArtifact]:
@@ -114,3 +140,23 @@ class ArtifactStore(ABC):
         Returns:
             A binary file-like object positioned at the start.
         """
+
+    @abstractmethod
+    def delete_run(self, project: str, run: str) -> None:
+        """Remove all artifact bytes stored for a run.
+
+        Missing storage is a no-op. Names must be validated so a bad project
+        or run cannot escape the store's root.
+        """
+
+    @abstractmethod
+    def delete_project(self, project: str) -> None:
+        """Remove all artifact bytes stored for a project (every run).
+
+        Missing storage is a no-op. Must not delete the store's root (where a
+        local libSQL tenant keeps ``aspara.db``).
+        """
+
+    @abstractmethod
+    def delete_file(self, project: str, run: str, name: str) -> None:
+        """Remove one stored artifact file. Missing files are a no-op."""

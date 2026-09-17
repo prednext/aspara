@@ -4,14 +4,15 @@ Stage 2 of the multi-tenant SaaS direction. Where ``ProjectCatalog`` and
 ``RunCatalog`` discover projects/runs by scanning the filesystem, this catalog
 keeps everything in one tenant database:
 
-- **Discovery / metrics** derive from the ``metrics`` table written by
-  :class:`LibsqlMetricsStorage` (``project``, ``run``, ``ts``, ``step``, ``name``,
-  ``value``) via ``SELECT ... GROUP BY`` queries.
+- **Discovery** unions the ``metrics`` table with ``run_meta`` / ``project_meta``,
+  so a ``create_run`` that has not yet logged a metric still appears in project
+  and run listings. Metric timestamps still come from ``metrics`` when present.
 - **Metadata** (tags, notes, params, status, artifacts, timestamps) lives in
   ``run_meta`` / ``project_meta`` tables as JSON blobs whose shape matches the
   file-based ``*.meta.json`` / ``metadata.json`` payloads, so no migration is
   needed as fields evolve.
-- **Deletes** remove a run's/project's rows from those tables.
+- **Deletes** remove a run's/project's rows from those tables. Local artifact
+  bytes under ``base_dir`` are removed by the dashboard facades, not here.
 
 Timestamps stored as UNIX milliseconds are surfaced as UTC ``datetime``.
 
@@ -32,9 +33,17 @@ import polars as pl
 
 from aspara.exceptions import ProjectNotFoundError, RunNotFoundError
 from aspara.models import RunStatus
+from aspara.storage.metadata.libsql import (
+    PROJECT_META_DDL,
+    RUN_META_DDL,
+    delete_project_meta,
+    delete_run_meta,
+    read_project_meta,
+    read_run_meta,
+    write_project_meta,
+    write_run_meta,
+)
 from aspara.storage.metadata.models import validate_metadata
-from aspara.storage.metadata.project import ProjectMetadataStorage
-from aspara.storage.metadata.run import RunMetadataStorage
 from aspara.storage.metrics.libsql import connect_libsql, ensure_metrics_schema, long_rows_to_wide
 from aspara.utils.timestamp import parse_to_datetime
 from aspara.utils.validators import validate_name
@@ -42,18 +51,11 @@ from aspara.utils.validators import validate_name
 from .project_catalog import ProjectInfo
 from .run_catalog import RunInfo, _infer_stale_status
 
-# Metadata tables kept alongside the metrics table in the same tenant database.
-# Each row stores the run/project metadata dict as a JSON blob (the same shape the
-# file-based ``*.meta.json`` / ``metadata.json`` files use), keyed by identity.
-_CREATE_RUN_META = (
-    "CREATE TABLE IF NOT EXISTS run_meta ("
-    "  project TEXT NOT NULL,"
-    "  run TEXT NOT NULL,"
-    "  data TEXT NOT NULL,"
-    "  PRIMARY KEY (project, run)"
-    ")"
-)
-_CREATE_PROJECT_META = "CREATE TABLE IF NOT EXISTS project_meta (project TEXT PRIMARY KEY, data TEXT NOT NULL)"
+# Metadata tables (``run_meta`` / ``project_meta``) live alongside the metrics table
+# in the same tenant database. Each row stores the run/project metadata dict as a JSON
+# blob (the same shape the file-based ``*.meta.json`` / ``metadata.json`` files use).
+# The DDL is owned by ``aspara.storage.metadata.libsql`` so the read (this catalog) and
+# write (LibsqlRunMetadataStorage/LibsqlProjectMetadataStorage) paths share one schema.
 
 
 def _ms_to_dt(ms: int | float | None) -> datetime | None:
@@ -61,6 +63,15 @@ def _ms_to_dt(ms: int | float | None) -> datetime | None:
     if ms is None:
         return None
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+
+def _meta_time(value: Any) -> datetime | None:
+    """Parse a metadata timestamp (UNIX ms or ISO string) to UTC, or None."""
+    if value is None or isinstance(value, bool):
+        return None
+    with contextlib.suppress(ValueError, TypeError, OSError):
+        return parse_to_datetime(value)
+    return None
 
 
 class LibsqlCatalog:
@@ -81,67 +92,135 @@ class LibsqlCatalog:
             database: Optional remote libSQL URL (``libsql://...turso.io``).
             auth_token: Optional auth token for a remote database.
         """
-        self._conn: Any = connect_libsql(
-            base_dir if database is None else None,
-            database=database,
-            auth_token=auth_token,
+        self._base_dir = base_dir
+        self._database = database
+        self._auth_token = auth_token
+        self._conn: Any = None
+        self._open()
+
+    def _open(self) -> None:
+        """Connect and ensure schema. Close the connection if schema setup fails."""
+        conn = connect_libsql(
+            self._base_dir if self._database is None else None,
+            database=self._database,
+            auth_token=self._auth_token,
         )
-        # Ensure the tables exist so discovery over a freshly provisioned (empty)
-        # tenant database returns [] instead of raising "no such table".
-        ensure_metrics_schema(self._conn)
-        self._conn.execute(_CREATE_RUN_META)
-        self._conn.execute(_CREATE_PROJECT_META)
-        self._conn.commit()
+        try:
+            # Ensure the tables exist so discovery over a freshly provisioned
+            # (empty) tenant database returns [] instead of raising "no such table".
+            ensure_metrics_schema(conn)
+            conn.execute(RUN_META_DDL)
+            conn.execute(PROJECT_META_DDL)
+            conn.commit()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                conn.close()
+            raise
+        self._conn = conn
+
+    def _reopen(self) -> None:
+        with contextlib.suppress(Exception):
+            if self._conn is not None:
+                self._conn.close()
+        self._conn = None
+        self._open()
+
+    def _with_reconnect(self, fn: Any) -> Any:
+        """Run ``fn`` using ``self._conn``, reconnecting once if it fails."""
+        try:
+            return fn()
+        except Exception:
+            self._reopen()
+            return fn()
+
+    def _execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+        """Run a statement, reconnecting once if the cached connection is dead."""
+        return self._with_reconnect(lambda: self._conn.execute(sql, params))
+
+    def _query_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[Any]:
+        """Execute and fetchall, reconnecting once including after a dead cursor."""
+        return self._with_reconnect(lambda: self._conn.execute(sql, params).fetchall())
+
+    def _query_one(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+        """Execute and fetchone, reconnecting once including after a dead cursor."""
+        return self._with_reconnect(lambda: self._conn.execute(sql, params).fetchone())
+
+    def _execute_commit(self, statements: list[tuple[str, tuple[Any, ...]]]) -> None:
+        """Execute ``statements`` then commit, retrying the whole list after reconnect.
+
+        ``_execute`` reconnects per statement. A multi-statement write that
+        reconnects in the middle would commit only the suffix on the new
+        connection and drop the prefix with the old one.
+        """
+
+        def run() -> None:
+            for sql, params in statements:
+                self._conn.execute(sql, params)
+            self._conn.commit()
+
+        try:
+            run()
+        except Exception:
+            self._reopen()
+            run()
 
     def _load_run_meta(self, project: str, run: str) -> dict[str, Any]:
         """Return the stored run metadata (defaults filled) for a run."""
-        cur = self._conn.execute(
-            "SELECT data FROM run_meta WHERE project = ? AND run = ?",
-            (project, run),
-        )
-        row = cur.fetchone()
-        meta = RunMetadataStorage.default_metadata()
-        if row is not None:
+        return self._with_reconnect(lambda: read_run_meta(self._conn, project, run))
+
+    def _last_update_from_meta(self, project: str) -> datetime | None:
+        """Best-effort last_update for a project that has no metric rows.
+
+        Uses ``project_meta.updated_at`` / ``created_at``, then run_meta
+        ``finish_time`` / ``start_time``. Never substitutes ``datetime.now()``.
+        """
+        project_meta = self._load_project_meta(project)
+        for key in ("updated_at", "created_at"):
+            parsed = _meta_time(project_meta.get(key))
+            if parsed is not None:
+                return parsed
+        rows = self._query_all("SELECT data FROM run_meta WHERE project = ?", (project,))
+        latest: datetime | None = None
+        for (raw,) in rows:
+            data: Any = None
             with contextlib.suppress(json.JSONDecodeError, TypeError):
-                meta.update(json.loads(row[0]))
-        return meta
+                data = json.loads(raw)
+            if not isinstance(data, dict):
+                continue
+            for key in ("finish_time", "start_time"):
+                parsed = _meta_time(data.get(key))
+                if parsed is not None and (latest is None or parsed > latest):
+                    latest = parsed
+        return latest
 
     def _upsert_run_meta(self, project: str, run: str, meta: dict[str, Any]) -> None:
-        self._conn.execute(
-            "INSERT INTO run_meta (project, run, data) VALUES (?, ?, ?) "
-            "ON CONFLICT(project, run) DO UPDATE SET data = excluded.data",
-            (project, run, json.dumps(meta)),
-        )
-        self._conn.commit()
+        self._with_reconnect(lambda: write_run_meta(self._conn, project, run, meta))
 
     def _load_project_meta(self, project: str) -> dict[str, Any]:
         """Return the stored project metadata (defaults filled) for a project."""
-        cur = self._conn.execute("SELECT data FROM project_meta WHERE project = ?", (project,))
-        row = cur.fetchone()
-        meta = ProjectMetadataStorage.default_metadata()
-        if row is not None:
-            with contextlib.suppress(json.JSONDecodeError, TypeError):
-                meta.update(json.loads(row[0]))
-        return meta
+        return self._with_reconnect(lambda: read_project_meta(self._conn, project))
 
     def _upsert_project_meta(self, project: str, meta: dict[str, Any]) -> None:
-        self._conn.execute(
-            "INSERT INTO project_meta (project, data) VALUES (?, ?) ON CONFLICT(project) DO UPDATE SET data = excluded.data",
-            (project, json.dumps(meta)),
-        )
-        self._conn.commit()
+        self._with_reconnect(lambda: write_project_meta(self._conn, project, meta))
 
     def _run_info(self, run: str, start_ts: int | None, last_ts: int | None, meta: dict[str, Any]) -> RunInfo:
         """Build a RunInfo from metric timestamps and stored metadata."""
         is_finished = bool(meta.get("is_finished", False))
         exit_code = meta.get("exit_code")
-        params = meta.get("params", {})
-        param_count = len(params) if isinstance(params, dict) else 0
+        params = meta.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        param_count = len(params)
 
-        start_time = None
-        if meta.get("start_time") is not None:
-            with contextlib.suppress(ValueError):
-                start_time = parse_to_datetime(meta["start_time"])
+        artifacts = meta.get("artifacts")
+        if not isinstance(artifacts, list):
+            artifacts = []
+        tags = meta.get("tags")
+        if not isinstance(tags, list):
+            tags = []
+        is_corrupted = not isinstance(meta.get("artifacts", []), list) or not isinstance(meta.get("tags", []), list)
+
+        start_time = _meta_time(meta.get("start_time"))
         if start_time is None:
             start_time = _ms_to_dt(start_ts)
 
@@ -155,10 +234,11 @@ class LibsqlCatalog:
             name=run,
             run_id=meta.get("run_id"),
             start_time=start_time,
-            last_update=_ms_to_dt(last_ts),
+            last_update=_ms_to_dt(last_ts) or _meta_time(meta.get("finish_time")) or start_time,
             param_count=param_count,
-            artifact_count=len(meta.get("artifacts", [])),
-            tags=list(meta.get("tags", [])),
+            artifact_count=len(artifacts),
+            tags=[t for t in tags if isinstance(t, str)],
+            is_corrupted=is_corrupted,
             is_finished=is_finished,
             exit_code=exit_code,
             status=status,
@@ -167,20 +247,30 @@ class LibsqlCatalog:
     def get_projects(self) -> list[ProjectInfo]:
         """List all projects, with run counts and last-update times.
 
+        A project is listed if it has metric rows, run metadata, or project
+        metadata. ``run_count`` is the number of distinct runs across metrics
+        and ``run_meta`` (a metadata-only init counts as a run).
+
         Returns:
             ``ProjectInfo`` list sorted by project name.
         """
-        cur = self._conn.execute(
-            "SELECT project, COUNT(DISTINCT run) AS run_count, MAX(ts) AS last_ts "
-            "FROM metrics GROUP BY project ORDER BY project"
+        rows = self._query_all(
+            "SELECT project, COUNT(DISTINCT run) AS run_count, MAX(last_ts) AS last_ts "
+            "FROM ("
+            "  SELECT project, run, ts AS last_ts FROM metrics "
+            "  UNION ALL "
+            "  SELECT project, run, NULL AS last_ts FROM run_meta "
+            "  UNION ALL "
+            "  SELECT project, NULL AS run, NULL AS last_ts FROM project_meta"
+            ") GROUP BY project ORDER BY project"
         )
         projects: list[ProjectInfo] = []
-        for name, run_count, last_ts in cur.fetchall():
+        for name, run_count, last_ts in rows:
             projects.append(
                 ProjectInfo(
                     name=name,
                     run_count=int(run_count),
-                    last_update=_ms_to_dt(last_ts) or datetime.now(timezone.utc),
+                    last_update=_ms_to_dt(last_ts) or self._last_update_from_meta(name),
                 )
             )
         return projects
@@ -196,25 +286,44 @@ class LibsqlCatalog:
             project: Project name.
 
         Returns:
-            ``RunInfo`` list sorted by run name. Timestamps come from metric rows;
-            tags, params, status, and finish state come from ``run_meta`` when present.
+            ``RunInfo`` list sorted by run name. Timestamps come from metric rows
+            when present; tags, params, status, and finish state come from
+            ``run_meta``. A metadata-only run (no metric rows yet) is included.
 
         Raises:
             ValueError: If the project name is invalid.
             ProjectNotFoundError: If the project has no data in this database.
         """
         validate_name(project, "project name")
-
-        cur = self._conn.execute(
-            "SELECT run, MIN(ts) AS start_ts, MAX(ts) AS last_ts "
-            "FROM metrics WHERE project = ? GROUP BY run ORDER BY run",
-            (project,),
-        )
-        rows = cur.fetchall()
-        if not rows:
+        if not self._project_exists(project):
             raise ProjectNotFoundError(f"Project '{project}' not found")
 
-        return [self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run)) for run, start_ts, last_ts in rows]
+        rows = self._query_all(
+            "SELECT run, MIN(start_ts) AS start_ts, MAX(last_ts) AS last_ts "
+            "FROM ("
+            "  SELECT run, ts AS start_ts, ts AS last_ts FROM metrics WHERE project = ? "
+            "  UNION ALL "
+            "  SELECT run, NULL AS start_ts, NULL AS last_ts FROM run_meta WHERE project = ?"
+            ") GROUP BY run ORDER BY run",
+            (project, project),
+        )
+        return [
+            self._safe_run_info(project, run, start_ts, last_ts)
+            for run, start_ts, last_ts in rows
+        ]
+
+    def _safe_run_info(self, project: str, run: str, start_ts: int | None, last_ts: int | None) -> RunInfo:
+        try:
+            return self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+        except Exception as e:
+            return RunInfo(
+                name=run,
+                param_count=0,
+                is_corrupted=True,
+                error_message=str(e),
+                start_time=_ms_to_dt(start_ts),
+                last_update=_ms_to_dt(last_ts),
+            )
 
     def get_run(self, project: str, run: str) -> RunInfo:
         """Return a single run's info, enriched with stored metadata.
@@ -229,12 +338,12 @@ class LibsqlCatalog:
         if not self._run_exists(project, run):
             raise RunNotFoundError(f"Run '{run}' not found in project '{project}'")
 
-        row = self._conn.execute(
+        row = self._query_one(
             "SELECT MIN(ts), MAX(ts) FROM metrics WHERE project = ? AND run = ?",
             (project, run),
-        ).fetchone()
+        )
         start_ts, last_ts = (row[0], row[1]) if row else (None, None)
-        return self._run_info(run, start_ts, last_ts, self._load_run_meta(project, run))
+        return self._safe_run_info(project, run, start_ts, last_ts)
 
     def load_metrics(
         self,
@@ -260,11 +369,11 @@ class LibsqlCatalog:
         validate_name(project, "project name")
         validate_name(run, "run name")
 
-        cur = self._conn.execute(
+        rows = self._query_all(
             "SELECT ts, step, name, value FROM metrics WHERE project = ? AND run = ? ORDER BY ts, step",
             (project, run),
         )
-        df = long_rows_to_wide(cur.fetchall())
+        df = long_rows_to_wide(rows)
 
         if start_time is not None and len(df) > 0:
             # The wide ``timestamp`` column is tz-naive Datetime("ms"); normalize the
@@ -287,7 +396,8 @@ class LibsqlCatalog:
 
     def get_run_artifacts(self, project: str, run: str) -> list[dict[str, Any]]:
         """Return a run's artifact list from its metadata."""
-        return list(self.get_run_metadata(project, run).get("artifacts", []))
+        artifacts = self.get_run_metadata(project, run).get("artifacts", [])
+        return artifacts if isinstance(artifacts, list) else []
 
     def update_run_metadata(self, project: str, run: str, metadata: dict[str, Any]) -> dict[str, Any]:
         """Update a run's ``notes``/``tags`` and return the full metadata dict.
@@ -311,12 +421,7 @@ class LibsqlCatalog:
         """Delete a run's metadata row. Returns True if a row existed."""
         validate_name(project, "project name")
         validate_name(run, "run name")
-        existed = self._conn.execute(
-            "SELECT 1 FROM run_meta WHERE project = ? AND run = ? LIMIT 1", (project, run)
-        ).fetchone() is not None
-        self._conn.execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
-        self._conn.commit()
-        return existed
+        return self._with_reconnect(lambda: delete_run_meta(self._conn, project, run))
 
     def delete_run(self, project: str, run: str) -> None:
         """Delete a run's metrics and metadata from the tenant database.
@@ -331,9 +436,10 @@ class LibsqlCatalog:
         if not self._run_exists(project, run):
             raise RunNotFoundError(f"Run '{run}' does not exist in project '{project}'")
 
-        self._conn.execute("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run))
-        self._conn.execute("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run))
-        self._conn.commit()
+        self._execute_commit([
+            ("DELETE FROM metrics WHERE project = ? AND run = ?", (project, run)),
+            ("DELETE FROM run_meta WHERE project = ? AND run = ?", (project, run)),
+        ])
 
     # -- Project metadata ---------------------------------------------------
 
@@ -366,12 +472,7 @@ class LibsqlCatalog:
     def delete_project_metadata(self, project: str) -> bool:
         """Delete a project's metadata row. Returns True if a row existed."""
         validate_name(project, "project name")
-        existed = self._conn.execute(
-            "SELECT 1 FROM project_meta WHERE project = ? LIMIT 1", (project,)
-        ).fetchone() is not None
-        self._conn.execute("DELETE FROM project_meta WHERE project = ?", (project,))
-        self._conn.commit()
-        return existed
+        return self._with_reconnect(lambda: delete_project_meta(self._conn, project))
 
     def delete_project(self, project: str) -> None:
         """Delete a project (all its runs' metrics and all metadata).
@@ -385,10 +486,11 @@ class LibsqlCatalog:
         if not self._project_exists(project):
             raise ProjectNotFoundError(f"Project '{project}' does not exist")
 
-        self._conn.execute("DELETE FROM metrics WHERE project = ?", (project,))
-        self._conn.execute("DELETE FROM run_meta WHERE project = ?", (project,))
-        self._conn.execute("DELETE FROM project_meta WHERE project = ?", (project,))
-        self._conn.commit()
+        self._execute_commit([
+            ("DELETE FROM metrics WHERE project = ?", (project,)),
+            ("DELETE FROM run_meta WHERE project = ?", (project,)),
+            ("DELETE FROM project_meta WHERE project = ?", (project,)),
+        ])
 
     # -- Existence helpers --------------------------------------------------
 
@@ -401,22 +503,26 @@ class LibsqlCatalog:
         return self._project_exists(project)
 
     def _run_exists(self, project: str, run: str) -> bool:
-        cur = self._conn.execute(
+        row = self._query_one(
             "SELECT EXISTS(SELECT 1 FROM metrics WHERE project = ? AND run = ?) "
             "OR EXISTS(SELECT 1 FROM run_meta WHERE project = ? AND run = ?)",
             (project, run, project, run),
         )
-        return bool(cur.fetchone()[0])
+        return bool(row[0])
 
     def _project_exists(self, project: str) -> bool:
-        cur = self._conn.execute(
+        row = self._query_one(
             "SELECT EXISTS(SELECT 1 FROM metrics WHERE project = ?) "
             "OR EXISTS(SELECT 1 FROM run_meta WHERE project = ?) "
             "OR EXISTS(SELECT 1 FROM project_meta WHERE project = ?)",
             (project, project, project),
         )
-        return bool(cur.fetchone()[0])
+        return bool(row[0])
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        conn = self._conn
+        self._conn = None
+        if conn is not None:
+            with contextlib.suppress(Exception):
+                conn.close()

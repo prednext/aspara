@@ -47,6 +47,8 @@ response = requests.get(f"{BASE_URL}/api/v1/health")
 print(response.json())  # {"status": "ok"}
 ```
 
+The tracker reads the tenant from `X-Aspara-Tenant` only (not `?tenant=` or the cookie). A present value that is not a safe name (alphanumeric, underscore, hyphen) returns **400** and does not fall back to the default tenant.
+
 ### Creating a Run
 
 ```python
@@ -94,6 +96,10 @@ response = requests.post(
 )
 print(response.json())  # {"status": "ok"}
 ```
+
+Metric values must be numeric for a libSQL tenant. A non-numeric value returns **400**. Filesystem tenants (jsonl/polars) still store non-numeric values and return 200. An omitted `step` is stored as 0 on libSQL.
+
+RemoteRun / `aspara.init(tracker_uri=...)` does not send `X-Aspara-Tenant`; those clients write the default tenant.
 
 ### Uploading Artifacts
 

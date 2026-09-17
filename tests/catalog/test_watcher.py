@@ -48,6 +48,23 @@ class TestDataDirWatcher:
         assert watcher1.data_dir == tmp_path
 
     @pytest.mark.asyncio
+    async def test_get_instance_is_per_data_dir(self, tmp_path):
+        """Distinct data directories must not share a watcher."""
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+
+        watcher_a = await DataDirWatcher.get_instance(dir_a)
+        watcher_b = await DataDirWatcher.get_instance(dir_b)
+        watcher_a2 = await DataDirWatcher.get_instance(dir_a)
+
+        assert watcher_a is watcher_a2
+        assert watcher_a is not watcher_b
+        assert watcher_a.data_dir == dir_a.resolve()
+        assert watcher_b.data_dir == dir_b.resolve()
+
+    @pytest.mark.asyncio
     async def test_subscribe_reads_initial_data(self, tmp_path):
         """Test that subscribe yields initial data from existing files."""
         # Create project and run file
@@ -459,6 +476,40 @@ class TestRunCatalogSubscribe:
         assert len(records) >= 1
         assert records[0].project == "test_project"
         assert records[0].run == "run1"
+
+    @pytest.mark.asyncio
+    async def test_subscribe_does_not_yield_another_tenants_metrics(self, tmp_path):
+        """A later tenant must not see the first tenant's JSONL (same project/run names)."""
+        tenant_a = tmp_path / "a"
+        tenant_b = tmp_path / "b"
+        for tenant, loss in ((tenant_a, 1.0), (tenant_b, 9.0)):
+            project_dir = tenant / "proj"
+            project_dir.mkdir(parents=True)
+            (project_dir / "shared.jsonl").write_text(
+                json.dumps({
+                    "type": "metrics",
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "step": 0,
+                    "metrics": {"loss": loss},
+                })
+                + "\n"
+            )
+
+        catalog_a = RunCatalog(tenant_a)
+        catalog_b = RunCatalog(tenant_b)
+        since = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        targets = {"proj": ["shared"]}
+
+        records_a = await collect_records_with_timeout(catalog_a.subscribe(targets, since), timeout=0.5)
+        records_b = await collect_records_with_timeout(catalog_b.subscribe(targets, since), timeout=0.5)
+
+        def losses(records):
+            return [r.metrics["loss"] for r in records if isinstance(r, MetricRecord) and "loss" in r.metrics]
+
+        assert 1.0 in losses(records_a)
+        assert 9.0 not in losses(records_a)
+        assert 9.0 in losses(records_b)
+        assert 1.0 not in losses(records_b)
 
     @pytest.mark.asyncio
     async def test_subscribe_multiple_runs(self, tmp_path):

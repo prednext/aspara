@@ -13,8 +13,11 @@ spawns via ``asyncio.to_thread`` (e.g. the metrics endpoint loads runs in
 parallel). Correctness is favored over throughput for this first wiring.
 
 Not yet supported for libSQL tenants (kept as graceful no-ops / gaps):
-- ``subscribe`` (SSE change streaming) yields nothing -- there is no watcher.
-- Artifact *file* bytes / ZIP download; only artifact metadata is available.
+- ``subscribe`` (SSE change streaming) has no watcher; the generator stays
+  open until cancelled so EventSource does not reconnect in a loop.
+- Artifact *bytes* for *remote* tenants (a ``database`` URL). Local libSQL
+  tenants still pin files under ``base_dir``; remote tenants keep only
+  artifact metadata until object storage exists. ZIP download 404s for them.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from typing import Any
 import polars as pl
 
 from aspara.models import MetricRecord, StatusRecord
+from aspara.storage.artifacts.base import ArtifactStore
 
 from .libsql_catalog import LibsqlCatalog
 from .project_catalog import ProjectInfo
@@ -37,9 +41,15 @@ from .run_catalog import RunInfo
 class LibsqlProjectCatalog:
     """``ProjectCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""
 
-    def __init__(self, catalog: LibsqlCatalog, lock: threading.RLock | None = None) -> None:
+    def __init__(
+        self,
+        catalog: LibsqlCatalog,
+        lock: threading.RLock | None = None,
+        artifact_store: ArtifactStore | None = None,
+    ) -> None:
         self._cat = catalog
         self._lock = lock or threading.RLock()
+        self._artifacts = artifact_store
 
     def exists(self, name: str) -> bool:
         with self._lock:
@@ -63,15 +73,31 @@ class LibsqlProjectCatalog:
 
     def delete(self, name: str) -> None:
         with self._lock:
+            # Bytes first: if the DB delete fails, the project row remains and
+            # delete can be retried. DB-first would leave files that a same-name
+            # recreate would mix into ZIP.
+            if self._artifacts is not None:
+                self._artifacts.delete_project(name)
             self._cat.delete_project(name)
+
+    def close(self) -> None:
+        """Close the shared tenant database connection."""
+        with self._lock:
+            self._cat.close()
 
 
 class LibsqlRunCatalog:
     """``RunCatalog``-compatible facade backed by a shared ``LibsqlCatalog``."""
 
-    def __init__(self, catalog: LibsqlCatalog, lock: threading.RLock | None = None) -> None:
+    def __init__(
+        self,
+        catalog: LibsqlCatalog,
+        lock: threading.RLock | None = None,
+        artifact_store: ArtifactStore | None = None,
+    ) -> None:
         self._cat = catalog
         self._lock = lock or threading.RLock()
+        self._artifacts = artifact_store
 
     def get_runs(self, project: str) -> list[RunInfo]:
         with self._lock:
@@ -95,6 +121,10 @@ class LibsqlRunCatalog:
 
     def delete(self, project: str, run: str) -> None:
         with self._lock:
+            # Bytes first so a failed DB delete can be retried without mixing
+            # leftover files into a same-name recreate.
+            if self._artifacts is not None:
+                self._artifacts.delete_run(project, run)
             self._cat.delete_run(project, run)
 
     def get_artifacts(self, project: str, run: str) -> list[dict[str, Any]]:
@@ -121,10 +151,14 @@ class LibsqlRunCatalog:
     ) -> AsyncGenerator[MetricRecord | StatusRecord, None]:
         """SSE change streaming is not supported for libSQL tenants yet.
 
-        Yields nothing and closes immediately so the endpoint degrades to "no
-        live updates" instead of erroring. The REST metrics endpoint still
-        serves the current data. The element type matches ``RunCatalog.subscribe``
+        Yields nothing and stays open until cancelled so the SSE endpoint
+        degrades to "no live updates" instead of closing (which would make
+        EventSource reconnect forever). The REST metrics endpoint still serves
+        the current data. The element type matches ``RunCatalog.subscribe``
         so both catalogs present an identical streaming interface.
         """
-        return
-        yield  # pragma: no cover - makes this an (empty) async generator
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise
+        yield  # pragma: no cover - cancelled before any record

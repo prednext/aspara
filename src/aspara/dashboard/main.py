@@ -12,20 +12,22 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from aspara.catalog import DataDirWatcher
 from aspara.config import get_sse_dev_shutdown_timeout, is_dev_mode
+from aspara.dashboard.dependencies import _clear_catalog_caches
+from aspara.tenancy import (
+    TENANT_COOKIE,
+    TENANT_QUERY_PARAM,
+    InvalidTenantIdError,
+    safe_tenant_id,
+    tenant_id_from_request,
+)
 
-from .dependencies import DEFAULT_TENANT
 from .router import router
 
 logger = logging.getLogger(__name__)
-
-# Request header carrying the tenant id. This is a minimal seam for multi-tenant
-# serving; a real deployment may derive the tenant from a subdomain or a JWT claim
-# instead. When absent, requests fall back to the single default tenant.
-TENANT_HEADER = "X-Aspara-Tenant"
 
 
 # Global state for SSE connection management
@@ -47,11 +49,34 @@ class TenantMiddleware(BaseHTTPMiddleware):
     Downstream catalog/storage dependencies read ``request.state.tenant_id`` to
     serve the correct tenant's data. With no tenant resolver configured, the id is
     informational only and all requests still map to the single data directory.
+
+    Resolution order: ``X-Aspara-Tenant`` header, ``?tenant=``, ``aspara_tenant``
+    cookie, then the default tenant. A valid ``?tenant=`` also sets the cookie so
+    browser navigations and same-origin ``fetch`` keep the chosen tenant.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        request.state.tenant_id = request.headers.get(TENANT_HEADER) or DEFAULT_TENANT
-        return await call_next(request)
+        try:
+            request.state.tenant_id = tenant_id_from_request(
+                request.headers,
+                query=request.query_params,
+                cookies=request.cookies,
+            )
+        except InvalidTenantIdError as e:
+            response = JSONResponse({"detail": str(e)}, status_code=400)
+            response.delete_cookie(TENANT_COOKIE, path="/")
+            return response
+        response = await call_next(request)
+        queried = safe_tenant_id(request.query_params.get(TENANT_QUERY_PARAM))
+        if queried is not None:
+            response.set_cookie(
+                TENANT_COOKIE,
+                queried,
+                httponly=True,
+                samesite="lax",
+                path="/",
+            )
+        return response
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -147,11 +172,12 @@ async def lifespan(app: FastAPI):
         # Production mode: graceful shutdown with 30 second timeout
         await asyncio.sleep(0.5)
 
-    # Tear down the DataDirWatcher singleton so that the underlying
-    # awatch/inotify FD is closed and a subsequent reload (e.g. --dev
+    # Tear down DataDirWatcher instances so that the underlying
+    # awatch/inotify FDs are closed and a subsequent reload (e.g. --dev
     # auto-reload) does not reuse a stale watcher — which would leak
     # inotify FDs and deliver duplicate events.
     await DataDirWatcher.shutdown()
+    _clear_catalog_caches()
 
 
 app = FastAPI(

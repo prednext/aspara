@@ -1,9 +1,11 @@
 """
-DataDirWatcher - Singleton watcher for data directory.
+DataDirWatcher - One file watcher per data directory.
 
 This module provides a centralized file watcher service that uses a single
-inotify watcher for the entire data directory. Multiple SSE connections
-subscribe to this service, reducing inotify file descriptor usage.
+inotify watcher per data directory. Multiple SSE connections for the same
+tenant share that watcher, reducing inotify file descriptor usage. Distinct
+data directories (tenants) must not share a watcher, or live updates would
+read another tenant's files.
 """
 
 from __future__ import annotations
@@ -38,24 +40,25 @@ class Subscription:
 
 
 class DataDirWatcher:
-    """Singleton watcher for data directory.
+    """One inotify watcher per data directory.
 
-    This class provides a single inotify watcher for the entire data directory,
-    allowing multiple SSE connections to subscribe without consuming additional
-    file descriptors.
+    SSE connections for the same ``data_dir`` share a watcher so they do not
+    each consume a file descriptor. A process that serves more than one
+    tenant must keep a watcher per directory; otherwise subscribe() reads
+    the first tenant's files for every later tenant.
     """
 
     # Size thresholds for initial read strategy
     LARGE_FILE_THRESHOLD = 1 * 1024 * 1024  # 1MB
     TAIL_READ_SIZE = 64 * 1024  # Read last 64KB for large files
 
-    _instance: DataDirWatcher | None = None
+    _instances: dict[Path, DataDirWatcher] = {}
     _lock: asyncio.Lock | None = None
 
     def __init__(self, data_dir: Path) -> None:
         """Initialize the watcher.
 
-        Note: Use get_instance() to get the singleton instance.
+        Note: Use get_instance() to get the shared watcher for a data_dir.
 
         Args:
             data_dir: Base directory for data storage
@@ -72,46 +75,53 @@ class DataDirWatcher:
 
     @classmethod
     async def get_instance(cls, data_dir: Path) -> DataDirWatcher:
-        """Get or create singleton instance.
+        """Get or create the shared watcher for ``data_dir``.
 
         Args:
             data_dir: Base directory for data storage
 
         Returns:
-            DataDirWatcher singleton instance
+            The DataDirWatcher for this directory (created on first call).
         """
+        key = data_dir.resolve()
         if cls._lock is None:
             cls._lock = asyncio.Lock()
 
         async with cls._lock:
-            if cls._instance is None:
-                cls._instance = cls(data_dir)
-                logger.info(f"[Watcher] Created singleton DataDirWatcher for {data_dir}")
-            return cls._instance
+            instance = cls._instances.get(key)
+            if instance is None:
+                instance = cls(key)
+                cls._instances[key] = instance
+                logger.info(f"[Watcher] Created DataDirWatcher for {key}")
+            return instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Reset the singleton instance. Used for testing."""
-        cls._instance = None
+        """Drop all watchers. Used for testing."""
+        cls._instances = {}
         cls._lock = None
 
     @classmethod
     async def shutdown(cls) -> None:
-        """Properly shut down the singleton instance.
+        """Shut down every watcher.
 
-        Cancels the running dispatch task (which closes the underlying
-        awatch/inotify file descriptor) and then clears the singleton
-        state via reset_instance(). Call this from the application
-        lifespan shutdown so that a subsequent reload does not reuse a
-        stale watcher — which would leak inotify FDs and deliver
-        duplicate events.
+        Cancels each dispatch task (which closes the underlying
+        awatch/inotify file descriptor) and then clears the registry via
+        reset_instance(). Call this from the application lifespan shutdown
+        so that a subsequent reload does not reuse a stale watcher — which
+        would leak inotify FDs and deliver duplicate events.
         """
-        instance = cls._instance
-        if instance is not None and instance._task is not None and not instance._task.done():
-            logger.info("[Watcher] Shutting down dispatch task")
-            instance._task.cancel()
+        instances = list(cls._instances.values())
+        tasks = [instance._task for instance in instances if instance._task is not None and not instance._task.done()]
+        if tasks:
+            logger.info("[Watcher] Shutting down %s dispatch task(s)", len(tasks))
+            for task in tasks:
+                task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
-                await asyncio.wait_for(instance._task, timeout=2.0)
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=2.0,
+                )
         cls.reset_instance()
 
     def _parse_file_path(self, file_path: Path) -> tuple[str, str, str] | None:

@@ -170,6 +170,191 @@ def test_libsql_tenant_without_artifacts_returns_404(tmp_path: Path) -> None:
         configure_libsql_tenant_resolver(None)
 
 
+def test_remote_libsql_tenant_artifact_zip_is_404(tmp_path: Path) -> None:
+    """Remote tenants have no local artifact bytes; ZIP must not read the default data_dir."""
+    configure_data_dir(str(tmp_path))
+    leaked = tmp_path / "proj" / "r1" / "artifacts"
+    leaked.mkdir(parents=True, exist_ok=True)
+    (leaked / "secret.pt").write_bytes(b"should-not-be-served")
+
+    configure_libsql_tenant_resolver(
+        lambda t: LibsqlTenant(database="libsql://example") if t == "lib" else None
+    )
+    try:
+        resp = client.get(
+            "/api/projects/proj/runs/r1/artifacts/download",
+            headers={"X-Aspara-Tenant": "lib"},
+        )
+        assert resp.status_code == 404
+    finally:
+        configure_libsql_tenant_resolver(None)
+        configure_data_dir(None)
+
+
+def _write_artifacts(base: Path, project: str, run: str, files: dict[str, bytes]) -> Path:
+    artifacts_dir = base / project / run / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    for name, body in files.items():
+        (artifacts_dir / name).write_bytes(body)
+    return artifacts_dir
+
+
+def test_local_libsql_delete_run_removes_artifact_bytes(tmp_path: Path) -> None:
+    """DELETE a local libSQL run must remove its artifact dir, not aspara.db."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    _seed_libsql(tenant_dir, "proj", "keep", [(1000, 0, {"loss": 2.0})])
+    artifacts_dir = _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+    keep_dir = _write_artifacts(tenant_dir, "proj", "keep", {"ok.pt": b"keep"})
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib", **_XHR}
+    try:
+        resp = client.delete("/api/projects/proj/runs/r1", headers=hdr)
+        assert resp.status_code == 204
+        assert not artifacts_dir.exists()
+        assert not (tenant_dir / "proj" / "r1").exists()
+        assert (keep_dir / "ok.pt").read_bytes() == b"keep"
+        assert (tenant_dir / "aspara.db").exists()
+        zip_resp = client.get("/api/projects/proj/runs/r1/artifacts/download", headers={"X-Aspara-Tenant": "lib"})
+        assert zip_resp.status_code == 404
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_run_same_name_recreate_does_not_mix_artifacts(tmp_path: Path) -> None:
+    """Recreating a deleted run must not ZIP leftover model files from the old run."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        dele = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert dele.status_code == 204
+
+        _seed_libsql(tenant_dir, "proj", "r1", [(2000, 0, {"loss": 0.1})])
+        zip_resp = client.get("/api/projects/proj/runs/r1/artifacts/download", headers=hdr)
+        assert zip_resp.status_code == 404
+        assert not (tenant_dir / "proj" / "r1" / "artifacts" / "old.pt").exists()
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_project_removes_artifact_dirs_not_db(tmp_path: Path) -> None:
+    """DELETE a local libSQL project removes every run's files and leaves aspara.db."""
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    _seed_libsql(tenant_dir, "proj", "r2", [(1000, 0, {"loss": 2.0})])
+    _seed_libsql(tenant_dir, "other", "r1", [(1000, 0, {"loss": 9.0})])
+    _write_artifacts(tenant_dir, "proj", "r1", {"a.pt": b"a"})
+    _write_artifacts(tenant_dir, "proj", "r2", {"b.pt": b"b"})
+    other_dir = _write_artifacts(tenant_dir, "other", "r1", {"c.pt": b"c"})
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    try:
+        resp = client.delete("/api/projects/proj", headers={"X-Aspara-Tenant": "lib", **_XHR})
+        assert resp.status_code == 204
+        assert not (tenant_dir / "proj").exists()
+        assert (tenant_dir / "aspara.db").exists()
+        assert (other_dir / "c.pt").read_bytes() == b"c"
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_keeps_run_when_artifact_bytes_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If rmtree fails, the DB row must still be there so delete can be retried."""
+    from aspara.storage.artifacts.filesystem import FilesystemArtifactStore
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    artifacts_dir = _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+
+    def _boom(self: FilesystemArtifactStore, project: str, run: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(FilesystemArtifactStore, "delete_run", _boom)
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        resp = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert resp.status_code == 500
+        assert (artifacts_dir / "old.pt").read_bytes() == b"stale-weights"
+        got = client.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert _values(got.json(), "loss", "r1") == [1.0]
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_local_libsql_delete_retries_after_db_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bytes are removed first; a later DB failure must not block a retry."""
+    from aspara.catalog.libsql_catalog import LibsqlCatalog
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+    artifacts_dir = _write_artifacts(tenant_dir, "proj", "r1", {"old.pt": b"stale-weights"})
+
+    calls = {"n": 0}
+    real = LibsqlCatalog.delete_run
+
+    def _flaky(self: LibsqlCatalog, project: str, run: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("db down")
+        return real(self, project, run)
+
+    monkeypatch.setattr(LibsqlCatalog, "delete_run", _flaky)
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    hdr = {"X-Aspara-Tenant": "lib"}
+    try:
+        first = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert first.status_code == 500
+        assert not artifacts_dir.exists()
+        got = client.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert _values(got.json(), "loss", "r1") == [1.0]
+
+        second = client.delete("/api/projects/proj/runs/r1", headers={**hdr, **_XHR})
+        assert second.status_code == 204
+        gone = client.get("/api/projects/proj/runs/metrics?runs=r1", headers=hdr)
+        assert gone.json()["metrics"] == {}
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
+def test_null_artifacts_do_not_500_run_detail(tmp_path: Path) -> None:
+    """A run_meta row with null artifacts/params must still render the run page."""
+    from aspara.catalog import LibsqlCatalog
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "broken", [(1000, 0, {"loss": 1.0})])
+    cat = LibsqlCatalog(base_dir=str(tenant_dir))
+    try:
+        cat._execute(
+            "INSERT INTO run_meta (project, run, data) VALUES (?, ?, ?)",
+            (
+                "proj",
+                "broken",
+                '{"run_id": "x", "tags": null, "artifacts": null, "params": null, "config": null}',
+            ),
+        )
+        cat._conn.commit()
+    finally:
+        cat.close()
+
+    configure_libsql_tenant_resolver(lambda t: LibsqlTenant(base_dir=str(tenant_dir)) if t == "lib" else None)
+    try:
+        page = client.get("/projects/proj/runs/broken", headers={"X-Aspara-Tenant": "lib"})
+        assert page.status_code == 200
+        assert "broken" in page.text
+    finally:
+        configure_libsql_tenant_resolver(None)
+
+
 def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:
     dir_a = tmp_path / "a"
     dir_b = tmp_path / "b"
@@ -185,3 +370,50 @@ def test_two_libsql_tenants_isolated(tmp_path: Path) -> None:
         assert _values(rb.json(), "loss", "shared") == [9.0]
     finally:
         configure_libsql_tenant_resolver(None)
+
+
+def test_libsql_catalog_cache_shares_one_connection_on_concurrent_miss(tmp_path: Path) -> None:
+    """Two overlapping first requests for the same tenant must not leak a connection."""
+    import threading
+
+    from aspara.catalog import libsql_catalog as catalog_mod
+    from aspara.dashboard import dependencies as deps
+
+    tenant_dir = tmp_path / "lib"
+    _seed_libsql(tenant_dir, "proj", "r1", [(1000, 0, {"loss": 1.0})])
+
+    connects = {"n": 0}
+    orig_connect = catalog_mod.connect_libsql
+
+    def _connect(*args: Any, **kwargs: Any) -> Any:
+        connects["n"] += 1
+        return orig_connect(*args, **kwargs)
+
+    catalog_mod.connect_libsql = _connect  # type: ignore[method-assign]
+    deps._clear_catalog_caches()
+    try:
+        results: list[Any] = []
+        errors: list[BaseException] = []
+
+        def _borrow() -> None:
+            try:
+                catalogs, release = deps._borrow_libsql_catalogs(str(tenant_dir), None, None, None)
+                results.append((catalogs, release))
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_borrow) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+        assert errors == []
+        assert connects["n"] == 1
+        assert len(results) == 8
+        first = results[0][0][0]
+        assert all(catalogs[0] is first for catalogs, _ in results)
+        for _, release in results:
+            release()
+    finally:
+        catalog_mod.connect_libsql = orig_connect  # type: ignore[method-assign]
+        deps._clear_catalog_caches()

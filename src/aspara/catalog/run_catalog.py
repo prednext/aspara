@@ -552,8 +552,9 @@ class RunCatalog:
     ) -> AsyncGenerator[MetricRecord | StatusRecord, None]:
         """Subscribe to file changes for specified targets using DataDirWatcher.
 
-        This method uses a singleton DataDirWatcher instance to minimize inotify
-        file descriptor usage. Multiple SSE connections share the same watcher.
+        This method uses one DataDirWatcher per data directory to minimize
+        inotify file descriptor usage. SSE connections for the same tenant
+        share that watcher; other tenants have their own.
 
         Args:
             targets: Dictionary mapping project names to list of run names.
@@ -590,7 +591,8 @@ class RunCatalog:
             try:
                 with open(metadata_file) as f:
                     metadata = json.load(f)
-                    return metadata.get("artifacts", [])
+                    artifacts = metadata.get("artifacts", [])
+                    return artifacts if isinstance(artifacts, list) else []
             except Exception as e:
                 logger.warning(f"Error reading artifacts from metadata file for {run}: {e}")
 

@@ -9,8 +9,8 @@ This module provides reusable dependencies for:
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections import OrderedDict
+from collections.abc import Callable, Iterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -20,46 +20,45 @@ from fastapi import Path as PathParam
 
 from aspara.catalog import LibsqlCatalog, ProjectCatalog, RunCatalog
 from aspara.catalog.libsql_adapters import LibsqlProjectCatalog, LibsqlRunCatalog
-from aspara.config import get_data_dir
+from aspara.storage.artifacts import ArtifactStore
+from aspara.storage.tenant import artifact_store_for_tenant
+from aspara.tenancy import (
+    DEFAULT_TENANT,
+    LibsqlTenant,
+    configure_data_dir,
+    configure_libsql_tenant_resolver,
+    configure_tenant_resolver,
+    register_config_change_callback,
+    resolve_artifact_base_dir,
+    resolve_data_dir,
+    resolve_libsql_tenant,
+)
 from aspara.utils import validators
+
+# Re-exported for backward compatibility; tenant resolution now lives in
+# ``aspara.tenancy`` so the tracker (write path) and dashboard (read path) share
+# one source of truth. ``configure_*`` are re-exported so existing callers keep
+# importing them from here.
+__all__ = [
+    "DEFAULT_TENANT",
+    "LibsqlTenant",
+    "configure_data_dir",
+    "configure_tenant_resolver",
+    "configure_libsql_tenant_resolver",
+    "ProjectCatalogLike",
+    "RunCatalogLike",
+    "ProjectCatalogDep",
+    "RunCatalogDep",
+    "DataDirDep",
+    "ArtifactStoreDep",
+    "ValidatedProject",
+    "ValidatedRun",
+]
 
 # The two catalog dependencies can be served by either the file-based catalogs or
 # their libSQL-backed facades, depending on how the request's tenant resolves.
 ProjectCatalogLike = ProjectCatalog | LibsqlProjectCatalog
 RunCatalogLike = RunCatalog | LibsqlRunCatalog
-
-# Tenant id used when no tenant is resolved from the request (single-tenant default).
-DEFAULT_TENANT = "default"
-
-# Mutable container for the single configured data directory (single-tenant default).
-_custom_data_dir: list[str | None] = [None]
-
-# Optional tenant resolver: tenant_id -> data directory. When unset, every request
-# uses the single configured data directory, i.e. behavior is identical to the
-# pre-multi-tenant dashboard. Multi-tenant serving installs a resolver via
-# configure_tenant_resolver() that maps each tenant to its own data location.
-_tenant_resolver: list[Callable[[str], str | Path] | None] = [None]
-
-
-@dataclass(frozen=True)
-class LibsqlTenant:
-    """Connection spec for a libSQL-backed tenant.
-
-    Either ``base_dir`` (a local ``{base_dir}/aspara.db`` file) or ``database``
-    (a remote ``libsql://`` URL, with an optional ``auth_token``) identifies the
-    tenant's single database.
-    """
-
-    base_dir: str | None = None
-    database: str | None = None
-    auth_token: str | None = None
-
-
-# Optional libSQL tenant resolver: tenant_id -> LibsqlTenant | None. When it
-# returns a spec, that tenant is served from its libSQL database instead of the
-# filesystem. Returning None (or leaving this unset) falls back to the file-based
-# path resolution, so filesystem tenants are entirely unaffected.
-_libsql_resolver: list[Callable[[str], LibsqlTenant | None] | None] = [None]
 
 
 @lru_cache(maxsize=32)
@@ -69,38 +68,80 @@ def _catalogs_for_dir(data_dir: str) -> tuple[ProjectCatalog, RunCatalog, Path]:
     return ProjectCatalog(str(path)), RunCatalog(str(path)), path
 
 
-@lru_cache(maxsize=32)
-def _libsql_catalogs_for_key(
+class _LibsqlCatalogEntry:
+    """Cached libSQL catalogs plus a borrow count so eviction cannot close in-use connections."""
+
+    __slots__ = ("project_cat", "run_cat", "data_dir", "refs")
+
+    def __init__(
+        self,
+        project_cat: LibsqlProjectCatalog,
+        run_cat: LibsqlRunCatalog,
+        data_dir: Path,
+    ) -> None:
+        self.project_cat = project_cat
+        self.run_cat = run_cat
+        self.data_dir = data_dir
+        self.refs = 0
+
+
+_libsql_catalog_lock = threading.Lock()
+_libsql_catalog_cache: OrderedDict[
+    tuple[str | None, str | None, str | None],
+    _LibsqlCatalogEntry,
+] = OrderedDict()
+_LIBSQL_CATALOG_CACHE_MAX = 32
+
+
+def _borrow_libsql_catalogs(
     base_dir: str | None,
     database: str | None,
     auth_token: str | None,
-) -> tuple[LibsqlProjectCatalog, LibsqlRunCatalog, Path]:
-    """Build and cache libSQL-backed catalog facades for one tenant database.
+    artifact_store: ArtifactStore | None,
+) -> tuple[tuple[LibsqlProjectCatalog, LibsqlRunCatalog, Path], Callable[[], None]]:
+    """Borrow cached libSQL catalogs for one tenant database.
 
-    The shared ``LibsqlCatalog`` (and its connection) is kept alive by this cache
-    for the tenant's lifetime; a single re-entrant lock serializes access.
+    Concurrent first access shares one connection. Eviction closes only idle
+    entries (``refs == 0``). The caller must invoke the returned release
+    function exactly once.
     """
-    catalog = LibsqlCatalog(base_dir=base_dir, database=database, auth_token=auth_token)
-    lock = threading.RLock()
-    # A local libSQL tenant has a real directory (used only by the artifact-ZIP
-    # route, which will simply 404 when no artifacts dir exists); a remote tenant
-    # has none, so point at a sentinel path that never resolves.
-    data_dir = Path(base_dir) if base_dir else Path("__aspara_libsql_no_local_dir__")
-    return LibsqlProjectCatalog(catalog, lock), LibsqlRunCatalog(catalog, lock), data_dir
+    key = (base_dir, database, auth_token)
+    with _libsql_catalog_lock:
+        entry = _libsql_catalog_cache.get(key)
+        if entry is None:
+            while len(_libsql_catalog_cache) >= _LIBSQL_CATALOG_CACHE_MAX:
+                victim_key = next((k for k, v in _libsql_catalog_cache.items() if v.refs == 0), None)
+                if victim_key is None:
+                    break
+                victim = _libsql_catalog_cache.pop(victim_key)
+                victim.project_cat.close()
+            catalog = LibsqlCatalog(base_dir=base_dir, database=database, auth_token=auth_token)
+            lock = threading.RLock()
+            data_dir = Path(base_dir) if base_dir else Path(".")
+            entry = _LibsqlCatalogEntry(
+                LibsqlProjectCatalog(catalog, lock, artifact_store),
+                LibsqlRunCatalog(catalog, lock, artifact_store),
+                data_dir,
+            )
+            _libsql_catalog_cache[key] = entry
+        else:
+            _libsql_catalog_cache.move_to_end(key)
+        entry.refs += 1
+        catalogs = (entry.project_cat, entry.run_cat, entry.data_dir)
 
+    released = False
 
-def _resolve_data_dir(tenant_id: str) -> Path:
-    """Resolve a tenant id to its data directory.
+    def release() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        with _libsql_catalog_lock:
+            current = _libsql_catalog_cache.get(key)
+            if current is not None:
+                current.refs = max(0, current.refs - 1)
 
-    Uses the configured tenant resolver when present; otherwise falls back to the
-    single configured data directory (single-tenant behavior).
-    """
-    resolver = _tenant_resolver[0]
-    if resolver is not None:
-        return Path(resolver(tenant_id))
-    if _custom_data_dir[0] is not None:
-        return Path(_custom_data_dir[0])
-    return Path(get_data_dir())
+    return catalogs, release
 
 
 def _tenant_id_from_request(request: Request | None) -> str:
@@ -112,82 +153,84 @@ def _tenant_id_from_request(request: Request | None) -> str:
     return DEFAULT_TENANT
 
 
-def _catalogs_for_request(request: Request | None) -> tuple[ProjectCatalogLike, RunCatalogLike, Path]:
-    """Resolve the catalogs for the request's tenant.
-
-    A libSQL tenant (when a libSQL resolver is installed and returns a spec) is
-    served by the libSQL-backed facades; otherwise the file-based catalogs are
-    used, exactly as before.
-    """
+def _borrow_catalogs_for_request(
+    request: Request | None,
+) -> tuple[tuple[ProjectCatalogLike, RunCatalogLike, Path], Callable[[], None]]:
+    """Resolve catalogs for the request's tenant and a matching release callback."""
     tenant_id = _tenant_id_from_request(request)
 
-    resolver = _libsql_resolver[0]
-    if resolver is not None:
-        spec = resolver(tenant_id)
-        if spec is not None:
-            return _libsql_catalogs_for_key(spec.base_dir, spec.database, spec.auth_token)
+    spec = resolve_libsql_tenant(tenant_id)
+    if spec is not None:
+        return _borrow_libsql_catalogs(
+            spec.base_dir,
+            spec.database,
+            spec.auth_token,
+            artifact_store_for_tenant(tenant_id),
+        )
 
-    data_dir = _resolve_data_dir(tenant_id)
-    return _catalogs_for_dir(str(data_dir))
+    data_dir = resolve_data_dir(tenant_id)
+    return _catalogs_for_dir(str(data_dir)), lambda: None
 
 
 def _get_catalogs() -> tuple[ProjectCatalog, RunCatalog, Path]:
     """Backward-compatible accessor for the default tenant's (filesystem) catalogs."""
-    return _catalogs_for_dir(str(_resolve_data_dir(DEFAULT_TENANT)))
+    return _catalogs_for_dir(str(resolve_data_dir(DEFAULT_TENANT)))
 
 
-def get_project_catalog(request: Request) -> ProjectCatalogLike:
+def get_project_catalog(request: Request) -> Iterator[ProjectCatalogLike]:
     """Get the project catalog for the request's tenant."""
-    return _catalogs_for_request(request)[0]
+    catalogs, release = _borrow_catalogs_for_request(request)
+    try:
+        yield catalogs[0]
+    finally:
+        release()
 
 
-def get_run_catalog(request: Request) -> RunCatalogLike:
+def get_run_catalog(request: Request) -> Iterator[RunCatalogLike]:
     """Get the run catalog for the request's tenant."""
-    return _catalogs_for_request(request)[1]
+    catalogs, release = _borrow_catalogs_for_request(request)
+    try:
+        yield catalogs[1]
+    finally:
+        release()
 
 
 def get_data_dir_path(request: Request) -> Path:
-    """Get the data directory for the request's tenant."""
-    return _catalogs_for_request(request)[2]
+    """Get the local artifact-bytes directory for the request's tenant.
+
+    Remote libSQL tenants do not store artifact bytes locally, so this raises
+    404 and the ZIP route never falls back to the shared default data_dir.
+    """
+    tenant_id = _tenant_id_from_request(request)
+    root = resolve_artifact_base_dir(tenant_id)
+    if root is None:
+        raise HTTPException(status_code=404, detail="No artifacts found for this run")
+    return root
+
+
+def get_artifact_store(request: Request) -> ArtifactStore:
+    """Get the artifact-byte store for the request's tenant.
+
+    Remote libSQL tenants have no local bytes, so this raises 404.
+    """
+    store = artifact_store_for_tenant(_tenant_id_from_request(request))
+    if store is None:
+        raise HTTPException(status_code=404, detail="No artifacts found for this run")
+    return store
 
 
 def _clear_catalog_caches() -> None:
     """Drop all cached catalog instances (file-based and libSQL-backed)."""
     _catalogs_for_dir.cache_clear()
-    _libsql_catalogs_for_key.cache_clear()
+    with _libsql_catalog_lock:
+        entries = list(_libsql_catalog_cache.values())
+        _libsql_catalog_cache.clear()
+    for entry in entries:
+        entry.project_cat.close()
 
 
-def configure_data_dir(data_dir: str | None = None) -> None:
-    """Configure the single (default-tenant) data directory and clear caches.
-
-    Args:
-        data_dir: Custom data directory path. If None, uses the default.
-    """
-    _clear_catalog_caches()
-    _custom_data_dir[0] = data_dir
-
-
-def configure_tenant_resolver(resolver: Callable[[str], str | Path] | None) -> None:
-    """Install (or clear) the tenant -> data directory resolver.
-
-    Passing None restores single-tenant behavior (the configured data directory).
-    This is the seam the multi-tenant SaaS path uses to map each tenant to its own
-    filesystem data location.
-    """
-    _clear_catalog_caches()
-    _tenant_resolver[0] = resolver
-
-
-def configure_libsql_tenant_resolver(resolver: Callable[[str], LibsqlTenant | None] | None) -> None:
-    """Install (or clear) the tenant -> libSQL database resolver.
-
-    When installed and it returns a :class:`LibsqlTenant` for a tenant, that
-    tenant is served from its libSQL database via the libSQL-backed catalog
-    facades. Returning None for a tenant (or passing None here) falls back to the
-    filesystem resolver, so file-based tenants are unaffected.
-    """
-    _clear_catalog_caches()
-    _libsql_resolver[0] = resolver
+# Invalidate cached catalogs whenever the tenant resolver configuration changes.
+register_config_change_callback(_clear_catalog_caches)
 
 
 def get_validated_project(project: Annotated[str, PathParam(description="Project name")]) -> str:
@@ -234,3 +277,4 @@ ValidatedRun = Annotated[str, Depends(get_validated_run)]
 ProjectCatalogDep = Annotated[ProjectCatalogLike, Depends(get_project_catalog)]
 RunCatalogDep = Annotated[RunCatalogLike, Depends(get_run_catalog)]
 DataDirDep = Annotated[Path, Depends(get_data_dir_path)]
+ArtifactStoreDep = Annotated[ArtifactStore, Depends(get_artifact_store)]

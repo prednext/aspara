@@ -26,7 +26,7 @@ class ProjectInfo(BaseModel):
 
     name: str
     run_count: int
-    last_update: datetime
+    last_update: datetime | None = None
 
 
 # Run data file suffixes used when discovering and counting runs.

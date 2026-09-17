@@ -49,6 +49,9 @@ Thumbs.db
 *.sqlite
 *.db
 
+# Local multi-tenant demo output (examples/demo_libsql_tenant.py)
+.aspara_demo/
+
 # uv
 .python-version
 

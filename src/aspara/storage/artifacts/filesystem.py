@@ -64,7 +64,7 @@ class FilesystemArtifactStore(ArtifactStore):
 
         return StoredArtifact(name=name, size=dest_size)
 
-    def put_stream(
+    def stage_stream(
         self,
         project: str,
         run: str,
@@ -78,27 +78,41 @@ class FilesystemArtifactStore(ArtifactStore):
 
         dest = artifacts_dir / name
         validators.validate_safe_path(dest, artifacts_dir)
+        partial = dest.with_name(dest.name + ".partial")
+        validators.validate_safe_path(partial, artifacts_dir)
 
         written = 0
         try:
-            with open(dest, "wb") as f:
+            with open(partial, "wb") as f:
                 for chunk in chunks:
                     if not chunk:
                         continue
                     written += len(chunk)
                     if written > max_size:
-                        f.close()
-                        dest.unlink(missing_ok=True)
                         raise ArtifactTooLargeError(max_size)
                     f.write(chunk)
         except ArtifactTooLargeError:
+            partial.unlink(missing_ok=True)
             raise
         except Exception:
-            # Clean up the partial file on any write error.
-            dest.unlink(missing_ok=True)
+            partial.unlink(missing_ok=True)
             raise
 
         return StoredArtifact(name=name, size=written)
+
+    def commit_put(self, project: str, run: str, name: str) -> None:
+        dest = self._artifacts_dir(project, run) / name
+        validators.validate_safe_path(dest, self._base_dir)
+        partial = dest.with_name(dest.name + ".partial")
+        validators.validate_safe_path(partial, self._base_dir)
+        os.replace(partial, dest)
+
+    def abort_put(self, project: str, run: str, name: str) -> None:
+        dest = self._artifacts_dir(project, run) / name
+        validators.validate_safe_path(dest, self._base_dir)
+        partial = dest.with_name(dest.name + ".partial")
+        validators.validate_safe_path(partial, self._base_dir)
+        partial.unlink(missing_ok=True)
 
     def list(self, project: str, run: str) -> Sequence[StoredArtifact]:
         artifacts_dir = self._artifacts_dir(project, run)
@@ -113,6 +127,9 @@ class FilesystemArtifactStore(ArtifactStore):
         with os.scandir(artifacts_dir) as it:
             for entry in it:
                 if entry.is_file(follow_symlinks=False):
+                    # leftover temps must not appear in ZIP listings.
+                    if entry.name.endswith(".partial"):
+                        continue
                     size = entry.stat(follow_symlinks=False).st_size
                     entries.append(StoredArtifact(name=entry.name, size=size))
                 elif entry.is_symlink():
@@ -124,3 +141,26 @@ class FilesystemArtifactStore(ArtifactStore):
         path = artifacts_dir / name
         validators.validate_safe_path(path, artifacts_dir)
         return open(path, "rb")
+
+    def delete_run(self, project: str, run: str) -> None:
+        validators.validate_name(project, "project name")
+        validators.validate_name(run, "run name")
+        run_dir = self._base_dir / project / run
+        validators.validate_safe_path(run_dir, self._base_dir)
+        if run_dir.exists():
+            shutil.rmtree(run_dir)
+
+    def delete_project(self, project: str) -> None:
+        validators.validate_name(project, "project name")
+        project_dir = self._base_dir / project
+        validators.validate_safe_path(project_dir, self._base_dir)
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+
+    def delete_file(self, project: str, run: str, name: str) -> None:
+        validators.validate_name(project, "project name")
+        validators.validate_name(run, "run name")
+        validators.validate_artifact_name(name)
+        path = self._artifacts_dir(project, run) / name
+        validators.validate_safe_path(path, self._base_dir)
+        path.unlink(missing_ok=True)

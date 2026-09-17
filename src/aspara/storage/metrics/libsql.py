@@ -23,6 +23,11 @@ when this backend is actually selected (``ASPARA_STORAGE_BACKEND=libsql``).
 
 from __future__ import annotations
 
+import contextlib
+import datetime as dt
+import threading
+from collections import OrderedDict
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +36,28 @@ import polars as pl
 from aspara.exceptions import RunNotFoundError
 
 from .base import MetricsStorage
+
+
+def _to_epoch_ms(value: Any) -> int:
+    """Normalize a timestamp to UNIX milliseconds.
+
+    Accepts what the various write paths produce: an ``int``/``float`` already in
+    milliseconds, a ``datetime``, or an ISO-8601 string (as emitted by
+    ``MetricRecord.model_dump(mode="json")``). Naive datetimes are treated as UTC.
+    """
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, dt.datetime):
+        moment = value if value.tzinfo is not None else value.replace(tzinfo=dt.timezone.utc)
+        return int(moment.timestamp() * 1000)
+    if isinstance(value, str):
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    return int(value)
 
 _CREATE_TABLE = (
     "CREATE TABLE IF NOT EXISTS metrics ("
@@ -91,6 +118,132 @@ def connect_libsql(
     return libsql.connect(str(base / "aspara.db"))  # ty: ignore[unresolved-attribute]
 
 
+_LIBSQL_POOL_MAX = 32
+_libsql_pool_lock = threading.Lock()
+_libsql_pool: OrderedDict[tuple[str | None, str | None, str | None], _LibsqlPoolEntry] = OrderedDict()
+_libsql_pool_callback_registered = False
+
+
+class _LibsqlPoolEntry:
+    """One cached tenant connection, shared by ingest (and optional readers)."""
+
+    __slots__ = ("conn", "lock", "refs")
+
+    def __init__(self, conn: Any) -> None:
+        self.conn = conn
+        self.lock = threading.RLock()
+        self.refs = 0
+
+
+class LibsqlConnectionLease:
+    """Borrowed pooled connection. ``release()`` must be called once."""
+
+    __slots__ = ("conn", "lock", "_key", "_released")
+
+    def __init__(
+        self,
+        conn: Any,
+        lock: threading.RLock,
+        key: tuple[str | None, str | None, str | None],
+    ) -> None:
+        self.conn = conn
+        self.lock = lock
+        self._key = key
+        self._released = False
+
+    def release(self) -> None:
+        """Drop this borrow. The connection stays cached for later requests."""
+        if self._released:
+            return
+        self._released = True
+        _release_libsql_connection(self._key)
+
+
+def _libsql_pool_key(
+    base_dir: str | Path | None,
+    database: str | None,
+    auth_token: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    db = (database or "").strip() or None
+    base = None if db else (str(base_dir) if base_dir else None)
+    return (base, db, auth_token or None)
+
+
+def _ensure_pool_callback() -> None:
+    global _libsql_pool_callback_registered
+    if _libsql_pool_callback_registered:
+        return
+    from aspara.tenancy import register_config_change_callback
+
+    register_config_change_callback(clear_libsql_connection_pool)
+    _libsql_pool_callback_registered = True
+
+
+def _evict_idle_libsql_connections() -> None:
+    while len(_libsql_pool) >= _LIBSQL_POOL_MAX:
+        victim_key = next((k for k, v in _libsql_pool.items() if v.refs == 0), None)
+        if victim_key is None:
+            break
+        victim = _libsql_pool.pop(victim_key)
+        with contextlib.suppress(Exception):
+            victim.conn.close()
+
+
+def acquire_libsql_connection(
+    base_dir: str | Path | None = None,
+    *,
+    database: str | None = None,
+    auth_token: str | None = None,
+) -> LibsqlConnectionLease:
+    """Borrow a tenant libSQL connection, connecting and ensuring schema on first use.
+
+    Sequential ingest requests for the same tenant reuse the connection so a remote
+    RTT is not paid for connect/DDL on every ``log``. The caller must ``release()``
+    the lease (typically from storage ``close()``).
+    """
+    _ensure_pool_callback()
+    key = _libsql_pool_key(base_dir, database, auth_token)
+    with _libsql_pool_lock:
+        entry = _libsql_pool.get(key)
+        if entry is None:
+            _evict_idle_libsql_connections()
+            conn = connect_libsql(
+                base_dir if not (database or "").strip() else None,
+                database=database,
+                auth_token=auth_token,
+            )
+            try:
+                ensure_metrics_schema(conn)
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    conn.close()
+                raise
+            entry = _LibsqlPoolEntry(conn)
+            _libsql_pool[key] = entry
+        else:
+            _libsql_pool.move_to_end(key)
+        entry.refs += 1
+        return LibsqlConnectionLease(entry.conn, entry.lock, key)
+
+
+def _release_libsql_connection(key: tuple[str | None, str | None, str | None]) -> None:
+    with _libsql_pool_lock:
+        entry = _libsql_pool.get(key)
+        if entry is None:
+            return
+        entry.refs = max(0, entry.refs - 1)
+
+
+def clear_libsql_connection_pool() -> None:
+    """Close every pooled connection (resolver changes, process shutdown)."""
+    with _libsql_pool_lock:
+        entries = list(_libsql_pool.values())
+        _libsql_pool.clear()
+    for entry in entries:
+        with contextlib.suppress(Exception):
+            entry.conn.close()
+
+
 def ensure_metrics_schema(conn: Any) -> None:
     """Create the ``metrics`` table and index if they do not already exist."""
     conn.execute(_CREATE_TABLE)
@@ -141,6 +294,7 @@ class LibsqlMetricsStorage(MetricsStorage):
         *,
         database: str | None = None,
         auth_token: str | None = None,
+        reuse_connection: bool = False,
     ) -> None:
         """Initialize libSQL storage.
 
@@ -152,18 +306,40 @@ class LibsqlMetricsStorage(MetricsStorage):
             database: Optional libSQL database URL (e.g. ``libsql://...turso.io``).
                 When set, connects remotely instead of using a local file.
             auth_token: Optional auth token for a remote database.
+            reuse_connection: When True, borrow a process-wide pooled connection for
+                this tenant instead of connecting and closing on every instance.
         """
         self.project_name = project_name
         self.run_name = run_name
+        self._lease: LibsqlConnectionLease | None = None
 
         # ``self._conn`` is typed Any because ``libsql`` ships no type stubs.
-        self._conn: Any = connect_libsql(base_dir if database is None else None, database=database, auth_token=auth_token)
-        ensure_metrics_schema(self._conn)
+        if reuse_connection:
+            self._lease = acquire_libsql_connection(
+                base_dir if database is None else None,
+                database=database,
+                auth_token=auth_token,
+            )
+            self._conn = self._lease.conn
+            return
+
+        conn = connect_libsql(base_dir if database is None else None, database=database, auth_token=auth_token)
+        try:
+            ensure_metrics_schema(conn)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                conn.close()
+            raise
+        self._conn = conn
+
+    def _conn_lock(self) -> threading.RLock | nullcontext[None]:
+        return self._lease.lock if self._lease is not None else nullcontext()
 
     def save(self, metrics_data: dict[str, Any]) -> str:
         """Insert one step's metrics for this project/run and commit.
 
-        Non-numeric metric values are skipped (metrics must be numeric).
+        Non-numeric metric values raise ``ValueError`` (the tracker maps that to HTTP 400).
+        Filesystem backends (jsonl/polars) still store non-numeric values.
 
         Args:
             metrics_data: Dict with ``timestamp`` (UNIX ms), ``step``, and ``metrics``.
@@ -171,24 +347,26 @@ class LibsqlMetricsStorage(MetricsStorage):
         Returns:
             str: Empty string.
         """
-        ts = int(metrics_data.get("timestamp", 0))
-        step = int(metrics_data.get("step", 0))
+        ts = _to_epoch_ms(metrics_data.get("timestamp", 0))
+        raw_step = metrics_data.get("step")
+        step = 0 if raw_step is None else int(raw_step)
         metrics: dict[str, Any] = metrics_data.get("metrics", {})
 
         rows: list[tuple[str, str, int, int, str, float]] = []
         for name, value in metrics.items():
             try:
                 numeric = float(value)
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Metric '{name}' must be numeric, got {type(value).__name__}") from e
             rows.append((self.project_name, self.run_name, ts, step, name, numeric))
 
         if rows:
-            self._conn.executemany(
-                "INSERT INTO metrics (project, run, ts, step, name, value) VALUES (?, ?, ?, ?, ?, ?)",
-                rows,
-            )
-            self._conn.commit()
+            with self._conn_lock():
+                self._conn.executemany(
+                    "INSERT INTO metrics (project, run, ts, step, name, value) VALUES (?, ?, ?, ?, ?, ?)",
+                    rows,
+                )
+                self._conn.commit()
         return ""
 
     def load(
@@ -209,11 +387,12 @@ class LibsqlMetricsStorage(MetricsStorage):
         Raises:
             RunNotFoundError: If the run has no rows in this database.
         """
-        cur = self._conn.execute(
-            "SELECT ts, step, name, value FROM metrics WHERE project = ? AND run = ? ORDER BY ts, step",
-            (self.project_name, self.run_name),
-        )
-        rows = cur.fetchall()
+        with self._conn_lock():
+            cur = self._conn.execute(
+                "SELECT ts, step, name, value FROM metrics WHERE project = ? AND run = ? ORDER BY ts, step",
+                (self.project_name, self.run_name),
+            )
+            rows = cur.fetchall()
         if not rows:
             raise RunNotFoundError(f"Run '{self.run_name}' not found in project '{self.project_name}'")
 
@@ -221,11 +400,17 @@ class LibsqlMetricsStorage(MetricsStorage):
 
     def finish(self) -> None:
         """Commit any pending writes."""
-        self._conn.commit()
+        with self._conn_lock():
+            self._conn.commit()
 
     def close(self) -> None:
-        """Commit and close the database connection."""
+        """Commit and close, or return a pooled connection to the cache."""
         try:
-            self._conn.commit()
+            with self._conn_lock():
+                self._conn.commit()
         finally:
-            self._conn.close()
+            if self._lease is not None:
+                self._lease.release()
+                self._lease = None
+            else:
+                self._conn.close()

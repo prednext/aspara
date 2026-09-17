@@ -81,6 +81,36 @@ def test_dashboard_isolates_tenants(tmp_path: Path) -> None:
         configure_data_dir(None)
 
 
+def test_tenant_query_param_sets_cookie_for_browser(tmp_path: Path) -> None:
+    """A browser cannot send X-Aspara-Tenant; ?tenant= plus the cookie must work."""
+    tenant_a = tmp_path / "tenant_a"
+    tenant_b = tmp_path / "tenant_b"
+    _write_run(tenant_a, "proj", "shared", [(1000, 0, {"loss": 1.0})])
+    _write_run(tenant_b, "proj", "shared", [(1000, 0, {"loss": 9.0})])
+    mapping = {"a": str(tenant_a), "b": str(tenant_b)}
+    configure_tenant_resolver(lambda t: mapping.get(t, str(tmp_path / "missing")))
+    browser = TestClient(app)
+    try:
+        via_query = browser.get("/api/projects/proj/runs/metrics?runs=shared&tenant=a")
+        assert via_query.status_code == 200
+        assert _values(via_query.json(), "loss", "shared") == [1.0]
+        assert via_query.cookies.get("aspara_tenant") == "a"
+
+        # Later same-origin requests (no query, no header) keep the cookie tenant.
+        via_cookie = browser.get("/api/projects/proj/runs/metrics?runs=shared")
+        assert _values(via_cookie.json(), "loss", "shared") == [1.0]
+
+        # Header still wins over the cookie.
+        via_header = browser.get(
+            "/api/projects/proj/runs/metrics?runs=shared",
+            headers={"X-Aspara-Tenant": "b"},
+        )
+        assert _values(via_header.json(), "loss", "shared") == [9.0]
+    finally:
+        configure_tenant_resolver(None)
+        configure_data_dir(None)
+
+
 def test_default_tenant_behavior_unchanged_without_resolver(tmp_path: Path) -> None:
     """With no resolver, the tenant header is informational and the single
     configured data directory is always used (backward compatible)."""
@@ -96,5 +126,29 @@ def test_default_tenant_behavior_unchanged_without_resolver(tmp_path: Path) -> N
         r2 = client.get("/api/projects/proj/runs/metrics?runs=r", headers={"X-Aspara-Tenant": "anything"})
         assert r2.status_code == 200
         assert _values(r2.json(), "loss", "r") == [1.0]
+    finally:
+        configure_data_dir(None)
+
+
+def test_invalid_tenant_id_is_rejected(tmp_path: Path) -> None:
+    """A present but unsafe tenant id is 400, not silently the default tenant."""
+    _write_run(tmp_path, "proj", "r", [(1000, 0, {"loss": 1.0})])
+    configure_data_dir(str(tmp_path))
+    browser = TestClient(app)
+    try:
+        via_query = browser.get("/api/projects/proj/runs/metrics?runs=r&tenant=../etc")
+        assert via_query.status_code == 400
+        assert "Invalid tenant" in via_query.json()["detail"]
+
+        via_header = browser.get(
+            "/api/projects/proj/runs/metrics?runs=r",
+            headers={"X-Aspara-Tenant": "my.tenant"},
+        )
+        assert via_header.status_code == 400
+
+        # After the 400, a request with no tenant still reaches the default data.
+        ok = browser.get("/api/projects/proj/runs/metrics?runs=r")
+        assert ok.status_code == 200
+        assert _values(ok.json(), "loss", "r") == [1.0]
     finally:
         configure_data_dir(None)
