@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -85,8 +86,12 @@ def init(
         selected_backend = resolve_metrics_storage_backend(storage_backend)
         _storage_backend = selected_backend
 
-        # Create Run which internally delegates to LocalRun or RemoteRun based on tracker_uri
         from aspara.run.run import Run
+
+        resolved_uri = tracker_uri
+        if resolved_uri is None:
+            env_uri = os.environ.get("ASPARA_TRACKER_URI", "").strip()
+            resolved_uri = env_uri or None
 
         run = Run(
             name=name,
@@ -96,7 +101,7 @@ def init(
             notes=notes,
             dir=dir,
             storage_backend=selected_backend,
-            tracker_uri=tracker_uri,
+            tracker_uri=resolved_uri,
             project_tags=project_tags,
             resume=resume,
             intent=intent,

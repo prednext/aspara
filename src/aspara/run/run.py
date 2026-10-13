@@ -7,20 +7,18 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from aspara.run._config import Config
     from aspara.run._local_run import LocalRun
-    from aspara.run._remote_run import RemoteRun
     from aspara.run._summary import Summary
 
 
 class Run:
-    """Run class that delegates to either LocalRun or RemoteRun.
+    """Run class that delegates to LocalRun.
 
-    This class provides a unified interface for creating runs. When tracker_uri is provided,
-    it creates and delegates to a RemoteRun instance. Otherwise, it creates and delegates
-    to a LocalRun instance.
+    Local files are always the source of truth. When tracker_uri is set,
+    LocalRun also ships a copy to a Tracker in the background.
     """
 
     __slots__ = ("_backend",)
-    _backend: LocalRun | RemoteRun
+    _backend: LocalRun
 
     def __init__(
         self,
@@ -47,7 +45,8 @@ class Run:
             notes: Run notes/description (wandb-compatible).
             dir: Base directory for storing data. If None, uses XDG-based default (~/.local/share/aspara).
             storage_backend: Storage backend type ('jsonl' or 'polars'). Defaults to 'jsonl'.
-            tracker_uri: Tracker server URI for remote mode. If None, uses local file storage.
+            tracker_uri: If set, also ship a copy to a Tracker. Local files
+                remain the source of truth.
             project_tags: List of tags to add to the project.
             resume: If True and a run with the same name already exists, resume
                 it (reuse run_id, reset finish state, continue step numbering).
@@ -55,35 +54,22 @@ class Run:
             intent: What this run is testing. Separate from notes.
             data: Dataset pointer or list of pointers.
         """
-        if tracker_uri is not None:
-            from aspara.run._remote_run import RemoteRun
+        from aspara.run._local_run import LocalRun
 
-            self._backend = RemoteRun(
-                name=name,
-                project=project,
-                config=config,
-                tags=tags,
-                notes=notes,
-                tracker_uri=tracker_uri,
-                project_tags=project_tags,
-                resume=resume,
-            )
-        else:
-            from aspara.run._local_run import LocalRun
-
-            self._backend = LocalRun(
-                name=name,
-                project=project,
-                config=config,
-                tags=tags,
-                notes=notes,
-                dir=dir,
-                storage_backend=storage_backend,
-                project_tags=project_tags,
-                resume=resume,
-                intent=intent,
-                data=data,
-            )
+        self._backend = LocalRun(
+            name=name,
+            project=project,
+            config=config,
+            tags=tags,
+            notes=notes,
+            dir=dir,
+            storage_backend=storage_backend,
+            project_tags=project_tags,
+            resume=resume,
+            intent=intent,
+            data=data,
+            tracker_uri=tracker_uri,
+        )
 
     # ---- Property delegations ----------------------------------------
 
@@ -157,24 +143,21 @@ class Run:
         Args:
             exit_code: Exit code for the run (0 = success)
             quiet: If True, suppress output messages
-            flush_timeout: Maximum time to wait for queue flush in seconds.
-                Only meaningful for remote runs; ignored by LocalRun.
+            flush_timeout: Maximum time to wait for queued tracker shipping.
         """
         self._backend.finish(exit_code=exit_code, quiet=quiet, flush_timeout=flush_timeout)
 
     def flush(self, timeout: float = 30.0) -> int:
         """Ensure all data is persisted.
 
-        For LocalRun this is a no-op (data is written directly to disk on
-        every ``log()`` call) and always returns 0. For RemoteRun this
-        flushes any queued metrics that failed to send previously.
+        Local files are already written on ``log()``. This waits for queued
+        tracker shipping when ``tracker_uri`` is set.
 
         Args:
-            timeout: Maximum time to wait for flush in seconds
-                (only meaningful for remote runs).
+            timeout: Maximum time to wait for flush in seconds.
 
         Returns:
-            Number of metrics that failed to persist (always 0 for local runs).
+            Number of metrics that failed to ship (0 when there is no shipper).
         """
         return self._backend.flush(timeout=timeout)
 
@@ -224,7 +207,7 @@ class Run:
     # ---- Testing utilities ----------------------------------------
 
     @property
-    def backend(self) -> LocalRun | RemoteRun:
+    def backend(self) -> LocalRun:
         """Access to the underlying backend implementation.
 
         This property is intended for testing purposes to verify

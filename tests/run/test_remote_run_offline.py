@@ -26,7 +26,7 @@ class TestRemoteRunOfflineQueue:
             self.base_url = base_url
             self.session = mock_session
 
-        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False):
+        def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False, **kwargs):
             return {"run_id": "server-gen-id", "name": name}
 
         monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
@@ -175,11 +175,11 @@ class TestRemoteRunOfflineQueue:
             tracker_uri="http://localhost:3142",
         )
 
-        # Log metrics (should succeed and not queue)
         run.log({"loss": 0.5})
         run.log({"loss": 0.4})
-
-        # Verify metrics were not queued
+        assert run._queue_storage.count() == 2
+        failed = run.flush(timeout=5.0)
+        assert failed == 0
         assert run._queue_storage.is_empty()
 
         run.finish(quiet=True)
@@ -333,6 +333,7 @@ class TestRemoteRunOfflineQueue:
         run.set_tags(["new", "tags"])
 
         assert run.tags == ["new", "tags"]
+        run.flush(timeout=5.0)
         # Verify the tags endpoint was called
         post_calls = mock_tracker_client.post.call_args_list
         tags_calls = [c for c in post_calls if "/tags" in c[0][0]]
@@ -520,7 +521,7 @@ class TestQueueFileStructure:
             assert metadata["tracker_uri"] == "http://localhost:3142"
             assert metadata["project"] == "test_project"
             assert metadata["run_name"] == "test_run"
-            assert metadata["run_id"] == "test-run-id"
+            assert metadata["run_id"] == run.id
             assert "created_at" in metadata
 
             run.finish(quiet=True)

@@ -13,9 +13,9 @@ Aspara has two operating modes:
 |---------|------------|-------------|
 | **Server Required** | No | Yes (tracker) |
 | **Dependencies** | Minimal | `requests` required (`aspara[remote]`) |
-| **Storage** | Local files | Tracker (currently saves to local files) |
+| **Storage** | Local files | Local files, plus a copy sent to the Tracker |
 | **Team Collaboration** | Limited | Possible |
-| **Offline** | Yes | No |
+| **Offline** | Yes | Local write continues; shipping retries when the Tracker is back |
 
 ## Local Mode (Default)
 
@@ -46,7 +46,7 @@ A mode that sends metrics to a tracker server via HTTP:
 ```python
 import aspara
 
-# Specifying tracker_uri enables remote mode
+# tracker_uri still writes local files and also ships to the Tracker
 aspara.init(
     project="my_project",
     tracker_uri="http://localhost:3142"
@@ -54,6 +54,8 @@ aspara.init(
 aspara.log({"loss": 0.5})
 aspara.finish()
 ```
+
+On create, a loopback Tracker compares the client's directory with its own. When they match, it stores nothing and Aspara does not ship a second copy. A Tracker started with a different `--data-dir` receives the copy. Point `dir` at a different directory, or use a Tracker on another host, when you want a duplicate.
 
 **Prerequisites:**
 

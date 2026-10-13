@@ -8,7 +8,6 @@ from urllib.parse import quote
 from aspara.logger import logger
 from aspara.run._base_run import BaseRun
 from aspara.run._config import Config
-from aspara.run._offline_queue import MetricsQueueItem, MetricsRetryWorker, OfflineQueueStorage
 from aspara.run._summary import Summary
 
 if TYPE_CHECKING:
@@ -114,7 +113,7 @@ class TrackerClient:
         run_name: str,
         step: int,
         metrics: dict[str, Any],
-        timestamp: str | None = None,
+        timestamp: int | str | None = None,
     ) -> dict[str, Any]:
         """Save metrics for a specific run.
 
@@ -123,8 +122,9 @@ class TrackerClient:
             run_name: Run name
             step: Step number
             metrics: Dictionary of metric names to values
-            timestamp: Optional timestamp in ISO format. If None, server will
-                assign the timestamp.
+            timestamp: UNIX milliseconds, or an ISO string. If None, the
+                server assigns the time. Local runs pass the milliseconds
+                already written to disk.
 
         Raises:
             requests.RequestException: If HTTP request fails
@@ -285,7 +285,10 @@ class TrackerClient:
 
 
 class RemoteRun(BaseRun):
-    """A run that sends metrics to a remote Aspara tracker via HTTP."""
+    """HTTP-only run that delegates Tracker writes to TrackerShipper.
+
+    Kept for tests and direct construction. ``aspara.init`` uses LocalRun.
+    """
 
     def __init__(
         self,
@@ -320,67 +323,43 @@ class RemoteRun(BaseRun):
             raise ValueError("tracker_uri is required for RemoteRun")
 
         super().__init__(name=name, project=project, tags=tags, notes=notes)
+        self.id = self._generate_run_id()
 
-        # Initialize tracker client
-        self.client = TrackerClient(tracker_uri)
+        from aspara.run._shipper import TrackerShipper
 
-        # Create (or resume) run on tracker
-        try:
-            response = self.client.create_run(
-                name=self.name,
-                project=self.project,
-                config=config,
-                tags=self.tags,
-                notes=self.notes,
-                project_tags=project_tags,
-                resume=resume,
-            )
-            # Server always generates run_id
-            self.id = response["run_id"]
-            # Update name if server generated one
-            if "name" in response:
-                self.name = response["name"]
-        except requests.RequestException as e:
-            raise RuntimeError(f"Failed to create run on tracker: {e}") from e
-
-        # Create config with sync callback
-        def sync_config() -> None:
-            try:
-                self.client.log_config(self.project, self.name, self.config.to_dict())
-            except requests.RequestException as e:
-                logger.warning(f"Failed to sync config to tracker: {e}")
-
-        self.config = Config(config, on_change=sync_config)
-
-        # Create summary with sync callback
-        def sync_summary() -> None:
-            try:
-                self.client.log_summary(self.project, self.name, self.summary.to_dict())
-            except requests.RequestException as e:
-                logger.warning(f"Failed to sync summary to tracker: {e}")
-
-        self.summary = Summary(on_change=sync_summary)
-
-        # Initialize offline queue for resilience
-        self._tracker_uri = tracker_uri
-        self._queue_storage = OfflineQueueStorage(
+        self._shipper = TrackerShipper(
+            tracker_uri,
             project=self.project,
             run_name=self.name,
             run_id=self.id,
-            tracker_uri=tracker_uri,
+            name=self.name,
+            config=config,
+            tags=self.tags,
+            notes=self.notes,
+            project_tags=project_tags,
+            resume=resume,
+            intent="",
+            source={},
         )
-        self._retry_worker = MetricsRetryWorker(
-            storage=self._queue_storage,
-            client=self.client,
-            project=self.project,
-            run_name=self.name,
-        )
-        self._retry_worker.start()
+        self.client = self._shipper.client
+        self._queue_storage = self._shipper._queue
+        self._retry_worker = self._shipper._worker
+        self._tracker_uri = tracker_uri
 
-        # User-facing guidance: where data is being sent and how to view it.
+        self.config = Config(config, on_change=self._on_config_change)
+        self.summary = Summary(on_change=self._on_summary_change)
+
         print(f"aspara: Run '{self.name}' initialized in project '{self.project}'")
         print(f"aspara: Sending metrics to: {tracker_uri}")
         print("aspara: View results with: aspara dashboard")
+
+    def _on_config_change(self) -> None:
+        if not self._finished:
+            self._shipper.offer_config(self.config.to_dict())
+
+    def _on_summary_change(self) -> None:
+        if not self._finished:
+            self._shipper.offer_summary(self.summary.to_dict())
 
     def log(
         self,
@@ -404,32 +383,14 @@ class RemoteRun(BaseRun):
             RuntimeError: If run has already finished
         """
         self._ensure_not_finished()
-
-        # Prepare step value (mirrors LocalRun behaviour)
         self._prepare_step(step, commit)
-
-        # Validate and normalize metrics using shared helper
         metrics = self._validate_metrics(data)
-
         if metrics:
-            try:
-                self.client.save_metrics(
-                    project=self.project,
-                    run_name=self.name,
-                    step=self._current_step,
-                    metrics=metrics,
-                    timestamp=timestamp,
-                )
-            except requests.RequestException as e:
-                logger.warning(f"Failed to log metrics to tracker: {e}. Queueing for retry.")
-                # Queue for later retry
-                item = MetricsQueueItem(
-                    step=self._current_step,
-                    metrics=metrics,
-                    timestamp=timestamp,
-                )
-                self._queue_storage.enqueue(item)
-
+            self._shipper.offer_metrics(
+                step=self._current_step,
+                metrics=metrics,
+                timestamp=timestamp,
+            )
         self._after_log(commit)
 
     def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
@@ -442,21 +403,7 @@ class RemoteRun(BaseRun):
         """
         if not self._mark_finished():
             return
-
-        # Stop the background worker
-        self._retry_worker.stop()
-
-        # Flush any remaining queued metrics
-        if not self._queue_storage.is_empty():
-            self._retry_worker.flush_sync(timeout=flush_timeout)
-
-        try:
-            self.client.finish_run(self.project, self.name, exit_code)
-        except requests.RequestException as e:
-            logger.warning(f"Failed to finish run on tracker: {e}")
-        finally:
-            self.client.close()
-
+        self._shipper.finish(exit_code=exit_code, flush_timeout=flush_timeout)
         if not quiet:
             print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
             print("aspara: View results with: aspara dashboard")
@@ -481,22 +428,13 @@ class RemoteRun(BaseRun):
             RuntimeError: If run has already finished
         """
         self._ensure_not_finished()
-
-        # Validate input using shared helper
         abs_file_path, artifact_name = self._validate_artifact_input(file_path, name, category)
-
-        # Upload artifact to tracker
-        try:
-            self.client.log_artifact(
-                project=self.project,
-                run_name=self.name,
-                file_path=abs_file_path,
-                name=artifact_name,
-                description=description,
-                category=category,
-            )
-        except (requests.RequestException, OSError) as e:
-            logger.warning(f"Failed to upload artifact to tracker: {e}")
+        self._shipper.offer_artifact(
+            abs_file_path,
+            name=artifact_name,
+            description=description,
+            category=category,
+        )
 
     def flush(self, timeout: float = 30.0) -> int:
         """Ensure all metrics are sent to tracker.
@@ -509,9 +447,7 @@ class RemoteRun(BaseRun):
         Returns:
             Number of metrics that failed to send
         """
-        if self._queue_storage.is_empty():
-            return 0
-        return self._retry_worker.flush_sync(timeout=timeout)
+        return self._shipper.flush(timeout)
 
     def set_tags(self, tags: list[str]) -> None:
         """Set tags for this run.
@@ -526,9 +462,5 @@ class RemoteRun(BaseRun):
         """
         if self._finished:
             raise RuntimeError("Cannot modify a finished run")
-
         self.tags = tags
-        try:
-            self.client.update_tags(self.project, self.name, tags)
-        except Exception as e:
-            logger.warning(f"Failed to sync tags to tracker: {e}")
+        self._shipper.offer_tags(tags)
