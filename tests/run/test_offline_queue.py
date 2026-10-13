@@ -15,6 +15,11 @@ from aspara.run._offline_queue import (
 )
 
 
+def _queue_items(storage: OfflineQueueStorage) -> list[MetricsQueueItem]:
+    text = storage._queue_file.read_text()
+    return [MetricsQueueItem.from_jsonl(line) for line in text.splitlines() if line.strip()]
+
+
 class TestMetricsQueueItem:
     """Test suite for MetricsQueueItem model."""
 
@@ -67,6 +72,14 @@ class TestMetricsQueueItem:
         assert restored.metrics == original.metrics
         assert restored.timestamp == original.timestamp
         assert restored.created_at == original.created_at
+
+    def test_serialization_keeps_unix_ms(self):
+        """Queued retries send the same millisecond timestamp."""
+        original = MetricsQueueItem(step=1, metrics={"loss": 0.1}, timestamp=1718447400123)
+
+        restored = MetricsQueueItem.from_jsonl(original.to_jsonl())
+
+        assert restored.timestamp == 1718447400123
 
 
 class TestQueueMetadata:
@@ -251,6 +264,112 @@ class TestOfflineQueueStorage:
 
             assert storage.count() == 5
 
+    def test_full_queue_drops_oldest_steps_and_keeps_create(self, monkeypatch):
+        """The create request stays when the queue drops old steps."""
+        monkeypatch.setattr("aspara.run._offline_queue._MAX_QUEUE_ITEMS", 4)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            assert storage.enqueue(MetricsQueueItem(kind="create", payload={"run_id": "abc123"})) is True
+            for step in range(3):
+                assert storage.enqueue(MetricsQueueItem(step=step, metrics={"loss": 0.5})) is True
+
+            assert storage.enqueue(MetricsQueueItem(step=9, metrics={"loss": 0.1})) is True
+
+            items = _queue_items(storage)
+            assert [(item.kind, item.step) for item in items] == [("create", 0), ("metrics", 9)]
+            assert items[0].payload["run_id"] == "abc123"
+
+    def test_full_queue_keeps_finish(self, monkeypatch):
+        """A short queue still keeps finish when it makes room for a new step."""
+        monkeypatch.setattr("aspara.run._offline_queue._MAX_QUEUE_ITEMS", 3)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"run_id": "abc123"}))
+            storage.enqueue(MetricsQueueItem(step=0, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
+
+            assert storage.enqueue(MetricsQueueItem(step=5, metrics={"loss": 0.2})) is True
+
+            items = _queue_items(storage)
+            assert [(item.kind, item.step, item.payload.get("exit_code")) for item in items] == [
+                ("create", 0, None),
+                ("finish", 0, 0),
+                ("metrics", 5, None),
+            ]
+
+    def test_queue_keeps_create_when_nothing_else_can_be_dropped(self, monkeypatch):
+        """A full queue of create and finish does not accept another step."""
+        monkeypatch.setattr("aspara.run._offline_queue._MAX_QUEUE_ITEMS", 2)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"intent": "try lag features"}))
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
+
+            assert storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.4})) is False
+
+            items = _queue_items(storage)
+            assert [item.kind for item in items] == ["create", "finish"]
+            assert items[0].payload["intent"] == "try lag features"
+
+    def test_drop_oldest_steps_leaves_later_steps(self):
+        """Only the oldest steps are removed, up to the requested count."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"run_id": "abc123"}))
+            storage.enqueue(MetricsQueueItem(kind="config", payload={"config": {"lr": 0.01}}))
+            storage.enqueue(MetricsQueueItem(step=0, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.4}))
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
+
+            assert storage._drop_oldest_items(count=2) == 2
+
+            items = _queue_items(storage)
+            assert [item.kind for item in items] == ["create", "metrics", "finish"]
+            assert items[1].step == 1
+
+    def test_oversized_queue_keeps_create_when_no_steps_remain(self, monkeypatch):
+        """A huge create payload is not deleted to make room for another step."""
+        monkeypatch.setattr("aspara.run._offline_queue._MAX_QUEUE_FILE_SIZE", 1)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            assert storage.enqueue(MetricsQueueItem(kind="create", payload={"run_id": "abc123"})) is True
+
+            assert storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.1})) is False
+
+            items = _queue_items(storage)
+            assert [item.kind for item in items] == ["create"]
+            assert items[0].payload["run_id"] == "abc123"
+
     def test_enqueue_persists_to_disk_synchronously(self):
         """enqueue must fsync so the item survives a process crash right after."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -326,6 +445,22 @@ class TestOfflineQueueStorage:
             assert len(ready_items) == 4
             steps = [item.step for item in ready_items]
             assert steps == [1, 2, 5, 8]
+
+    def test_get_ready_items_orders_create_then_metrics_then_finish(self):
+        """create items come first and finish items last, regardless of step."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            storage.enqueue(MetricsQueueItem(kind="finish", step=0, payload={"exit_code": 0}))
+            storage.enqueue(MetricsQueueItem(kind="metrics", step=3, metrics={"loss": 0.1}))
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"name": "test_run"}))
+            ready = storage.get_ready_items()
+            assert [item.kind for item in ready] == ["create", "metrics", "finish"]
 
     def test_get_ready_items_respects_limit_with_large_queue(self):
         """get_ready_items should return only ``limit`` items from a large queue."""
@@ -629,6 +764,177 @@ class TestMetricsRetryWorker:
 
             # Verify the queue is empty
             assert storage.is_empty()
+
+    def test_failed_send_keeps_only_the_unsent_step(self):
+        """A step already accepted by the tracker is not sent again."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+
+            def save_metrics(**kwargs):
+                if kwargs["step"] == 1:
+                    raise ConnectionError("tracker down")
+                return {}
+
+            mock_client.save_metrics.side_effect = save_metrics
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            storage.enqueue(MetricsQueueItem(step=0, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.4}))
+
+            worker._process_queue()
+
+            assert mock_client.save_metrics.call_count == 2
+            assert [item.step for item in _queue_items(storage)] == [1]
+
+    def test_flush_does_not_resend_the_worker_inflight_step(self):
+        """finish waits for the current send, then sends only what is still queued."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            started = threading.Event()
+            release = threading.Event()
+            sent_steps: list[int] = []
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+
+            def save_metrics(**kwargs):
+                sent_steps.append(kwargs["step"])
+                if kwargs["step"] == 0:
+                    started.set()
+                    assert release.wait(timeout=2)
+                return {}
+
+            mock_client.save_metrics.side_effect = save_metrics
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            storage.enqueue(MetricsQueueItem(step=0, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.4}))
+            sender = threading.Thread(target=worker._process_queue)
+            sender.start()
+            assert started.wait(timeout=2)
+            worker._stop_event.set()
+            flusher = threading.Thread(target=lambda: worker.flush_sync(timeout=2))
+            flusher.start()
+            time.sleep(0.05)
+            assert sent_steps == [0]
+            release.set()
+            sender.join(timeout=2)
+            flusher.join(timeout=2)
+
+            assert sent_steps == [0, 1]
+            assert storage.is_empty()
+
+    def test_worker_sends_create_before_metrics(self):
+        """Metrics stay queued until a pending create item succeeds."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"name": "test_run", "project": "test_project"}))
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.5}))
+            worker._process_queue()
+            sent = [call[0] for call in mock_client.method_calls if call[0] in {"create_run", "save_metrics"}]
+            assert sent == ["create_run", "save_metrics"]
+            assert storage.is_empty()
+
+    def test_worker_create_conflict_drops_queue_without_retry(self):
+        """HTTP 409 on create removes the queue and does not send later items."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            conflict = Exception("conflict")
+            conflict.response = MagicMock(status_code=409)
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+            mock_client.create_run.side_effect = conflict
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"name": "test_run", "run_id": "abc123"}))
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.5}))
+            worker._process_queue()
+            mock_client.save_metrics.assert_not_called()
+            assert mock_client.create_run.call_count == 1
+            assert storage.shipping_blocked
+            assert storage.is_empty()
+            assert storage.rejected_unsent == 2
+            worker._process_queue()
+            assert mock_client.create_run.call_count == 1
+
+    def test_worker_same_store_drops_queue_without_counting_failure(self):
+        """same_store stops later items and is not an unsent failure."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://127.0.0.1:3142",
+                data_dir=Path(temp_dir),
+            )
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+            mock_client.create_run.return_value = {"run_id": "abc123", "same_store": True}
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            storage.enqueue(
+                MetricsQueueItem(
+                    kind="create",
+                    payload={"name": "test_run", "run_id": "abc123", "client_data_dir": temp_dir},
+                )
+            )
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.5}))
+            worker._process_queue()
+            mock_client.save_metrics.assert_not_called()
+            assert mock_client.create_run.call_count == 1
+            assert storage.shipping_blocked
+            assert storage.is_empty()
+            assert storage.rejected_unsent == 0
+            assert worker.flush_sync(timeout=1.0) == 0
 
     def test_worker_retries_on_failure(self):
         """Test that the worker updates retry info on failure."""
