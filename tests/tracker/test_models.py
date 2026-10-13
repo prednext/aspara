@@ -44,6 +44,15 @@ def test_metrics_data_model():
     assert json_data["metrics"]["loss"] == 0.5
 
 
+def test_metrics_data_keeps_client_unix_ms():
+    """A client-supplied millisecond timestamp is stored as that integer."""
+    raw_ms = 1718447400123
+    data = MetricRecord(metrics={"loss": 0.5}, step=1, timestamp=raw_ms)
+
+    assert isinstance(data.timestamp, datetime)
+    assert data.timestamp_ms() == raw_ms
+
+
 def test_metrics_data_validation():
     """Test that MetricRecord model validation works correctly"""
 

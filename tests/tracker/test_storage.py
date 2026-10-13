@@ -2,6 +2,7 @@
 Tests for Aspara tracker storage backend
 """
 
+import datetime
 import json
 import shutil
 
@@ -135,6 +136,26 @@ def test_file_storage_load(temp_storage_dir):
     storage_non_existent = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="non_existent_run")
     with pytest.raises(RunNotFoundError):
         storage_non_existent.load()
+
+
+def test_file_storage_load_mixed_timestamp_forms(temp_storage_dir):
+    """ISO strings and UNIX milliseconds in one file both load."""
+    storage = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="mixed_ts")
+    project_dir = temp_storage_dir / "test_project"
+    project_dir.mkdir(parents=True)
+    run_file = project_dir / "mixed_ts.jsonl"
+    rows = [
+        {"timestamp": "2024-06-15T10:30:00", "step": 0, "metrics": {"loss": 0.4}},
+        {"timestamp": 1718447400123, "step": 1, "metrics": {"loss": 0.5}},
+    ]
+    run_file.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    result = storage.load()
+
+    assert len(result) == 2
+    stamps = result.sort("step").select("timestamp").to_series().to_list()
+    assert stamps[0] == datetime.datetime(2024, 6, 15, 10, 30, 0)
+    assert stamps[1] == datetime.datetime(2024, 6, 15, 10, 30, 0, 123000)
 
 
 def test_file_storage_load_drops_envelope_fields(temp_storage_dir):

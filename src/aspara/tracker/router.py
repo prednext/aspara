@@ -221,8 +221,9 @@ async def save_metrics(
             project_name=project_name,
             run_name=run_name,
         )
-        # Use mode='json' to convert datetime to ISO format string
-        storage.save(data.model_dump(mode="json"))
+        saved = data.model_dump(mode="json")
+        saved["timestamp"] = data.timestamp_ms()
+        storage.save(saved)
         return MetricsResponse()
     except ValueError as e:
         # Validation errors are safe to return

@@ -149,9 +149,16 @@ class JsonlMetricsStorage(MetricsStorage):
                 keep_cols = ["timestamp", "step"] + [f"_{name}" for name in metric_names if f"_{name}" in lf.collect_schema().names()]
                 lf = lf.select(keep_cols)
 
-        # Timestamp conversion - UNIX ms to Datetime
-        if "timestamp" in lf.collect_schema():
-            lf = lf.with_columns(pl.col("timestamp").cast(pl.Datetime("ms")))
+        # Timestamp conversion. New rows are UNIX ms. Older tracker rows are ISO strings.
+        # A file can contain both, which Polars reads as strings.
+        schema = lf.collect_schema()
+        if "timestamp" in schema:
+            if schema["timestamp"] == pl.String:
+                as_iso = pl.col("timestamp").cast(pl.Datetime("ms"), strict=False)
+                as_ms = pl.col("timestamp").cast(pl.Int64, strict=False).cast(pl.Datetime("ms"))
+                lf = lf.with_columns(pl.coalesce(as_iso, as_ms).alias("timestamp"))
+            else:
+                lf = lf.with_columns(pl.col("timestamp").cast(pl.Datetime("ms")))
 
         # Sort by timestamp and step, then collect
         return lf.sort(["timestamp", "step"]).collect()

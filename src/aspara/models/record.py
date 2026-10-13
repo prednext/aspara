@@ -8,7 +8,7 @@ for representing individual metric records.
 import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MetricRecord(BaseModel):
@@ -23,6 +23,29 @@ class MetricRecord(BaseModel):
     metrics: dict[str, Any] = Field(..., description="Dictionary of metric names and their values")
     run: str | None = Field(default=None, description="Run name (optional, useful for multi-run watch)")
     project: str | None = Field(default=None, description="Project name (optional, useful for multi-run watch)")
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _accept_unix_ms(cls, value: Any, handler: Any) -> "MetricRecord":
+        """Keep a client-supplied UNIX millisecond timestamp exact."""
+        raw_ms: int | None = None
+        if isinstance(value, dict):
+            ts = value.get("timestamp")
+            if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                raw_ms = int(ts)
+                value = dict(value)
+                value["timestamp"] = datetime.datetime.fromtimestamp(raw_ms / 1000, tz=datetime.timezone.utc)
+        model = handler(value)
+        if raw_ms is not None:
+            object.__setattr__(model, "_client_timestamp_ms", raw_ms)
+        return model
+
+    def timestamp_ms(self) -> int:
+        """UNIX milliseconds to store. Client-supplied ints are not re-clocked."""
+        raw = getattr(self, "_client_timestamp_ms", None)
+        if isinstance(raw, int):
+            return raw
+        return int(round(self.timestamp.timestamp() * 1000))
 
     def __str__(self) -> str:
         """String representation of the metric record."""

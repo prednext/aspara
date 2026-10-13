@@ -4,6 +4,7 @@ Tests for Aspara tracker API endpoints
 
 import io
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,6 +56,39 @@ def test_save_metrics(test_client_with_real_storage):
 
     run_file = tmp_path / "test_project" / "test_run_1.jsonl"
     assert run_file.exists()
+
+
+def test_save_metrics_stores_client_timestamp_ms(test_client_with_real_storage):
+    """The tracker stores the milliseconds the client sent."""
+    client, tmp_path = test_client_with_real_storage
+    raw_ms = 1718447400123
+
+    response = client.post(
+        "/api/v1/projects/test_project/runs/test_run_ts/metrics",
+        json={"metrics": {"loss": 0.5}, "step": 1, "timestamp": raw_ms},
+        headers=CSRF_HEADER,
+    )
+
+    assert response.status_code == 200
+    stored = json.loads((tmp_path / "test_project" / "test_run_ts.jsonl").read_text())
+    assert stored["timestamp"] == raw_ms
+
+
+def test_save_metrics_without_timestamp_uses_receive_time(test_client_with_real_storage):
+    """A request that omits timestamp still gets the server receive time."""
+    client, tmp_path = test_client_with_real_storage
+    before = int(time.time() * 1000)
+    response = client.post(
+        "/api/v1/projects/test_project/runs/test_run_now/metrics",
+        json={"metrics": {"loss": 0.5}, "step": 1},
+        headers=CSRF_HEADER,
+    )
+    after = int(time.time() * 1000)
+
+    assert response.status_code == 200
+    stored = json.loads((tmp_path / "test_project" / "test_run_now.jsonl").read_text())
+    assert isinstance(stored["timestamp"], int)
+    assert before <= stored["timestamp"] <= after
 
 
 class TestTrackerAPIIntegration:
