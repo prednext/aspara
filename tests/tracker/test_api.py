@@ -198,6 +198,32 @@ class TestTrackerAPIIntegration:
         assert metadata["created_at"] is not None
         assert metadata["updated_at"] is not None
 
+    def test_run_creation_stores_intent_and_source(self, tmp_path, monkeypatch):
+        """Run creation should persist intent and source onto run metadata."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={
+                "name": "run_intent",
+                "intent": "add lag features",
+                "source": {
+                    "code": {"kind": "git", "sha": "abc123", "dirty": False},
+                    "data": [{"uri": "s3://b/t", "version": "1"}],
+                },
+            },
+            headers=CSRF_HEADER,
+        )
+        assert response.status_code == 200
+
+        meta_path = tmp_path / "test_project" / "run_intent.meta.json"
+        with meta_path.open(encoding="utf-8") as f:
+            metadata = json.load(f)
+        assert metadata["intent"] == "add lag features"
+        assert metadata["source"]["code"]["sha"] == "abc123"
+        assert metadata["source"]["data"][0]["uri"] == "s3://b/t"
+
     def test_multiple_run_creations_merge_project_tags_and_preserve_created_at(self, tmp_path, monkeypatch):
         """Multiple run creations with project_tags should merge tags and keep created_at stable."""
         monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
@@ -340,6 +366,165 @@ class TestTrackerAPIIntegration:
         response = client.post("/api/v1/projects/test_project/runs", json=payload, headers=CSRF_HEADER)
         assert response.status_code == 200
         assert "run_id" in response.json()
+
+    def test_client_run_id_is_stored(self, tmp_path, monkeypatch):
+        """A client-supplied run_id is stored and returned."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        client = TestClient(app)
+        client_id = "abc123def4567890"
+        response = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={"name": "run1", "config": {}, "tags": [], "notes": "", "run_id": client_id},
+            headers=CSRF_HEADER,
+        )
+        assert response.status_code == 200
+        assert response.json()["run_id"] == client_id
+        meta = json.loads((tmp_path / "test_project" / "run1.meta.json").read_text())
+        assert meta["run_id"] == client_id
+
+    def test_loopback_same_directory_does_not_write(self, tmp_path, monkeypatch):
+        """A loopback client writing the Tracker's directory gets same_store and no second copy."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        client = TestClient(app, client=("127.0.0.1", 50000))
+        response = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={
+                "name": "run1",
+                "config": {},
+                "tags": [],
+                "notes": "",
+                "run_id": "abc123def4567890",
+                "client_data_dir": str(tmp_path),
+            },
+            headers=CSRF_HEADER,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["same_store"] is True
+        assert body["run_id"] == "abc123def4567890"
+        assert not (tmp_path / "test_project" / "run1.meta.json").exists()
+
+    def test_non_loopback_same_path_still_writes(self, tmp_path, monkeypatch):
+        """A path match from a non-loopback peer does not skip storage."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={
+                "name": "run1",
+                "config": {},
+                "tags": [],
+                "notes": "",
+                "run_id": "abc123def4567890",
+                "client_data_dir": str(tmp_path),
+            },
+            headers=CSRF_HEADER,
+        )
+        assert response.status_code == 200
+        assert response.json()["same_store"] is False
+        meta = json.loads((tmp_path / "test_project" / "run1.meta.json").read_text())
+        assert meta["run_id"] == "abc123def4567890"
+
+    def test_loopback_different_directory_writes(self, tmp_path, monkeypatch):
+        """Loopback with a different client directory stores the run."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path / "tracker"))
+        client = TestClient(app, client=("127.0.0.1", 50000))
+        response = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={
+                "name": "run1",
+                "config": {},
+                "tags": [],
+                "notes": "",
+                "run_id": "abc123def4567890",
+                "client_data_dir": str(tmp_path / "client"),
+            },
+            headers=CSRF_HEADER,
+        )
+        assert response.status_code == 200
+        assert response.json()["same_store"] is False
+        meta = json.loads((tmp_path / "tracker" / "test_project" / "run1.meta.json").read_text())
+        assert meta["run_id"] == "abc123def4567890"
+
+    def test_same_run_id_replay_does_not_reset_finish(self, tmp_path, monkeypatch):
+        """The same run_id with resume=False is 200 and leaves finish state alone."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        client = TestClient(app)
+        client_id = "abc123def4567890"
+        payload = {"name": "run1", "config": {}, "tags": [], "notes": "", "run_id": client_id}
+        created = client.post("/api/v1/projects/test_project/runs", json=payload, headers=CSRF_HEADER)
+        assert created.status_code == 200
+        finished = client.post(
+            "/api/v1/projects/test_project/runs/run1/finish",
+            json={"exit_code": 0},
+            headers=CSRF_HEADER,
+        )
+        assert finished.status_code == 200
+
+        replay = client.post("/api/v1/projects/test_project/runs", json=payload, headers=CSRF_HEADER)
+        assert replay.status_code == 200
+        assert replay.json()["run_id"] == client_id
+        meta = json.loads((tmp_path / "test_project" / "run1.meta.json").read_text())
+        assert meta["is_finished"] is True
+
+    def test_same_run_id_resume_resets_finish(self, tmp_path, monkeypatch):
+        """resume=True with the same run_id is 200 and resets finish."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        client = TestClient(app)
+        client_id = "abc123def4567890"
+        payload = {"name": "run1", "config": {}, "tags": [], "notes": "", "run_id": client_id}
+        created = client.post("/api/v1/projects/test_project/runs", json=payload, headers=CSRF_HEADER)
+        assert created.status_code == 200
+        finished = client.post(
+            "/api/v1/projects/test_project/runs/run1/finish",
+            json={"exit_code": 0},
+            headers=CSRF_HEADER,
+        )
+        assert finished.status_code == 200
+
+        payload["resume"] = True
+        resumed = client.post("/api/v1/projects/test_project/runs", json=payload, headers=CSRF_HEADER)
+        assert resumed.status_code == 200
+        assert resumed.json()["run_id"] == client_id
+        meta = json.loads((tmp_path / "test_project" / "run1.meta.json").read_text())
+        assert meta["is_finished"] is False
+        assert meta["status"] == "wip"
+
+    def test_different_run_id_conflicts_even_on_resume(self, tmp_path, monkeypatch):
+        """A run stored under another id, including a pre-change server id, is 409 on resume."""
+        monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
+        client = TestClient(app)
+        created = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={"name": "run1", "config": {}, "tags": [], "notes": ""},
+            headers=CSRF_HEADER,
+        )
+        assert created.status_code == 200
+        stored_id = created.json()["run_id"]
+        finished = client.post(
+            "/api/v1/projects/test_project/runs/run1/finish",
+            json={"exit_code": 0},
+            headers=CSRF_HEADER,
+        )
+        assert finished.status_code == 200
+
+        conflict = client.post(
+            "/api/v1/projects/test_project/runs",
+            json={
+                "name": "run1",
+                "config": {},
+                "tags": [],
+                "notes": "",
+                "resume": True,
+                "run_id": "ffffffffffffffff",
+            },
+            headers=CSRF_HEADER,
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"] == "Run already exists"
+        meta = json.loads((tmp_path / "test_project" / "run1.meta.json").read_text())
+        assert meta["run_id"] == stored_id
+        assert meta["is_finished"] is True
 
     def test_upload_artifact_basic(self, tmp_path, monkeypatch):
         """Test basic artifact upload functionality."""

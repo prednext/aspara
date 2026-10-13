@@ -67,8 +67,10 @@ response = requests.post(
     }
 )
 print(response.json())
-# {"project": "my_project", "name": "experiment_001", "run_id": "experiment_001"}
+# {"project": "my_project", "name": "experiment_001", "run_id": "<server-generated>"}
 ```
+
+`run_id` is optional. When the client sends it, the Tracker stores that id and returns it. A repeat with the same id returns 200. `resume: true` with the same id also returns 200 and clears the finished state. A different id for the same name returns 409, including a run created earlier without a client id. Omitting `run_id` keeps the previous behavior: 409 when the name exists, unless `resume` is true.
 
 ### Logging Metrics
 

@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, UploadFile
 
 from aspara.config import get_data_dir, get_resource_limits, is_read_only
 from aspara.models import MetricRecord
@@ -34,6 +34,69 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _is_same_store(client_host: str | None, client_data_dir: str | None, tracker_data_dir: Path) -> bool:
+    """True when a loopback client is already writing this Tracker's directory."""
+    host = (client_host or "").lower()
+    if host not in _LOOPBACK_HOSTS:
+        return False
+    raw = (client_data_dir or "").strip()
+    if not raw:
+        return False
+    try:
+        return Path(raw).expanduser().resolve() == Path(tracker_data_dir).expanduser().resolve()
+    except OSError:
+        return False
+
+
+def _requested_run_id(request: RunCreateRequest) -> str | None:
+    """Client-supplied run id. Empty means an old client that omits it."""
+    raw = (request.run_id or "").strip()
+    return raw or None
+
+
+def _load_existing_run_meta(metadata_path: Path) -> dict:
+    try:
+        with open(metadata_path) as f:
+            loaded = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to read existing run metadata",
+        ) from e
+    if not isinstance(loaded, dict):
+        raise HTTPException(status_code=500, detail="Failed to read existing run metadata")
+    return loaded
+
+
+def _resume_existing_run(
+    *,
+    data_dir: Path,
+    project_name: str,
+    request: RunCreateRequest,
+) -> None:
+    """Reset finish and apply create fields onto an existing run."""
+    storage = RunMetadataStorage(
+        base_dir=str(data_dir),
+        project_name=project_name,
+        run_name=request.name,
+    )
+    storage.reset_finish()
+    if request.config:
+        storage.update_config(request.config)
+    if request.intent:
+        storage.set_intent(request.intent)
+    if request.source:
+        storage.set_source(request.source)
+    if request.project_tags:
+        update_project_metadata_tags(
+            base_dir=data_dir,
+            project_name=project_name,
+            new_tags=request.project_tags,
+        )
 
 
 def verify_csrf_header(x_requested_with: str | None = Header(None)) -> None:
@@ -73,7 +136,7 @@ async def health_check() -> HealthResponse:
     tags=["Runs"],
     dependencies=[Depends(verify_csrf_header)],
 )
-async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateResponse:
+async def create_run(project_name: str, request: RunCreateRequest, http_request: Request) -> RunCreateResponse:
     """Create a new run and initialize metadata.
 
     This endpoint is used by RemoteRun to create run-level metadata and
@@ -85,10 +148,15 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
         request: Run creation request containing name, tags, notes, config, and project_tags
 
     Returns:
-        RunCreateResponse: Response containing project, name, and run_id
+        RunCreateResponse: Response containing project, name, and run_id.
+            ``same_store`` is true when a loopback client is already writing
+            this Tracker's directory. Nothing is written in that case.
 
     Raises:
-        HTTPException: If a run with the same name already exists (409 Conflict)
+        HTTPException: If a run with the same name already exists (409 Conflict).
+            A client ``run_id`` that does not match the stored id is 409 even
+            when ``resume`` is true. Omitting ``run_id`` keeps the previous
+            branch: 409 unless ``resume`` is true.
     """
     # Validate input names to prevent path traversal
     try:
@@ -97,6 +165,16 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
+    data_dir = get_data_dir()
+    client_host = http_request.client.host if http_request.client else None
+    if _is_same_store(client_host, request.client_data_dir, data_dir):
+        return RunCreateResponse(
+            project=project_name,
+            name=request.name,
+            run_id=_requested_run_id(request) or "same-store",
+            same_store=True,
+        )
+
     if is_read_only():
         return RunCreateResponse(
             project=project_name,
@@ -104,42 +182,34 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
             run_id="readonly00000000",
         )
 
-    data_dir = get_data_dir()
     base_dir = Path(data_dir)
 
     # Detect existing run by checking metadata file
     metadata_path = base_dir / project_name / f"{request.name}.meta.json"
     if metadata_path.exists():
-        if not request.resume:
-            raise HTTPException(status_code=409, detail="Run already exists")
-        # Resume path: reuse existing run_id and reset finish state.
-        try:
-            with open(metadata_path) as f:
-                existing_meta = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to read existing run metadata",
-            ) from e
-        run_id = existing_meta.get("run_id") or uuid.uuid4().hex[:16]
-        storage = RunMetadataStorage(
-            base_dir=str(data_dir),
-            project_name=project_name,
-            run_name=request.name,
-        )
-        storage.reset_finish()
-        if request.config:
-            storage.update_config(request.config)
-        if request.project_tags:
-            update_project_metadata_tags(
-                base_dir=data_dir,
-                project_name=project_name,
-                new_tags=request.project_tags,
+        existing_meta = _load_existing_run_meta(metadata_path)
+        stored_id = existing_meta.get("run_id") or ""
+        client_id = _requested_run_id(request)
+        if client_id is None:
+            # Old clients omit run_id and keep the previous branch.
+            if not request.resume:
+                raise HTTPException(status_code=409, detail="Run already exists")
+            run_id = stored_id or uuid.uuid4().hex[:16]
+            _resume_existing_run(data_dir=data_dir, project_name=project_name, request=request)
+            return RunCreateResponse(
+                project=project_name,
+                name=request.name,
+                run_id=run_id,
             )
+        if client_id != stored_id:
+            # Includes runs created before clients sent run_id.
+            raise HTTPException(status_code=409, detail="Run already exists")
+        if request.resume:
+            _resume_existing_run(data_dir=data_dir, project_name=project_name, request=request)
         return RunCreateResponse(
             project=project_name,
             name=request.name,
-            run_id=run_id,
+            run_id=stored_id,
         )
 
     # Initialize run-level metadata using RunMetadataStorage
@@ -150,7 +220,7 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
     )
 
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
-    run_id = uuid.uuid4().hex[:16]  # Server always generates run_id
+    run_id = _requested_run_id(request) or uuid.uuid4().hex[:16]
     storage.set_init(
         run_id=run_id,
         tags=request.tags,
@@ -160,6 +230,10 @@ async def create_run(project_name: str, request: RunCreateRequest) -> RunCreateR
 
     if request.config:
         storage.update_config(request.config)
+    if request.intent:
+        storage.set_intent(request.intent)
+    if request.source:
+        storage.set_source(request.source)
 
     # Update project-level metadata.json with project_tags, if provided
     if request.project_tags:

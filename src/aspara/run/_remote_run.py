@@ -63,6 +63,10 @@ class TrackerClient:
         notes: str | None,
         project_tags: list[str] | None = None,
         resume: bool = False,
+        intent: str | None = None,
+        source: dict[str, Any] | None = None,
+        run_id: str | None = None,
+        client_data_dir: str | None = None,
     ) -> dict[str, Any]:
         """Create a new run on the tracker.
 
@@ -74,6 +78,9 @@ class TrackerClient:
             notes: Run notes/description
             project_tags: Optional project-level tags
             resume: If True, resume an existing run with the same name
+            run_id: Client run id. The tracker stores this on create.
+            client_data_dir: Absolute directory the client is writing. Sent
+                for loopback trackers so the server can refuse a second copy.
 
         Returns:
             Parsed JSON response from the tracker (expected to contain
@@ -91,6 +98,10 @@ class TrackerClient:
                 "notes": notes or "",
                 "project_tags": project_tags,
                 "resume": resume,
+                **({"intent": intent} if intent else {}),
+                **({"source": source} if source else {}),
+                **({"run_id": run_id} if run_id else {}),
+                **({"client_data_dir": client_data_dir} if client_data_dir else {}),
             },
             timeout=_DEFAULT_TIMEOUT,
         )
