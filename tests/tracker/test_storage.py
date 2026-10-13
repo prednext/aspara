@@ -73,6 +73,20 @@ def test_file_storage_save(temp_storage_dir):
         assert saved_data["metrics"]["loss"] == 0.95
 
 
+def test_save_skips_repeat_of_the_last_step(temp_storage_dir):
+    """A retry of the last appended row does not add a second point."""
+    storage = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="test_run_1")
+    first = {"timestamp": 1718447400123, "step": 1, "metrics": {"loss": 0.5}}
+    storage.save(first)
+    storage.save(dict(first))
+    storage.save({"timestamp": 1718447400124, "step": 1, "metrics": {"loss": 0.4}})
+    storage.save({"timestamp": 1718447400123, "step": 2, "metrics": {"loss": 0.3}})
+
+    lines = (temp_storage_dir / "test_project" / "test_run_1.jsonl").read_text().splitlines()
+    assert [json.loads(line)["step"] for line in lines] == [1, 1, 2]
+    assert json.loads(lines[1])["timestamp"] == 1718447400124
+
+
 def test_file_storage_load(temp_storage_dir):
     """Test that JsonlMetricsStorage's load method works correctly"""
 

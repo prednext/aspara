@@ -20,6 +20,39 @@ from aspara.utils import datasync, secure_open_append
 from .base import MetricsStorage
 
 
+def repeats_last_metric(path: Path, record: dict[str, Any]) -> bool:
+    """True when ``record`` has the same step and timestamp as the file's last row."""
+    last = _last_jsonl_record(path)
+    if last is None:
+        return False
+    return last.get("step") == record.get("step") and last.get("timestamp") == record.get("timestamp")
+
+
+def _last_jsonl_record(path: Path) -> dict[str, Any] | None:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size <= 0:
+        return None
+    window = min(size, 65536)
+    with path.open("rb") as handle:
+        handle.seek(size - window)
+        data = handle.read(window)
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if size > window:
+        lines = lines[1:]
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        return record if isinstance(record, dict) else None
+    return None
+
+
 class JsonlMetricsStorage(MetricsStorage):
     """JSONL file-based metrics storage.
 
@@ -63,6 +96,8 @@ class JsonlMetricsStorage(MetricsStorage):
             ValueError: If file size exceeds limit
         """
         run_file = self._get_run_file()
+        if repeats_last_metric(run_file, metrics_data):
+            return ""
         limits = get_resource_limits()
 
         # Serialize data first to know the size before opening the file
