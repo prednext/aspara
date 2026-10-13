@@ -14,6 +14,25 @@ from aspara.utils.validators import validate_name, validate_safe_path
 from .base import BaseMetadataStorage
 
 
+def _empty_run_metadata() -> dict[str, Any]:
+    return {
+        "run_id": None,
+        "tags": [],
+        "notes": "",
+        "intent": "",
+        "params": {},
+        "config": {},
+        "artifacts": [],
+        "summary": {},
+        "source": {"code": {}, "data": []},
+        "is_finished": False,
+        "exit_code": None,
+        "status": RunStatus.WIP.value,
+        "start_time": None,
+        "finish_time": None,
+    }
+
+
 class RunMetadataStorage(BaseMetadataStorage):
     """Run-level metadata storage.
 
@@ -42,21 +61,22 @@ class RunMetadataStorage(BaseMetadataStorage):
         self._metadata_path = self._get_metadata_path()
         validate_safe_path(self._metadata_path, self.base_dir)
 
-        self._metadata: dict[str, Any] = {
-            "run_id": None,
-            "tags": [],
-            "notes": "",
-            "params": {},
-            "config": {},
-            "artifacts": [],
-            "summary": {},
-            "is_finished": False,
-            "exit_code": None,
-            "status": RunStatus.WIP.value,
-            "start_time": None,
-            "finish_time": None,
-        }
+        self._metadata: dict[str, Any] = _empty_run_metadata()
         self._load()
+
+    def _merge_loaded(self, loaded: dict[str, Any]) -> dict[str, Any]:
+        merged = _empty_run_metadata()
+        merged.update(loaded)
+        source = merged.get("source")
+        if not isinstance(source, dict):
+            source = {}
+        merged["source"] = {
+            "code": source.get("code") if isinstance(source.get("code"), dict) else {},
+            "data": source.get("data") if isinstance(source.get("data"), list) else [],
+        }
+        if merged.get("intent") is None:
+            merged["intent"] = ""
+        return merged
 
     def _get_metadata_path(self) -> Path:
         """Get the path to this run's metadata file.
@@ -199,6 +219,18 @@ class RunMetadataStorage(BaseMetadataStorage):
         self._save()
         return dict(self._metadata)
 
+    def set_intent(self, intent: str) -> None:
+        """Set the experiment intent (separate from free-form notes)."""
+        self._metadata["intent"] = intent
+        self._save()
+
+    def set_source(self, source: dict[str, Any]) -> None:
+        """Replace the source block (code state and data pointers)."""
+        code = source.get("code") if isinstance(source.get("code"), dict) else {}
+        data = source.get("data") if isinstance(source.get("data"), list) else []
+        self._metadata["source"] = {"code": dict(code), "data": list(data)}
+        self._save()
+
     def delete_metadata(self) -> bool:
         """Delete metadata file.
 
@@ -209,20 +241,7 @@ class RunMetadataStorage(BaseMetadataStorage):
             self._metadata_path.unlink()
         except FileNotFoundError:
             return False
-        self._metadata = {
-            "run_id": None,
-            "tags": [],
-            "notes": "",
-            "params": {},
-            "config": {},
-            "artifacts": [],
-            "summary": {},
-            "is_finished": False,
-            "exit_code": None,
-            "status": RunStatus.WIP.value,
-            "start_time": None,
-            "finish_time": None,
-        }
+        self._metadata = _empty_run_metadata()
         return True
 
     def get_params(self) -> dict[str, Any]:

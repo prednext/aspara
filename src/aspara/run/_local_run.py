@@ -33,6 +33,8 @@ class LocalRun(BaseRun):
         storage_backend: str | None = None,
         project_tags: list[str] | None = None,
         resume: bool = False,
+        intent: str | None = None,
+        data: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> None:
         """Initialize a new local run.
 
@@ -48,8 +50,12 @@ class LocalRun(BaseRun):
             resume: If True and a run with the same name already exists, resume
                 it (reuse run_id, reset finish state, continue step numbering).
                 If no existing run is found, a new run is created.
+            intent: What this run is testing. Separate from notes.
+            data: Dataset pointer or list of pointers (uri, version, hash).
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
+        self.intent = ""
+        self._source: dict[str, Any] = {"code": {}, "data": []}
 
         # Determine data directory
         data_dir = dir or str(get_data_dir())
@@ -136,6 +142,7 @@ class LocalRun(BaseRun):
 
         self._ensure_output_dir()
         self._write_init_record()
+        self._record_experiment_unit(intent=intent, data=data, resume=is_resuming)
 
     def _recover_last_step(self, data_dir: str) -> int:
         """Recover the next step number from existing metrics.
@@ -174,6 +181,47 @@ class LocalRun(BaseRun):
         # Write initial config if present
         if self.config._data:
             self._metadata_storage.update_config(self.config.to_dict())
+
+    def _record_experiment_unit(
+        self,
+        intent: str | None,
+        data: dict[str, Any] | list[dict[str, Any]] | None,
+        *,
+        resume: bool = False,
+    ) -> None:
+        from aspara.run._source import capture_code_state, normalize_data_refs
+
+        existing = self._metadata_storage.get_metadata() if resume else {}
+        if intent is not None:
+            resolved_intent = intent
+        elif resume:
+            resolved_intent = existing.get("intent") or ""
+        else:
+            resolved_intent = os.environ.get("ASPARA_INTENT", "")
+        self.intent = resolved_intent
+        self._metadata_storage.set_intent(resolved_intent)
+        existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
+        existing_code = existing_source.get("code") if isinstance(existing_source, dict) else {}
+        if not isinstance(existing_code, dict):
+            existing_code = {}
+        if data is not None:
+            data_refs = normalize_data_refs(data)
+        elif resume:
+            raw_data = existing_source.get("data") if isinstance(existing_source, dict) else []
+            data_refs = raw_data if isinstance(raw_data, list) else []
+        else:
+            data_refs = []
+        if resume and existing_code:
+            code = existing_code
+        else:
+            source_dir = Path(self._data_dir) / self.project / self.name / "source"
+            try:
+                code = capture_code_state(dest_dir=source_dir, base_dir=Path(self._data_dir))
+            except Exception as exc:
+                code = {"kind": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
+        source = {"code": code, "data": data_refs}
+        self._source = source
+        self._metadata_storage.set_source(source)
 
     def _on_config_change(self) -> None:
         """Callback when config changes."""
