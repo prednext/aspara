@@ -21,11 +21,15 @@ from .base import MetricsStorage
 
 
 def repeats_last_metric(path: Path, record: dict[str, Any]) -> bool:
-    """True when ``record`` has the same step and timestamp as the file's last row."""
+    """True when the last row is the same step, timestamp, and metrics dict.
+
+    A retried send matches all three. Another ``log()`` at that step, including
+    ``commit=False``, has a different metrics dict and is kept.
+    """
     last = _last_jsonl_record(path)
     if last is None:
         return False
-    return last.get("step") == record.get("step") and last.get("timestamp") == record.get("timestamp")
+    return last.get("step") == record.get("step") and last.get("timestamp") == record.get("timestamp") and last.get("metrics") == record.get("metrics")
 
 
 def _last_jsonl_record(path: Path) -> dict[str, Any] | None:

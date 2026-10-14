@@ -79,12 +79,18 @@ def test_save_skips_repeat_of_the_last_step(temp_storage_dir):
     first = {"timestamp": 1718447400123, "step": 1, "metrics": {"loss": 0.5}}
     storage.save(first)
     storage.save(dict(first))
+    storage.save({"timestamp": 1718447400123, "step": 1, "metrics": {"val/loss": 0.6}})
     storage.save({"timestamp": 1718447400124, "step": 1, "metrics": {"loss": 0.4}})
     storage.save({"timestamp": 1718447400123, "step": 2, "metrics": {"loss": 0.3}})
 
-    lines = (temp_storage_dir / "test_project" / "test_run_1.jsonl").read_text().splitlines()
-    assert [json.loads(line)["step"] for line in lines] == [1, 1, 2]
-    assert json.loads(lines[1])["timestamp"] == 1718447400124
+    lines = [json.loads(line) for line in (temp_storage_dir / "test_project" / "test_run_1.jsonl").read_text().splitlines()]
+    assert [line["metrics"] for line in lines] == [
+        {"loss": 0.5},
+        {"val/loss": 0.6},
+        {"loss": 0.4},
+        {"loss": 0.3},
+    ]
+    assert [line["step"] for line in lines] == [1, 1, 1, 2]
 
 
 def test_file_storage_load(temp_storage_dir):
