@@ -81,16 +81,18 @@ Aspara saves all metrics, metadata, and artifacts under a **data directory**.
 
 For details, see [Configuration (Advanced)](../advanced/configuration.md) and [Storage (Advanced)](../advanced/storage.md).
 
-## Local vs Remote Tracking
+## Local files and a Tracker copy
 
-Aspara has two main modes for saving logs:
+`aspara.init()` always writes metrics and metadata to the local data directory.
 
-- **Local Mode** (default)
-    - Writes metrics and metadata directly to local files (data directory).
-    - Suitable for simple setups like individual development or experiments on a laptop.
-- **Remote Mode** (via Tracker)
-    - Sends data to a remote server via HTTP using the Tracker API.
-    - Useful when you want to aggregate results from multiple machines or jobs in one place.
-    - Enabled by specifying `tracker_uri` in `aspara.init()`.
+- **Local only** (default)
+    - Omit `tracker_uri`.
+    - Suitable for a laptop or a single machine.
+- **Also ship a copy**
+    - Set `tracker_uri`, or `ASPARA_TRACKER_URI`.
+    - Local files remain the record. A copy is queued and sent to the Tracker in the background.
+    - `log()` does not wait for the Tracker. If the Tracker is down, logging still succeeds.
+    - Useful when several machines should show up in one Tracker.
+    - A loopback Tracker that already stores this directory does not keep a second copy.
 
-For differences and use cases of local and remote modes, see [Local vs Remote Tracking](../advanced/local-vs-remote.md) and [Tracker API](../advanced/tracker-api.md).
+See [Local files and a Tracker copy](../advanced/local-vs-remote.md) and [Tracker API](../advanced/tracker-api.md).

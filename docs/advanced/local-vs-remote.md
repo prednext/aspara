@@ -1,52 +1,34 @@
-# Local vs Remote Tracking
+# Local files and a Tracker copy
 
-Aspara has two operating modes:
+`aspara.init()` always writes the run to local files. `tracker_uri` does not switch storage. It queues a copy and sends that copy to a Tracker in the background.
 
-- **Local Mode** (local file-based)
-- **Remote Mode** (tracker server-based)
+| | Local only | With `tracker_uri` |
+|---|---|---|
+| **What `init` writes** | Local files | The same local files |
+| **Tracker** | Not used | Receives a copy when it is reachable |
+| **If the Tracker is down** | — | `log()` still returns. The copy stays queued and is sent later |
+| **Dependencies** | Minimal | `requests` (`aspara[remote]`) for the copy |
+| **Several machines** | Each machine keeps its own files | One Tracker can hold a copy from each machine |
 
-> **Note:** Internally, Aspara uses `LocalRun` and `RemoteRun` classes to implement these modes, but these are implementation details. You interact with the unified `Run` class returned by `aspara.init()`.
+## Local only
 
-## Mode Comparison
-
-| Feature | Local Mode | Remote Mode |
-|---------|------------|-------------|
-| **Server Required** | No | Yes (tracker) |
-| **Dependencies** | Minimal | `requests` required (`aspara[remote]`) |
-| **Storage** | Local files | Local files, plus a copy sent to the Tracker |
-| **Team Collaboration** | Limited | Possible |
-| **Offline** | Yes | Local write continues; shipping retries when the Tracker is back |
-
-## Local Mode (Default)
-
-A simple mode that writes metrics directly to local files:
+Omit `tracker_uri` and `ASPARA_TRACKER_URI`:
 
 ```python
 import aspara
 
-# Default is local mode
 aspara.init(project="my_project")
 aspara.log({"loss": 0.5})
 aspara.finish()
 ```
 
-**Features:**
-
-- Easy to use without a server
-- Works in offline environments
-- Lightweight and fast
-- Ideal for debugging and personal development
-
 **Data storage location:** `~/.local/share/aspara/my_project/run_name.jsonl`
 
-## Remote Mode
-
-A mode that sends metrics to a tracker server via HTTP:
+## Also ship a copy
 
 ```python
 import aspara
 
-# tracker_uri still writes local files and also ships to the Tracker
 aspara.init(
     project="my_project",
     tracker_uri="http://localhost:3142"
@@ -55,12 +37,11 @@ aspara.log({"loss": 0.5})
 aspara.finish()
 ```
 
+`log()` returns after the local write. The Tracker does not have to be running at that moment.
+
 On create, a loopback Tracker compares the client's directory with its own. When they match, it stores nothing and Aspara does not ship a second copy. A Tracker started with a different `--data-dir` receives the copy. Point `dir` at a different directory, or use a Tracker on another host, when you want a duplicate.
 
-**Prerequisites:**
-
-1. Tracker server must be running
-2. `requests` must be installed
+To receive the copy:
 
 ```bash
 # Start the Tracker
@@ -70,16 +51,14 @@ aspara tracker --port 3142
 uv pip install "aspara[remote]"
 ```
 
-## Switching Modes
-
-Local and remote modes can be switched simply by adding `tracker_uri`:
+## Adding a Tracker later
 
 ```python
-# Local mode (default)
+# Local files only
 with aspara.init(project="test") as run:
     aspara.log({"loss": 0.5})
 
-# Remote mode
+# Same local files, plus a background copy
 with aspara.init(project="test", tracker_uri="http://localhost:3142") as run:
     aspara.log({"loss": 0.5})
 ```

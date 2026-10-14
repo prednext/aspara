@@ -4,7 +4,7 @@ This page provides a conceptual overview of the Tracker. For detailed API docume
 
 ## Overview
 
-The Tracker is a standalone server that enables remote experiment tracking. It receives metrics, metadata, and artifacts from `RemoteRun` clients and stores them using the same storage layer as local runs.
+The Tracker is a standalone server that stores a copy of a run. `aspara.init(tracker_uri=...)` still writes local files, and sends that copy in the background. The Tracker stores it with the same storage layer as a local run.
 
 ## Starting the Tracker
 

@@ -127,8 +127,8 @@ python train.py
     variables. If you need to upload larger files, consider splitting
     them or storing artifacts outside the tracker.
 
-!!! note "Local vs Remote"
+!!! note "Local files and a Tracker copy"
     File-size and line-count limits apply when **reading** metrics files
     (e.g., in the dashboard or TUI). The notes and tags limits are
     enforced at write time by the metadata storage layer, so they apply
-    to both local and remote runs.
+    to local files and to the copy stored by a Tracker.

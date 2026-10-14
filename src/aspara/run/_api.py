@@ -43,7 +43,9 @@ def init(
         tags: Tags attached to this individual run (run-wide).
         notes: Run notes/description (wandb-compatible).
         dir: Base directory for storing data. Defaults to XDG-based default (~/.local/share/aspara).
-        tracker_uri: Tracker server URI for remote mode. If None, uses local file storage.
+        tracker_uri: If set, also ship a copy to this Tracker. Local files are always
+            written. If None, ``ASPARA_TRACKER_URI`` is used when set. A loopback
+            Tracker that already stores this directory does not keep a second copy.
         storage_backend: Storage backend type ('jsonl' or 'polars'). Can also be set via ASPARA_STORAGE_BACKEND env var.
         project_tags: Tags attached to the project as a whole (project-wide), shared across all runs in the project. Distinct from ``tags``, which are per-run.
         resume: If True and a run with the same name already exists, resume it
@@ -63,7 +65,7 @@ def init(
         >>> aspara.log({"loss": 0.5})
         >>> aspara.finish()
 
-        Using remote tracker:
+        Also ship a copy to a Tracker. The local files are still written:
 
         >>> run = aspara.init(project="my_project", tracker_uri="http://localhost:3142")
 
