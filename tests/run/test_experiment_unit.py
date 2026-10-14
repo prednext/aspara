@@ -339,7 +339,7 @@ def test_create_conflict_does_not_ship_or_retry(tmp_path: Path, monkeypatch) -> 
         finish()
 
 
-def test_sync_create_conflict_does_not_ship_metrics(tmp_path: Path, monkeypatch) -> None:
+def test_sync_create_conflict_does_not_ship_metrics(tmp_path: Path, monkeypatch, capsys) -> None:
     calls = {"n": 0}
     saved = MagicMock(return_value={"status": "ok"})
 
@@ -358,10 +358,11 @@ def test_sync_create_conflict_does_not_ship_metrics(tmp_path: Path, monkeypatch)
         tracker_uri="http://tracker.example:3142",
     )
     try:
+        assert "not sending a copy" in capsys.readouterr().out
         run.log({"loss": 0.5})
         failed = run.flush(timeout=2.0)
         assert calls["n"] == 1
-        assert failed == 0
+        assert failed == 1
         saved.assert_not_called()
         meta = json.loads((tmp_path / "p" / "sync-conflict.meta.json").read_text())
         assert meta["run_id"] == run.id

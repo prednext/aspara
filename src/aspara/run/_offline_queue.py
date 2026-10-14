@@ -462,14 +462,18 @@ class OfflineQueueStorage:
         """Drop queued items and refuse later enqueues.
 
         A create conflict (HTTP 409) is permanent: the items are not retried.
-        Returns how many items count as unsent. ``count_as_unsent=False`` is
-        the same-store response: nothing failed, and nothing more is sent.
+        Returns how many items count as unsent. An empty queue still counts
+        as one, because the refused create never entered it.
+        ``count_as_unsent=False`` is the same-store response: nothing failed,
+        and nothing more is sent.
         """
         with self._lock:
             if self._shipping_blocked:
                 return self._rejected_unsent
             self._shipping_blocked = True
-            self._rejected_unsent = self._item_count if count_as_unsent else 0
+            # A 409 on create can happen before that create is queued. Count it
+            # as one unsent item so flush() does not look like a clean send.
+            self._rejected_unsent = max(self._item_count, 1) if count_as_unsent else 0
             self._item_count = 0
             try:
                 if self._queue_file.exists():
@@ -700,6 +704,7 @@ class MetricsRetryWorker:
             status = getattr(getattr(e, "response", None), "status_code", None)
             kind = item.kind or "metrics"
             if status == 409 and kind == "create":
+                print(f"aspara: Tracker already has '{self.run_name}' with a different id; not sending a copy")
                 logger.warning(f"Tracker create returned 409 for {self.project}/{self.run_name}. Not retrying and not shipping further items.")
                 return "conflict"
             if status == 409:

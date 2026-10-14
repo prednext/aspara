@@ -88,6 +88,7 @@ class TrackerShipper:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status == 409:
                 self._queue.reject_shipping()
+                print(f"aspara: Tracker already has '{run_name}' with a different id; not sending a copy")
                 logger.warning(f"Tracker create returned 409 for {project}/{run_name}. Not retrying and not shipping further items.")
             else:
                 logger.warning(f"Failed to create run on tracker: {exc}. Will retry via queue.")

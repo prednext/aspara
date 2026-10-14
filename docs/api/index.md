@@ -50,7 +50,7 @@ run = aspara.init(
     - `"jsonl"` (default): JSONL file format
     - `"polars"`: Efficient storage with Polars (experimental)
     - Can be overridden with `ASPARA_STORAGE_BACKEND` environment variable
-- **`tracker_uri`**: Tracker server URI. Local files are still written; a copy is queued and sent in the background. The local run id is sent as `run_id` and stored on the Tracker. A same-name run with a different id returns 409 and is not retried. A loopback Tracker that is already storing this directory does not accept a second copy.
+- **`tracker_uri`**: Tracker server URI. Local files are still written; a copy is queued and sent in the background. The local run id is sent as `run_id` and stored on the Tracker. A same-name run with a different id returns 409. `init` still succeeds locally and prints that the copy will not be sent. `flush()` counts that create as unsent, and later logs are not queued. A loopback Tracker that is already storing this directory does not accept a second copy.
 
 **Returns:** `Run` object
 
