@@ -58,6 +58,9 @@ class TrackerShipper:
             tracker_uri=tracker_uri,
             data_dir=Path(data_dir) if data_dir else None,
         )
+        if resume:
+            # Continuing this run. A finish still queued is the previous exit.
+            self._queue.drop_kind("finish")
         self._worker = MetricsRetryWorker(
             storage=self._queue,
             client=self.client,

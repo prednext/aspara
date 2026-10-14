@@ -462,6 +462,46 @@ class TestOfflineQueueStorage:
             ready = storage.get_ready_items()
             assert [item.kind for item in ready] == ["create", "metrics", "finish"]
 
+    def test_get_ready_items_holds_finish_while_a_step_is_backing_off(self):
+        """A ready finish waits until a backing-off step can be sent."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            later = int(time.time() * 1000) + 100_000
+            waiting = MetricsQueueItem(step=4, metrics={"loss": 0.2}, next_retry_at=later)
+            ready_step = MetricsQueueItem(step=3, metrics={"loss": 0.3})
+            storage.enqueue(waiting)
+            storage.enqueue(ready_step)
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
+
+            ready = storage.get_ready_items()
+            assert [item.kind for item in ready] == ["metrics"]
+            assert ready[0].step == 3
+
+            storage.update_retry_info(waiting.id, retry_count=1, next_retry_at=0)
+            assert [item.kind for item in storage.get_ready_items()] == ["metrics", "metrics", "finish"]
+
+    def test_drop_kind_removes_only_that_kind(self):
+        """Resume can drop a leftover finish and keep the steps."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.5}))
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 1}))
+            assert storage.drop_kind("finish") == 1
+            assert [item.kind for item in _queue_items(storage)] == ["metrics"]
+            assert storage.count() == 1
+
     def test_get_ready_items_respects_limit_with_large_queue(self):
         """get_ready_items should return only ``limit`` items from a large queue."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -869,6 +909,59 @@ class TestMetricsRetryWorker:
             sent = [call[0] for call in mock_client.method_calls if call[0] in {"create_run", "save_metrics"}]
             assert sent == ["create_run", "save_metrics"]
             assert storage.is_empty()
+
+    def test_worker_holds_finish_while_a_step_is_backing_off(self):
+        """finish stays queued until the backing-off step is eligible."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            later = int(time.time() * 1000) + 100_000
+            storage.enqueue(MetricsQueueItem(step=2, metrics={"loss": 0.4}, next_retry_at=later))
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
+            worker._process_queue()
+            mock_client.finish_run.assert_not_called()
+            mock_client.save_metrics.assert_not_called()
+            assert [item.kind for item in _queue_items(storage)] == ["metrics", "finish"]
+
+    def test_flush_holds_finish_while_a_step_is_backing_off(self, monkeypatch):
+        """flush waits rather than completing the run ahead of a backing-off step."""
+        monkeypatch.setattr("aspara.run._offline_queue.time.sleep", lambda *_args, **_kwargs: None)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = OfflineQueueStorage(
+                project="test_project",
+                run_name="test_run",
+                run_id="abc123",
+                tracker_uri="http://localhost:3142",
+                data_dir=Path(temp_dir),
+            )
+            mock_client = MagicMock()
+            mock_client.health_check.return_value = True
+            worker = MetricsRetryWorker(
+                storage=storage,
+                client=mock_client,
+                project="test_project",
+                run_name="test_run",
+            )
+            later = int(time.time() * 1000) + 100_000
+            storage.enqueue(MetricsQueueItem(step=2, metrics={"loss": 0.4}, next_retry_at=later))
+            storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
+            failed = worker.flush_sync(timeout=0.05)
+            mock_client.finish_run.assert_not_called()
+            assert failed == 2
+            assert [item.kind for item in _queue_items(storage)] == ["metrics", "finish"]
 
     def test_worker_create_conflict_drops_queue_without_retry(self):
         """HTTP 409 on create removes the queue and does not send later items."""

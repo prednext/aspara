@@ -310,13 +310,16 @@ class OfflineQueueStorage:
             limit: Maximum number of items to return
 
         Returns:
-            List of items ready for retry
+            List of items ready for retry. ``finish`` is left out while any
+            other item is still waiting out its retry delay, so a completed
+            state cannot land before that item.
         """
         now_ms = int(time.time() * 1000)
         # Min-heap of (sort_key, item) — we push negative sort keys to use
         # heapq as a max-heap of size ``limit``, then pop all and reverse.
         # This keeps memory usage bounded to ``limit`` items.
         heap: list[tuple[tuple[int, int, int], str, MetricsQueueItem]] = []
+        waiting_on_backoff = False
 
         with self._lock:
             if not self._queue_file.exists():
@@ -333,6 +336,8 @@ class OfflineQueueStorage:
                             continue
 
                         if item.next_retry_at > now_ms:
+                            if item.kind != "finish":
+                                waiting_on_backoff = True
                             continue
 
                         rank = _KIND_RANK.get(item.kind, 1)
@@ -347,6 +352,10 @@ class OfflineQueueStorage:
                             heapq.heapreplace(heap, (neg_key, item.id, item))
             except OSError as e:
                 logger.warning(f"Failed to read queue file {self._queue_file}: {e}")
+
+        if waiting_on_backoff:
+            heap = [entry for entry in heap if entry[2].kind != "finish"]
+            heapq.heapify(heap)
 
         # Extract items in sorted order (kind rank, then step, then created_at).
         result = [heapq.heappop(heap)[2] for _ in range(len(heap))]
@@ -370,6 +379,38 @@ class OfflineQueueStorage:
             except OSError:
                 return False
         return False
+
+    def drop_kind(self, kind: str) -> int:
+        """Remove every queued item of ``kind``.
+
+        Resume drops a finish left by the previous session. That session
+        already ended, and this one enqueues its own finish when it ends.
+        """
+        with self._lock:
+            if not self._queue_file.exists():
+                return 0
+            try:
+                with self._queue_file.open("r") as f:
+                    lines = f.readlines()
+
+                remaining_lines: list[str] = []
+                removed = 0
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    item = self._parse_queue_item(line.strip())
+                    if item is not None and item.kind == kind:
+                        removed += 1
+                        continue
+                    remaining_lines.append(line if line.endswith("\n") else line + "\n")
+
+                if removed:
+                    atomic_write_text(self._queue_file, lambda f: f.writelines(remaining_lines), suffix=".jsonl")
+                    self._item_count = len(remaining_lines)
+                return removed
+            except OSError as e:
+                logger.warning(f"Failed to drop queued {kind} items: {e}")
+                return 0
 
     def dequeue(self, item_ids: list[str]) -> int:
         """Remove items from the queue by ID.

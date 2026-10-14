@@ -1,11 +1,13 @@
 """Experiment unit fields and local-first tracker shipping."""
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from aspara.run._api import finish, init
 from aspara.run._local_run import LocalRun
+from aspara.run._offline_queue import MetricsQueueItem
 
 
 def test_init_writes_intent_and_data(tmp_path: Path) -> None:
@@ -335,6 +337,46 @@ def test_create_conflict_does_not_ship_or_retry(tmp_path: Path, monkeypatch) -> 
         saved.assert_not_called()
         assert run.backend._shipper is not None
         assert run.backend._shipper.run_id == run.id
+    finally:
+        finish()
+
+
+def test_resume_drops_a_queued_finish(tmp_path: Path, monkeypatch) -> None:
+    first = init(project="p", name="held", dir=str(tmp_path))
+    first.finish()
+    queue_dir = tmp_path / ".queue" / "p"
+    queue_dir.mkdir(parents=True)
+    queued = MetricsQueueItem(step=7, metrics={"loss": 0.2})
+    leftover = MetricsQueueItem(kind="finish", payload={"exit_code": 1})
+    (queue_dir / "held.queue.jsonl").write_text(queued.to_jsonl() + "\n" + leftover.to_jsonl() + "\n")
+
+    finished: list[int] = []
+    saved: list[int] = []
+
+    def finish_run(self, project, run_name, exit_code):
+        finished.append(exit_code)
+
+    def save_metrics(self, **kwargs):
+        saved.append(kwargs["step"])
+        return {"status": "ok"}
+
+    _mock_tracker(monkeypatch)
+    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", finish_run)
+    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", save_metrics)
+    resumed = init(
+        project="p",
+        name="held",
+        dir=str(tmp_path),
+        resume=True,
+        tracker_uri="http://tracker.example:3142",
+    )
+    try:
+        deadline = time.time() + 2
+        while not saved and time.time() < deadline:
+            time.sleep(0.01)
+        assert saved == [7]
+        assert finished == []
+        assert resumed.backend._shipper is not None
     finally:
         finish()
 
