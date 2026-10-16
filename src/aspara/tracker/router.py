@@ -87,8 +87,6 @@ def _resume_existing_run(
     storage.reset_finish()
     if request.config:
         storage.update_config(request.config)
-    if request.intent:
-        storage.set_intent(request.intent)
     if request.source:
         storage.set_source(request.source)
     if request.project_tags:
@@ -230,8 +228,6 @@ async def create_run(project_name: str, request: RunCreateRequest, http_request:
 
     if request.config:
         storage.update_config(request.config)
-    if request.intent:
-        storage.set_intent(request.intent)
     if request.source:
         storage.set_source(request.source)
 

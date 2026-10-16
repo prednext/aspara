@@ -19,7 +19,6 @@ def _empty_run_metadata() -> dict[str, Any]:
         "run_id": None,
         "tags": [],
         "notes": "",
-        "intent": "",
         "params": {},
         "config": {},
         "artifacts": [],
@@ -74,8 +73,7 @@ class RunMetadataStorage(BaseMetadataStorage):
             "code": source.get("code") if isinstance(source.get("code"), dict) else {},
             "data": source.get("data") if isinstance(source.get("data"), list) else [],
         }
-        if merged.get("intent") is None:
-            merged["intent"] = ""
+        merged.pop("intent", None)
         return merged
 
     def _get_metadata_path(self) -> Path:
@@ -218,11 +216,6 @@ class RunMetadataStorage(BaseMetadataStorage):
 
         self._save()
         return dict(self._metadata)
-
-    def set_intent(self, intent: str) -> None:
-        """Set the experiment intent (separate from free-form notes)."""
-        self._metadata["intent"] = intent
-        self._save()
 
     def set_source(self, source: dict[str, Any]) -> None:
         """Replace the source block (code state and data pointers)."""

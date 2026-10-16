@@ -43,7 +43,6 @@ class TrackerShipper:
         notes: str | None,
         project_tags: list[str] | None,
         resume: bool,
-        intent: str,
         source: dict[str, Any],
         data_dir: str | None = None,
     ) -> None:
@@ -75,7 +74,6 @@ class TrackerShipper:
             "notes": notes,
             "project_tags": project_tags,
             "resume": resume,
-            "intent": intent or None,
             "source": source or None,
             "run_id": run_id,
         }

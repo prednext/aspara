@@ -198,16 +198,16 @@ class TestTrackerAPIIntegration:
         assert metadata["created_at"] is not None
         assert metadata["updated_at"] is not None
 
-    def test_run_creation_stores_intent_and_source(self, tmp_path, monkeypatch):
-        """Run creation should persist intent and source onto run metadata."""
+    def test_run_creation_stores_source(self, tmp_path, monkeypatch):
+        """Run creation should persist source onto run metadata."""
         monkeypatch.setenv("ASPARA_DATA_DIR", str(tmp_path))
 
         client = TestClient(app)
         response = client.post(
             "/api/v1/projects/test_project/runs",
             json={
-                "name": "run_intent",
-                "intent": "add lag features",
+                "name": "run_source",
+                "notes": "add lag features",
                 "source": {
                     "code": {"kind": "git", "sha": "abc123", "dirty": False},
                     "data": [{"uri": "s3://b/t", "version": "1"}],
@@ -217,10 +217,11 @@ class TestTrackerAPIIntegration:
         )
         assert response.status_code == 200
 
-        meta_path = tmp_path / "test_project" / "run_intent.meta.json"
+        meta_path = tmp_path / "test_project" / "run_source.meta.json"
         with meta_path.open(encoding="utf-8") as f:
             metadata = json.load(f)
-        assert metadata["intent"] == "add lag features"
+        assert metadata["notes"] == "add lag features"
+        assert "intent" not in metadata
         assert metadata["source"]["code"]["sha"] == "abc123"
         assert metadata["source"]["data"][0]["uri"] == "s3://b/t"
 

@@ -10,36 +10,36 @@ from aspara.run._local_run import LocalRun
 from aspara.run._offline_queue import MetricsQueueItem
 
 
-def test_init_writes_intent_and_data(tmp_path: Path) -> None:
+def test_init_writes_data(tmp_path: Path) -> None:
     run = init(
         project="p",
         name="r1",
         dir=str(tmp_path),
-        intent="add lag features",
+        notes="add lag features",
         data={"name": "sales", "uri": "s3://b/t", "version": "2026-01"},
     )
     try:
         meta = run.backend._metadata_storage.get_metadata()
-        assert meta["intent"] == "add lag features"
+        assert meta["notes"] == "add lag features"
+        assert "intent" not in meta
         assert meta["source"]["data"][0]["uri"] == "s3://b/t"
         assert "kind" in meta["source"]["code"]
     finally:
         finish()
 
 
-def test_resume_keeps_intent_and_data(tmp_path: Path) -> None:
+def test_resume_keeps_data(tmp_path: Path) -> None:
     first = init(
         project="p",
         name="r3",
         dir=str(tmp_path),
-        intent="add lag features",
+        notes="add lag features",
         data={"uri": "s3://b/t", "version": "1"},
     )
     first.finish()
     resumed = init(project="p", name="r3", dir=str(tmp_path), resume=True)
     try:
         meta = resumed.backend._metadata_storage.get_metadata()
-        assert meta["intent"] == "add lag features"
         assert meta["source"]["data"][0]["uri"] == "s3://b/t"
         assert "kind" in meta["source"]["code"]
     finally:
@@ -70,7 +70,6 @@ def test_tracker_uri_still_writes_local_files(tmp_path: Path, monkeypatch) -> No
         name="r2",
         dir=str(tmp_path),
         tracker_uri="http://localhost:3142",
-        intent="baseline",
     )
     try:
         assert isinstance(run.backend, LocalRun)
@@ -140,7 +139,7 @@ def test_other_data_dir_does_ship(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_resume_keeps_source_code_when_git_fails(tmp_path: Path, monkeypatch) -> None:
-    first = init(project="p", name="r-code", dir=str(tmp_path), intent="keep me")
+    first = init(project="p", name="r-code", dir=str(tmp_path), notes="keep me")
     original = dict(first.backend._source["code"])
     first.finish()
 
@@ -152,7 +151,6 @@ def test_resume_keeps_source_code_when_git_fails(tmp_path: Path, monkeypatch) ->
     try:
         meta = resumed.backend._metadata_storage.get_metadata()
         assert meta["source"]["code"] == original
-        assert meta["intent"] == "keep me"
     finally:
         finish()
 

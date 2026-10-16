@@ -46,7 +46,6 @@ class RunCreateRequest(BaseModel):
     notes: str = ""
     project_tags: list[str] | None = None
     resume: bool = False
-    intent: str = ""
     source: dict[str, Any] | None = None
     run_id: str | None = None
     client_data_dir: str | None = None

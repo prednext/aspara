@@ -32,7 +32,6 @@ class Run:
         tracker_uri: str | None = None,
         project_tags: list[str] | None = None,
         resume: bool = False,
-        intent: str | None = None,
         data: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> None:
         """Create a new run instance.
@@ -51,7 +50,6 @@ class Run:
             resume: If True and a run with the same name already exists, resume
                 it (reuse run_id, reset finish state, continue step numbering).
                 If no existing run is found, a new run is created.
-            intent: What this run is testing. Separate from notes.
             data: Dataset pointer or list of pointers.
         """
         from aspara.run._local_run import LocalRun
@@ -66,7 +64,6 @@ class Run:
             storage_backend=storage_backend,
             project_tags=project_tags,
             resume=resume,
-            intent=intent,
             data=data,
             tracker_uri=tracker_uri,
         )

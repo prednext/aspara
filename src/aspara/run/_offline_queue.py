@@ -37,7 +37,7 @@ _KIND_RANK = {
     "finish": 2,
 }
 
-# create is the only copy of intent, config, and source. finish is the only
+# create is the only copy of config and source. finish is the only
 # copy of the exit code. A full queue drops older steps instead of these.
 _PROTECTED_QUEUE_KINDS = frozenset({"create", "finish"})
 
@@ -767,7 +767,6 @@ class MetricsRetryWorker:
                 notes=payload.get("notes"),
                 project_tags=payload.get("project_tags"),
                 resume=bool(payload.get("resume")),
-                intent=payload.get("intent"),
                 source=payload.get("source"),
                 run_id=payload.get("run_id"),
                 client_data_dir=payload.get("client_data_dir"),

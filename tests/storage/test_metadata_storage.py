@@ -20,7 +20,7 @@ class TestRunMetadataStorage:
         assert metadata["run_id"] is None
         assert metadata["tags"] == []
         assert metadata["notes"] == ""
-        assert metadata["intent"] == ""
+        assert "intent" not in metadata
         assert metadata["source"] == {"code": {}, "data": []}
         assert metadata["params"] == {}
         assert metadata["config"] == {}

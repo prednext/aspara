@@ -320,14 +320,14 @@ class TestOfflineQueueStorage:
                 tracker_uri="http://localhost:3142",
                 data_dir=Path(temp_dir),
             )
-            storage.enqueue(MetricsQueueItem(kind="create", payload={"intent": "try lag features"}))
+            storage.enqueue(MetricsQueueItem(kind="create", payload={"notes": "try lag features"}))
             storage.enqueue(MetricsQueueItem(kind="finish", payload={"exit_code": 0}))
 
             assert storage.enqueue(MetricsQueueItem(step=1, metrics={"loss": 0.4})) is False
 
             items = _queue_items(storage)
             assert [item.kind for item in items] == ["create", "finish"]
-            assert items[0].payload["intent"] == "try lag features"
+            assert items[0].payload["notes"] == "try lag features"
 
     def test_drop_oldest_steps_leaves_later_steps(self):
         """Only the oldest steps are removed, up to the requested count."""

@@ -62,7 +62,6 @@ class TrackerClient:
         notes: str | None,
         project_tags: list[str] | None = None,
         resume: bool = False,
-        intent: str | None = None,
         source: dict[str, Any] | None = None,
         run_id: str | None = None,
         client_data_dir: str | None = None,
@@ -97,7 +96,6 @@ class TrackerClient:
                 "notes": notes or "",
                 "project_tags": project_tags,
                 "resume": resume,
-                **({"intent": intent} if intent else {}),
                 **({"source": source} if source else {}),
                 **({"run_id": run_id} if run_id else {}),
                 **({"client_data_dir": client_data_dir} if client_data_dir else {}),
@@ -338,7 +336,6 @@ class RemoteRun(BaseRun):
             notes=self.notes,
             project_tags=project_tags,
             resume=resume,
-            intent="",
             source={},
         )
         self.client = self._shipper.client

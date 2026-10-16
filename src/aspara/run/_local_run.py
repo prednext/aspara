@@ -33,7 +33,6 @@ class LocalRun(BaseRun):
         storage_backend: str | None = None,
         project_tags: list[str] | None = None,
         resume: bool = False,
-        intent: str | None = None,
         data: dict[str, Any] | list[dict[str, Any]] | None = None,
         tracker_uri: str | None = None,
     ) -> None:
@@ -51,14 +50,12 @@ class LocalRun(BaseRun):
             resume: If True and a run with the same name already exists, resume
                 it (reuse run_id, reset finish state, continue step numbering).
                 If no existing run is found, a new run is created.
-            intent: What this run is testing. Separate from notes.
             data: Dataset pointer or list of pointers (uri, version, hash).
             tracker_uri: If set, also ship a copy to a Tracker after the local
                 write. A tracker failure does not fail log().
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
         self._shipper = None
-        self.intent = ""
         self._source: dict[str, Any] = {"code": {}, "data": []}
 
         # Determine data directory
@@ -146,7 +143,7 @@ class LocalRun(BaseRun):
 
         self._ensure_output_dir()
         self._write_init_record()
-        self._record_experiment_unit(intent=intent, data=data, resume=is_resuming)
+        self._record_experiment_unit(data=data, resume=is_resuming)
         if tracker_uri:
             print(f"aspara: Also sending to: {tracker_uri}")
             self._start_shipper(
@@ -196,7 +193,6 @@ class LocalRun(BaseRun):
 
     def _record_experiment_unit(
         self,
-        intent: str | None,
         data: dict[str, Any] | list[dict[str, Any]] | None,
         *,
         resume: bool = False,
@@ -204,14 +200,6 @@ class LocalRun(BaseRun):
         from aspara.run._source import capture_code_state, normalize_data_refs
 
         existing = self._metadata_storage.get_metadata() if resume else {}
-        if intent is not None:
-            resolved_intent = intent
-        elif resume:
-            resolved_intent = existing.get("intent") or ""
-        else:
-            resolved_intent = os.environ.get("ASPARA_INTENT", "")
-        self.intent = resolved_intent
-        self._metadata_storage.set_intent(resolved_intent)
         existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
         existing_code = existing_source.get("code") if isinstance(existing_source, dict) else {}
         if not isinstance(existing_code, dict):
@@ -256,7 +244,6 @@ class LocalRun(BaseRun):
             notes=self.notes,
             project_tags=project_tags,
             resume=resume,
-            intent=getattr(self, "intent", ""),
             source=getattr(self, "_source", {"code": {}, "data": []}),
             data_dir=self._data_dir,
         )
