@@ -67,7 +67,7 @@ def init(
 
         Also ship a copy to a Tracker. The local files are still written:
 
-        >>> run = aspara.init(project="my_project", tracker_uri="http://localhost:3142")
+        >>> run = aspara.init(project="my_project", tracker_uri="http://localhost:3142/tracker")
 
         Using Polars backend for efficient storage:
 

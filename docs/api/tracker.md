@@ -131,7 +131,7 @@ import aspara
 run = aspara.init(
     project="my_project",
     name="experiment_001",
-    tracker_uri="http://localhost:3142",
+    tracker_uri="http://localhost:3142/tracker",
     config={"learning_rate": 0.001}
 )
 

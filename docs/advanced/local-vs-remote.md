@@ -31,13 +31,13 @@ import aspara
 
 aspara.init(
     project="my_project",
-    tracker_uri="http://localhost:3142"
+    tracker_uri="http://localhost:3142/tracker"
 )
 aspara.log({"loss": 0.5})
 aspara.finish()
 ```
 
-`log()` returns after the local write. The Tracker does not have to be running at that moment.
+`log()` returns after the local write. The Tracker does not have to be running at that moment. `tracker_uri` includes `/tracker`: the client appends `/api/v1`, and `aspara tracker` serves the API under that path. A URI of `http://localhost:3142` alone returns 404.
 
 On create, a loopback Tracker compares the client's directory with its own. When they match, it stores nothing and Aspara does not ship a second copy. A Tracker started with a different `--data-dir` receives the copy. Point `dir` at a different directory, or use a Tracker on another host, when you want a duplicate.
 
@@ -59,7 +59,7 @@ with aspara.init(project="test") as run:
     aspara.log({"loss": 0.5})
 
 # Same local files, plus a background copy
-with aspara.init(project="test", tracker_uri="http://localhost:3142") as run:
+with aspara.init(project="test", tracker_uri="http://localhost:3142/tracker") as run:
     aspara.log({"loss": 0.5})
 ```
 

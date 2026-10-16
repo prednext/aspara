@@ -32,7 +32,7 @@ run = aspara.init(
     data={"uri": "s3://bucket/t", "version": "2026-01"},  # Dataset pointer (optional)
     dir="./data",                   # Data storage location (default: XDG compliant)
     storage_backend="polars",       # Storage backend ("jsonl" or "polars")
-    tracker_uri="http://localhost:3142",  # Also ship a copy to a Tracker
+    tracker_uri="http://localhost:3142/tracker",  # Also ship a copy to a Tracker
 )
 ```
 
@@ -50,7 +50,7 @@ run = aspara.init(
     - `"jsonl"` (default): JSONL file format
     - `"polars"`: Efficient storage with Polars (experimental)
     - Can be overridden with `ASPARA_STORAGE_BACKEND` environment variable
-- **`tracker_uri`**: Tracker server URI. Local files are still written; a copy is queued and sent in the background. The local run id is sent as `run_id` and stored on the Tracker. A same-name run with a different id returns 409. `init` still succeeds locally and prints that the copy will not be sent. `flush()` counts that create as unsent, and later logs are not queued. A loopback Tracker that is already storing this directory does not accept a second copy.
+- **`tracker_uri`**: Tracker server URI, including `/tracker`. The client appends `/api/v1`, and `aspara tracker` serves the API under `/tracker`. Local files are still written; a copy is queued and sent in the background. The local run id is sent as `run_id` and stored on the Tracker. A same-name run with a different id returns 409. `init` still succeeds locally and prints that the copy will not be sent. `flush()` counts that create as unsent, and later logs are not queued. A loopback Tracker that is already storing this directory does not accept a second copy.
 
 **Returns:** `Run` object
 

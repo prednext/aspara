@@ -29,7 +29,7 @@ class TrackerClient:
         """Initialize tracker client.
 
         Args:
-            base_url: Base URL of the tracker server (e.g., "http://localhost:3142")
+            base_url: Base URL of the tracker server (e.g., "http://localhost:3142/tracker")
 
         Raises:
             ImportError: If requests library is not installed
