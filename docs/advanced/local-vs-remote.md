@@ -1,6 +1,8 @@
 # Local files and a Tracker copy
 
-`aspara.init()` always writes the run to local files. `tracker_uri` does not switch storage. It queues a copy and sends that copy to a Tracker in the background.
+`aspara.init()` always saves the run as files on the machine running your code. Metrics, config, and metadata go to the local data directory (by default `~/.local/share/aspara`). Those files are the record of the run.
+
+A **Tracker** is an HTTP server you start with `aspara tracker`. It can store a second copy of the same run, for example so several machines show up in one place. Pass `tracker_uri` to `aspara.init()`, or set `ASPARA_TRACKER_URI`, and Aspara queues that copy and sends it in the background after the local write. `log()` returns when the local write finishes. Omit `tracker_uri` and the run stays in local files only.
 
 | | Local only | With `tracker_uri` |
 |---|---|---|
