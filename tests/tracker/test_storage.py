@@ -73,8 +73,15 @@ def test_file_storage_save(temp_storage_dir):
         assert saved_data["metrics"]["loss"] == 0.95
 
 
-def test_save_skips_repeat_of_the_last_step(temp_storage_dir):
-    """A retry of the last appended row does not add a second point."""
+def test_save_keeps_an_identical_row(temp_storage_dir):
+    """The same step, timestamp, and metrics dict is stored again.
+
+    JsonlMetricsStorage.save used to read up to 64KB at the end of the file
+    and skip a row that repeated the last step, timestamp, and metrics.
+    That covered a Tracker retry after a crash, but the read made each log()
+    about twice as slow (4.97s vs 10.78s for 100 runs of 1,000 steps).
+    Identical rows are kept. The same note is on PolarsMetricsStorage.save.
+    """
     storage = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="test_run_1")
     first = {"timestamp": 1718447400123, "step": 1, "metrics": {"loss": 0.5}}
     storage.save(first)
@@ -86,11 +93,12 @@ def test_save_skips_repeat_of_the_last_step(temp_storage_dir):
     lines = [json.loads(line) for line in (temp_storage_dir / "test_project" / "test_run_1.jsonl").read_text().splitlines()]
     assert [line["metrics"] for line in lines] == [
         {"loss": 0.5},
+        {"loss": 0.5},
         {"val/loss": 0.6},
         {"loss": 0.4},
         {"loss": 0.3},
     ]
-    assert [line["step"] for line in lines] == [1, 1, 1, 2]
+    assert [line["step"] for line in lines] == [1, 1, 1, 1, 2]
 
 
 def test_file_storage_load(temp_storage_dir):

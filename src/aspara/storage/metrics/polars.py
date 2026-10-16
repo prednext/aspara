@@ -17,7 +17,6 @@ import polars as pl
 
 from aspara.exceptions import RunNotFoundError
 from aspara.logger import logger
-from aspara.storage.metrics.jsonl import repeats_last_metric
 from aspara.utils import atomic_write_text, datasync, secure_open_append
 
 from .base import MetricsStorage
@@ -431,8 +430,8 @@ class PolarsMetricsStorage(MetricsStorage):
         if needs_archive:
             self._try_archive()
 
-        if repeats_last_metric(wal_path, metrics_data):
-            return ""
+        # Append every row. Do not read the file here to drop a duplicate.
+        # That read made each log() about twice as slow. Identical rows are kept.
         try:
             self._write_to_wal(wal_path, metrics_data)
         except OSError as e:  # pragma: no cover - error path
