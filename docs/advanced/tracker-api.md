@@ -4,7 +4,7 @@ This page provides a conceptual overview of the Tracker. For detailed API docume
 
 ## Overview
 
-The Tracker is a standalone server that stores a copy of a run. `aspara.init(tracker_uri=...)` still writes local files, and sends that copy in the background. The Tracker stores it with the same storage layer as a local run.
+The Tracker is a standalone server that stores a copy of a run. `aspara.init(tracker_uri=...)` writes the run to local files and sends that copy in the background. The Tracker stores the copy with the same storage layer as a local run.
 
 ## Starting the Tracker
 
