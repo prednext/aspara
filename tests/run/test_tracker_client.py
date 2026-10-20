@@ -6,7 +6,6 @@ import requests
 
 
 class TestTrackerClientSession:
-
     def test_tracker_client_close_and_context_manager(self):
         """Test TrackerClient.close() and context manager protocol."""
         from aspara.run._tracker_client import TrackerClient
