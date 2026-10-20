@@ -28,7 +28,6 @@ def init(
     storage_backend: str | None = None,
     project_tags: list[str] | None = None,
     resume: bool = False,
-    data: dict[str, Any] | list[dict[str, Any]] | None = None,
 ) -> Run:
     """Initialize a new run.
 
@@ -50,7 +49,6 @@ def init(
         resume: If True and a run with the same name already exists, resume it
             (reuse run_id, reset finish state, continue step numbering). If no
             existing run is found, a new run is created.
-        data: Dataset pointer or list of pointers (uri, version, hash).
 
     Returns:
         The initialized Run object.
@@ -104,7 +102,6 @@ def init(
             tracker_uri=resolved_uri,
             project_tags=project_tags,
             resume=resume,
-            data=data,
         )
         _current_run = run
 

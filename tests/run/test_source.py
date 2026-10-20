@@ -3,7 +3,7 @@
 import subprocess
 from pathlib import Path
 
-from aspara.run._source import capture_code_state, normalize_data_refs, sanitize_remote_url
+from aspara.run._source import capture_code_state, sanitize_remote_url
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -18,16 +18,6 @@ def _dirty_repo(repo: Path) -> None:
     _git(repo, "add", "a.py")
     _git(repo, "commit", "-m", "init")
     (repo / "a.py").write_text("x = 2\n")
-
-
-def test_normalize_data_single_dict() -> None:
-    assert normalize_data_refs({"uri": "s3://bucket/x", "version": "1"}) == [
-        {"uri": "s3://bucket/x", "version": "1"},
-    ]
-
-
-def test_normalize_data_none() -> None:
-    assert normalize_data_refs(None) == []
 
 
 def test_sanitize_remote_strips_userinfo() -> None:

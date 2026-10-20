@@ -23,7 +23,7 @@ def _empty_run_metadata() -> dict[str, Any]:
         "config": {},
         "artifacts": [],
         "summary": {},
-        "source": {"code": {}, "data": []},
+        "source": {"code": {}},
         "is_finished": False,
         "exit_code": None,
         "status": RunStatus.WIP.value,
@@ -71,7 +71,6 @@ class RunMetadataStorage(BaseMetadataStorage):
             source = {}
         merged["source"] = {
             "code": source.get("code") if isinstance(source.get("code"), dict) else {},
-            "data": source.get("data") if isinstance(source.get("data"), list) else [],
         }
         merged.pop("intent", None)
         return merged
@@ -218,10 +217,9 @@ class RunMetadataStorage(BaseMetadataStorage):
         return dict(self._metadata)
 
     def set_source(self, source: dict[str, Any]) -> None:
-        """Replace the source block (code state and data pointers)."""
+        """Replace the source block (code state)."""
         code = source.get("code") if isinstance(source.get("code"), dict) else {}
-        data = source.get("data") if isinstance(source.get("data"), list) else []
-        self._metadata["source"] = {"code": dict(code), "data": list(data)}
+        self._metadata["source"] = {"code": dict(code)}
         self._save()
 
     def delete_metadata(self) -> bool:

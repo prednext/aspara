@@ -1,4 +1,4 @@
-"""Capture code and data pointers for a run without user-specified SHAs."""
+"""Capture code state for a run without user-specified SHAs."""
 
 from __future__ import annotations
 
@@ -18,22 +18,6 @@ def _source_max_bytes() -> int:
         return max(0, int(raw))
     except ValueError:
         return 1_000_000
-
-
-def normalize_data_refs(data: dict[str, Any] | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """Normalize ``data=`` from init into a list of pointer dicts."""
-    if data is None:
-        return []
-    if isinstance(data, dict):
-        items = [data]
-    else:
-        items = list(data)
-    refs: list[dict[str, Any]] = []
-    for item in items:
-        if not isinstance(item, dict):
-            raise ValueError("data entries must be dictionaries")
-        refs.append(dict(item))
-    return refs
 
 
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:

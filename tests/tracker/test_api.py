@@ -210,7 +210,6 @@ class TestTrackerAPIIntegration:
                 "notes": "add lag features",
                 "source": {
                     "code": {"kind": "git", "sha": "abc123", "dirty": False},
-                    "data": [{"uri": "s3://b/t", "version": "1"}],
                 },
             },
             headers=CSRF_HEADER,
@@ -223,7 +222,7 @@ class TestTrackerAPIIntegration:
         assert metadata["notes"] == "add lag features"
         assert "intent" not in metadata
         assert metadata["source"]["code"]["sha"] == "abc123"
-        assert metadata["source"]["data"][0]["uri"] == "s3://b/t"
+        assert "data" not in metadata["source"]
 
     def test_multiple_run_creations_merge_project_tags_and_preserve_created_at(self, tmp_path, monkeypatch):
         """Multiple run creations with project_tags should merge tags and keep created_at stable."""

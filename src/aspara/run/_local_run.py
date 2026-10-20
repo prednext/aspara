@@ -33,7 +33,6 @@ class LocalRun(BaseRun):
         storage_backend: str | None = None,
         project_tags: list[str] | None = None,
         resume: bool = False,
-        data: dict[str, Any] | list[dict[str, Any]] | None = None,
         tracker_uri: str | None = None,
     ) -> None:
         """Initialize a new local run.
@@ -50,13 +49,12 @@ class LocalRun(BaseRun):
             resume: If True and a run with the same name already exists, resume
                 it (reuse run_id, reset finish state, continue step numbering).
                 If no existing run is found, a new run is created.
-            data: Dataset pointer or list of pointers (uri, version, hash).
             tracker_uri: With a Tracker, set this URI. The copy is sent after
                 the local write. A tracker failure does not fail log().
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
         self._shipper = None
-        self._source: dict[str, Any] = {"code": {}, "data": []}
+        self._source: dict[str, Any] = {"code": {}}
 
         # Determine data directory
         data_dir = dir or str(get_data_dir())
@@ -143,7 +141,7 @@ class LocalRun(BaseRun):
 
         self._ensure_output_dir()
         self._write_init_record()
-        self._record_experiment_unit(data=data, resume=is_resuming)
+        self._record_experiment_unit(resume=is_resuming)
         if tracker_uri:
             print(f"aspara: With a Tracker: {tracker_uri}")
             self._start_shipper(
@@ -191,26 +189,14 @@ class LocalRun(BaseRun):
         if self.config._data:
             self._metadata_storage.update_config(self.config.to_dict())
 
-    def _record_experiment_unit(
-        self,
-        data: dict[str, Any] | list[dict[str, Any]] | None,
-        *,
-        resume: bool = False,
-    ) -> None:
-        from aspara.run._source import capture_code_state, normalize_data_refs
+    def _record_experiment_unit(self, *, resume: bool = False) -> None:
+        from aspara.run._source import capture_code_state
 
         existing = self._metadata_storage.get_metadata() if resume else {}
         existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
         existing_code = existing_source.get("code") if isinstance(existing_source, dict) else {}
         if not isinstance(existing_code, dict):
             existing_code = {}
-        if data is not None:
-            data_refs = normalize_data_refs(data)
-        elif resume:
-            raw_data = existing_source.get("data") if isinstance(existing_source, dict) else []
-            data_refs = raw_data if isinstance(raw_data, list) else []
-        else:
-            data_refs = []
         if resume and existing_code:
             code = existing_code
         else:
@@ -219,7 +205,7 @@ class LocalRun(BaseRun):
                 code = capture_code_state(dest_dir=source_dir, base_dir=Path(self._data_dir))
             except Exception as exc:
                 code = {"kind": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
-        source = {"code": code, "data": data_refs}
+        source = {"code": code}
         self._source = source
         self._metadata_storage.set_source(source)
 
@@ -244,7 +230,7 @@ class LocalRun(BaseRun):
             notes=self.notes,
             project_tags=project_tags,
             resume=resume,
-            source=getattr(self, "_source", {"code": {}, "data": []}),
+            source=getattr(self, "_source", {"code": {}}),
             data_dir=self._data_dir,
         )
 

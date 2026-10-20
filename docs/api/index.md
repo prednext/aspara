@@ -28,7 +28,6 @@ run = aspara.init(
     config={"lr": 0.001},           # Config parameters
     tags=["baseline"],              # Tags
     notes="First experiment",       # Notes
-    data={"uri": "s3://bucket/t", "version": "2026-01"},  # Dataset pointer (optional)
     dir="./data",                   # Data storage location (default: XDG compliant)
     storage_backend="polars",       # Storage backend ("jsonl" or "polars")
     tracker_uri="http://localhost:3142/tracker",  # With a Tracker
@@ -42,7 +41,6 @@ run = aspara.init(
 - **`config`**: Dictionary of config parameters
 - **`tags`**: List of tags (for search/filtering)
 - **`notes`**: Run description or notes (wandb compatible)
-- **`data`**: Dataset pointer (`uri` / `version` / `hash`) or a list of pointers
 - **`dir`**: Data storage directory (default: `~/.local/share/aspara`)
 - **`storage_backend`**: Storage backend for metrics
     - `"jsonl"` (default): JSONL file format

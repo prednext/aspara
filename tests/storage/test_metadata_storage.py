@@ -21,7 +21,7 @@ class TestRunMetadataStorage:
         assert metadata["tags"] == []
         assert metadata["notes"] == ""
         assert "intent" not in metadata
-        assert metadata["source"] == {"code": {}, "data": []}
+        assert metadata["source"] == {"code": {}}
         assert metadata["params"] == {}
         assert metadata["config"] == {}
         assert metadata["artifacts"] == []
