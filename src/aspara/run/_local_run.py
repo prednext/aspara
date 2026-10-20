@@ -51,8 +51,8 @@ class LocalRun(BaseRun):
                 it (reuse run_id, reset finish state, continue step numbering).
                 If no existing run is found, a new run is created.
             data: Dataset pointer or list of pointers (uri, version, hash).
-            tracker_uri: If set, also ship a copy to a Tracker after the local
-                write. A tracker failure does not fail log().
+            tracker_uri: With a Tracker, set this URI. The copy is sent after
+                the local write. A tracker failure does not fail log().
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
         self._shipper = None
@@ -145,7 +145,7 @@ class LocalRun(BaseRun):
         self._write_init_record()
         self._record_experiment_unit(data=data, resume=is_resuming)
         if tracker_uri:
-            print(f"aspara: Also sending to: {tracker_uri}")
+            print(f"aspara: With a Tracker: {tracker_uri}")
             self._start_shipper(
                 tracker_uri,
                 config=config,

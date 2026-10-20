@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 class Run:
     """Run class that delegates to LocalRun.
 
-    Local files are always the source of truth. When tracker_uri is set,
-    LocalRun also ships a copy to a Tracker in the background.
+    Local files are always the source of truth. With a Tracker, LocalRun
+    sends a copy in the background.
     """
 
     __slots__ = ("_backend",)
@@ -44,7 +44,7 @@ class Run:
             notes: Run notes/description (wandb-compatible).
             dir: Base directory for storing data. If None, uses XDG-based default (~/.local/share/aspara).
             storage_backend: Storage backend type ('jsonl' or 'polars'). Defaults to 'jsonl'.
-            tracker_uri: If set, also ship a copy to a Tracker. Local files
+            tracker_uri: With a Tracker, set this URI. Local files
                 remain the source of truth.
             project_tags: List of tags to add to the project.
             resume: If True and a run with the same name already exists, resume

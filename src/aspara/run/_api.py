@@ -42,7 +42,7 @@ def init(
         tags: Tags attached to this individual run (run-wide).
         notes: Run notes/description (wandb-compatible).
         dir: Base directory for storing data. Defaults to XDG-based default (~/.local/share/aspara).
-        tracker_uri: If set, also ship a copy to this Tracker. Local files are always
+        tracker_uri: With a Tracker, set this URI. Local files are always
             written. If None, ``ASPARA_TRACKER_URI`` is used when set. A loopback
             Tracker that already stores this directory does not keep a second copy.
         storage_backend: Storage backend type ('jsonl' or 'polars'). Can also be set via ASPARA_STORAGE_BACKEND env var.
@@ -63,7 +63,7 @@ def init(
         >>> aspara.log({"loss": 0.5})
         >>> aspara.finish()
 
-        Also ship a copy to a Tracker. The local files are still written:
+        With a Tracker. Local files are written:
 
         >>> run = aspara.init(project="my_project", tracker_uri="http://localhost:3142/tracker")
 

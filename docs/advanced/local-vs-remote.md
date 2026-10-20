@@ -4,7 +4,7 @@
 
 A **Tracker** is an HTTP server you start with `aspara tracker`. It can store a second copy of the same run, for example so several machines show up in one place. Pass `tracker_uri` to `aspara.init()`, or set `ASPARA_TRACKER_URI`, and Aspara queues that copy and sends it in the background after the local write. `log()` returns when the local write finishes. Omit `tracker_uri` and the run stays in local files only.
 
-| | Local only | With `tracker_uri` |
+| | Local only | With a Tracker |
 |---|---|---|
 | **What `init` writes** | Local files | The same local files |
 | **Tracker** | Not used | Receives a copy when it is reachable |
@@ -26,7 +26,7 @@ aspara.finish()
 
 **Data storage location:** `~/.local/share/aspara/my_project/run_name.jsonl`
 
-## Also ship a copy
+## With a Tracker
 
 ```python
 import aspara

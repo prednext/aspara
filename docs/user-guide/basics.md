@@ -18,6 +18,6 @@ This page serves as the entry point to the User Guide. We recommend reading the 
 - [Configuration (Storage Location, etc.)](../advanced/configuration.md)
   Explains how to customize Aspara's behavior through environment variables and code, including data directories and storage methods.
 - [Local files and a Tracker copy](../advanced/local-vs-remote.md)
-  `aspara.init()` always writes local files. `tracker_uri` also sends a copy to a Tracker.
+  `aspara.init()` writes local files. With a Tracker, set `tracker_uri`.
 - [Storage](../advanced/storage.md)
   Covers storage backends such as JSONL and Polars, and their characteristics.

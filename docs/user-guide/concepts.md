@@ -88,7 +88,7 @@ For details, see [Configuration (Advanced)](../advanced/configuration.md) and [S
 - **Local only** (default)
     - Omit `tracker_uri`.
     - Suitable for a laptop or a single machine.
-- **Also ship a copy**
+- **With a Tracker**
     - Set `tracker_uri`, or `ASPARA_TRACKER_URI`.
     - Local files remain the record. A copy is queued and sent to the Tracker in the background.
     - `log()` does not wait for the Tracker. If the Tracker is down, logging still succeeds.
