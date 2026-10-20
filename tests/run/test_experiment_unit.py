@@ -57,13 +57,13 @@ def test_tracker_uri_still_writes_local_files(tmp_path: Path, monkeypatch) -> No
         self.base_url = base_url
         self.session = mock_session
 
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_init)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.__init__", mock_init)
     monkeypatch.setattr(
-        "aspara.run._remote_run.TrackerClient.create_run",
+        "aspara.run._tracker_client.TrackerClient.create_run",
         lambda self, **kwargs: {"run_id": "server", "name": kwargs["name"]},
     )
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", lambda self, **kwargs: {"status": "ok"})
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *a, **k: None)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", lambda self, **kwargs: {"status": "ok"})
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", lambda self, *a, **k: None)
 
     run = init(
         project="p",
@@ -87,19 +87,19 @@ def _mock_tracker(monkeypatch, *, create_run=None) -> None:
         self.base_url = base_url
         self.session = MagicMock()
 
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_init)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.__init__", mock_init)
     monkeypatch.setattr(
-        "aspara.run._remote_run.TrackerClient.create_run",
+        "aspara.run._tracker_client.TrackerClient.create_run",
         create_run or (lambda self, **kwargs: {"run_id": "server", "name": kwargs["name"]}),
     )
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", lambda self, **kwargs: {"status": "ok"})
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *a, **k: None)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.log_config", lambda self, *a, **k: None)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.log_summary", lambda self, *a, **k: None)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.update_tags", lambda self, *a, **k: None)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.log_artifact", lambda self, **k: {"status": "ok"})
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: True)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.close", lambda self: None)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", lambda self, **kwargs: {"status": "ok"})
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", lambda self, *a, **k: None)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.log_config", lambda self, *a, **k: None)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.log_summary", lambda self, *a, **k: None)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.update_tags", lambda self, *a, **k: None)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.log_artifact", lambda self, **k: {"status": "ok"})
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: True)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.close", lambda self: None)
 
 
 def test_same_data_dir_does_not_ship(tmp_path: Path, monkeypatch) -> None:
@@ -107,7 +107,7 @@ def test_same_data_dir_does_not_ship(tmp_path: Path, monkeypatch) -> None:
     saved = MagicMock(return_value={"status": "ok"})
     created = MagicMock(return_value={"run_id": "local", "same_store": True, "name": "same-dir"})
     _mock_tracker(monkeypatch, create_run=created)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", saved)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", saved)
     run = init(project="p", name="same-dir", tracker_uri="http://127.0.0.1:3142")
     try:
         assert run.backend._shipper is not None
@@ -165,7 +165,7 @@ def test_create_failure_is_retried_on_flush(tmp_path: Path, monkeypatch) -> None
         return {"run_id": "server", "name": kwargs["name"]}
 
     _mock_tracker(monkeypatch, create_run=create_run)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: False)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: False)
     run = init(
         project="p",
         name="retry-create",
@@ -186,8 +186,8 @@ def test_create_failure_is_retried_on_flush(tmp_path: Path, monkeypatch) -> None
 def test_log_does_not_call_save_metrics_inline(tmp_path: Path, monkeypatch) -> None:
     saved = MagicMock(return_value={"status": "ok"})
     _mock_tracker(monkeypatch)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", saved)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: False)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", saved)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: False)
     run = init(
         project="p",
         name="async-log",
@@ -206,8 +206,8 @@ def test_log_does_not_call_save_metrics_inline(tmp_path: Path, monkeypatch) -> N
 def test_shipped_timestamp_matches_the_local_file(tmp_path: Path, monkeypatch) -> None:
     saved = MagicMock(return_value={"status": "ok"})
     _mock_tracker(monkeypatch)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", saved)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: False)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", saved)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: False)
     run = init(
         project="p",
         name="same-time",
@@ -231,9 +231,9 @@ def test_config_and_tags_are_queued_for_tracker(tmp_path: Path, monkeypatch) -> 
     logged_config = MagicMock()
     updated_tags = MagicMock()
     _mock_tracker(monkeypatch)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.log_config", logged_config)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.update_tags", updated_tags)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: False)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.log_config", logged_config)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.update_tags", updated_tags)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: False)
     run = init(
         project="p",
         name="meta-ship",
@@ -319,8 +319,8 @@ def test_create_conflict_does_not_ship_or_retry(tmp_path: Path, monkeypatch) -> 
         raise conflict
 
     _mock_tracker(monkeypatch, create_run=create_run)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", saved)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: False)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", saved)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: False)
     run = init(
         project="p",
         name="conflict",
@@ -359,8 +359,8 @@ def test_resume_drops_a_queued_finish(tmp_path: Path, monkeypatch) -> None:
         return {"status": "ok"}
 
     _mock_tracker(monkeypatch)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", finish_run)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", save_metrics)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", finish_run)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", save_metrics)
     resumed = init(
         project="p",
         name="held",
@@ -390,7 +390,7 @@ def test_sync_create_conflict_does_not_ship_metrics(tmp_path: Path, monkeypatch,
         raise conflict
 
     _mock_tracker(monkeypatch, create_run=create_run)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", saved)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", saved)
     run = init(
         project="p",
         name="sync-conflict",
@@ -421,8 +421,8 @@ def test_queued_same_store_does_not_ship_metrics(tmp_path: Path, monkeypatch) ->
         return {"run_id": kwargs.get("run_id"), "same_store": True, "name": kwargs["name"]}
 
     _mock_tracker(monkeypatch, create_run=create_run)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.save_metrics", saved)
-    monkeypatch.setattr("aspara.run._remote_run.TrackerClient.health_check", lambda self, timeout=5.0: False)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.save_metrics", saved)
+    monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.health_check", lambda self, timeout=5.0: False)
     run = init(
         project="p",
         name="same-later",

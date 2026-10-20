@@ -1,4 +1,4 @@
-"""RemoteRun implementation for tracking metrics via HTTP to Aspara tracker."""
+"""HTTP client for sending a run copy to an Aspara Tracker."""
 
 from __future__ import annotations
 
@@ -6,9 +6,6 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from aspara.logger import logger
-from aspara.run._base_run import BaseRun
-from aspara.run._config import Config
-from aspara.run._summary import Summary
 
 if TYPE_CHECKING:
     import requests
@@ -16,7 +13,7 @@ else:
     try:
         import requests
     except ImportError:
-        requests: Any = None  # Will raise error on RemoteRun instantiation
+        requests: Any = None  # Will raise error on TrackerClient instantiation
 
 # Default timeout for HTTP requests in seconds
 _DEFAULT_TIMEOUT = 30.0
@@ -35,7 +32,7 @@ class TrackerClient:
             ImportError: If requests library is not installed
         """
         if requests is None:
-            raise ImportError('requests library is required for RemoteRun. Install it with: pip install "aspara[remote]"')
+            raise ImportError('requests library is required to reach a Tracker. Install it with: pip install "aspara[remote]"')
 
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
@@ -280,184 +277,3 @@ class TrackerClient:
             )
             response.raise_for_status()
             return response.json()
-
-
-class RemoteRun(BaseRun):
-    """HTTP-only run that delegates Tracker writes to TrackerShipper.
-
-    Kept for tests and direct construction. ``aspara.init`` uses LocalRun.
-    """
-
-    def __init__(
-        self,
-        name: str | None = None,
-        project: str | None = None,
-        config: dict[str, Any] | None = None,
-        tags: list[str] | None = None,
-        notes: str | None = None,
-        tracker_uri: str | None = None,
-        project_tags: list[str] | None = None,
-        resume: bool = False,
-    ) -> None:
-        """Initialize a new remote run.
-
-        Args:
-            name: Name of the run. If None, server will generate one.
-            project: Project name this run belongs to. Defaults to "default".
-            config: Initial configuration parameters.
-            tags: List of tags for this run.
-            notes: Run notes/description (wandb-compatible).
-            tracker_uri: Tracker server URI (required for RemoteRun)
-            project_tags: List of tags to add to the project.
-            resume: If True and a run with the same name already exists on the
-                tracker, resume it (reuse run_id, reset finish state). If no
-                existing run is found, a new run is created.
-
-        Raises:
-            ValueError: If tracker_uri is not provided
-            ImportError: If requests library is not installed
-        """
-        if tracker_uri is None:
-            raise ValueError("tracker_uri is required for RemoteRun")
-
-        super().__init__(name=name, project=project, tags=tags, notes=notes)
-        self.id = self._generate_run_id()
-
-        from aspara.run._shipper import TrackerShipper
-
-        self._shipper = TrackerShipper(
-            tracker_uri,
-            project=self.project,
-            run_name=self.name,
-            run_id=self.id,
-            name=self.name,
-            config=config,
-            tags=self.tags,
-            notes=self.notes,
-            project_tags=project_tags,
-            resume=resume,
-            source={},
-        )
-        self.client = self._shipper.client
-        self._queue_storage = self._shipper._queue
-        self._retry_worker = self._shipper._worker
-        self._tracker_uri = tracker_uri
-
-        self.config = Config(config, on_change=self._on_config_change)
-        self.summary = Summary(on_change=self._on_summary_change)
-
-        print(f"aspara: Run '{self.name}' initialized in project '{self.project}'")
-        print(f"aspara: Sending metrics to: {tracker_uri}")
-        print("aspara: View results with: aspara dashboard")
-
-    def _on_config_change(self) -> None:
-        if not self._finished:
-            self._shipper.offer_config(self.config.to_dict())
-
-    def _on_summary_change(self) -> None:
-        if not self._finished:
-            self._shipper.offer_summary(self.summary.to_dict())
-
-    def log(
-        self,
-        data: dict[str, Any],
-        step: int | None = None,
-        commit: bool = True,
-        timestamp: str | None = None,
-    ) -> None:
-        """Log metrics and other data.
-
-        Args:
-            data: Dictionary of metric names to values
-            step: Optional step number. If None, auto-increments.
-            commit: If True, commits the step. If False, accumulates data.
-            timestamp: Optional timestamp in ISO 8601 format. If provided, it is
-                forwarded to the tracker; otherwise, the tracker assigns the
-                timestamp on the server side.
-
-        Raises:
-            ValueError: If data contains invalid values
-            RuntimeError: If run has already finished
-        """
-        self._ensure_not_finished()
-        self._prepare_step(step, commit)
-        metrics = self._validate_metrics(data)
-        if metrics:
-            self._shipper.offer_metrics(
-                step=self._current_step,
-                metrics=metrics,
-                timestamp=timestamp,
-            )
-        self._after_log(commit)
-
-    def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
-        """Finish the run and notify tracker.
-
-        Args:
-            exit_code: Exit code for the run (0 = success)
-            quiet: If True, suppress output messages
-            flush_timeout: Maximum time to wait for queue flush in seconds
-        """
-        if not self._mark_finished():
-            return
-        self._shipper.finish(exit_code=exit_code, flush_timeout=flush_timeout)
-        if not quiet:
-            print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
-            print("aspara: View results with: aspara dashboard")
-
-    def log_artifact(
-        self,
-        file_path: str,
-        name: str | None = None,
-        description: str | None = None,
-        category: str | None = None,
-    ) -> None:
-        """Log an artifact file for this run.
-
-        Args:
-            file_path: Path to the file to be logged as an artifact
-            name: Optional custom name for the artifact. If None, uses the filename.
-            description: Optional description of the artifact
-            category: Optional category ('code', 'model', 'config', 'data', 'other')
-
-        Raises:
-            ValueError: If file_path is invalid or file doesn't exist
-            RuntimeError: If run has already finished
-        """
-        self._ensure_not_finished()
-        abs_file_path, artifact_name = self._validate_artifact_input(file_path, name, category)
-        self._shipper.offer_artifact(
-            abs_file_path,
-            name=artifact_name,
-            description=description,
-            category=category,
-        )
-
-    def flush(self, timeout: float = 30.0) -> int:
-        """Ensure all metrics are sent to tracker.
-
-        Flushes any queued metrics that failed to send previously.
-
-        Args:
-            timeout: Maximum time to wait for flush in seconds
-
-        Returns:
-            Number of metrics that failed to send
-        """
-        return self._shipper.flush(timeout)
-
-    def set_tags(self, tags: list[str]) -> None:
-        """Set tags for this run.
-
-        Replaces the existing run-level tags with the provided list.
-
-        Args:
-            tags: List of tags
-
-        Raises:
-            RuntimeError: If run has already finished
-        """
-        if self._finished:
-            raise RuntimeError("Cannot modify a finished run")
-        self.tags = tags
-        self._shipper.offer_tags(tags)

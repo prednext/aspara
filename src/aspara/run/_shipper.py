@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from aspara.logger import logger
 from aspara.run._offline_queue import MetricsQueueItem, MetricsRetryWorker, OfflineQueueStorage
-from aspara.run._remote_run import TrackerClient
+from aspara.run._tracker_client import TrackerClient
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 

@@ -153,7 +153,7 @@ class TestRunBasic:
             assert metadata["exit_code"] == 0
 
     def test_run_finish_accepts_flush_timeout_local(self):
-        """LocalRun.finish() must accept flush_timeout for signature parity with RemoteRun."""
+        """LocalRun.finish() accepts flush_timeout."""
         with tempfile.TemporaryDirectory() as temp_dir:
             run = Run(name="test_run", dir=temp_dir)
             run.log({"loss": 0.5})
@@ -355,8 +355,8 @@ class TestModuleLevelAPI:
 
             finish()
 
-    def test_init_with_tracker_uri_creates_remote_run(self, monkeypatch, tmp_path):
-        """Test initialization with tracker_uri creates RemoteRun."""
+    def test_init_with_tracker_uri_starts_shipper(self, monkeypatch, tmp_path):
+        """tracker_uri starts a Tracker copy on the local run."""
         from unittest.mock import MagicMock
 
         from aspara.run._local_run import LocalRun
@@ -374,15 +374,15 @@ class TestModuleLevelAPI:
             self.base_url = base_url
             self.session = mock_session
 
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.__init__", mock_tracker_client_init)
         monkeypatch.setattr(
-            "aspara.run._remote_run.TrackerClient.create_run",
+            "aspara.run._tracker_client.TrackerClient.create_run",
             lambda self, name, project, config, tags, notes, project_tags=None, resume=False, **kwargs: {
                 "run_id": "server-gen-id",
                 "name": name,
             },
         )
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
 
         run = init(
             project="test_project",
@@ -403,8 +403,8 @@ class TestModuleLevelAPI:
         # Cleanup
         finish()
 
-    def test_remote_run_forwards_project_tags_to_tracker(self, monkeypatch, tmp_path):
-        """RemoteRun should forward project_tags to TrackerClient.create_run."""
+    def test_tracker_uri_forwards_project_tags(self, monkeypatch, tmp_path):
+        """A Tracker copy forwards project_tags to TrackerClient.create_run."""
         from unittest.mock import MagicMock
 
         captured_kwargs: dict = {}
@@ -424,9 +424,9 @@ class TestModuleLevelAPI:
             )
             return {"run_id": "server-gen-id", "name": name}
 
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.create_run", mock_create_run)
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.__init__", mock_tracker_client_init)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.create_run", mock_create_run)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
 
         run = init(  # noqa: F841
             project="test_project",
@@ -440,8 +440,8 @@ class TestModuleLevelAPI:
         assert captured_kwargs["project"] == "test_project"
         assert captured_kwargs["project_tags"] == ["dog", "cat"]
 
-    def test_remote_run_logs_metrics_to_new_endpoint(self, monkeypatch, tmp_path):
-        """RemoteRun.log should POST metrics to /api/v1/projects/{project}/runs/{name}/metrics."""
+    def test_tracker_uri_logs_metrics(self, monkeypatch, tmp_path):
+        """A Tracker copy POSTs metrics to /api/v1/projects/{project}/runs/{name}/metrics."""
         from unittest.mock import MagicMock
 
         mock_session = MagicMock()
@@ -456,9 +456,9 @@ class TestModuleLevelAPI:
         def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False, **kwargs):  # type: ignore[override]
             return {"run_id": "server-gen-id", "name": name}
 
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.create_run", mock_create_run)
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.__init__", mock_tracker_client_init)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.create_run", mock_create_run)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
 
         _run = init(
             project="test_project",
@@ -474,7 +474,7 @@ class TestModuleLevelAPI:
         called_url = mock_session.post.call_args[0][0]
         assert called_url == "http://localhost:3142/tracker/api/v1/projects/test_project/runs/test_run_metrics/metrics"
 
-    def test_remote_run_forwards_timestamp_to_tracker(self, monkeypatch, tmp_path):
+    def test_tracker_uri_forwards_timestamp(self, monkeypatch, tmp_path):
         """Shipped metrics use the milliseconds written to the local file."""
         from unittest.mock import MagicMock
 
@@ -490,9 +490,9 @@ class TestModuleLevelAPI:
         def mock_create_run(self, name, project, config, tags, notes, project_tags=None, resume=False, **kwargs):  # type: ignore[override]
             return {"run_id": "server-gen-id", "name": name}
 
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.__init__", mock_tracker_client_init)
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.create_run", mock_create_run)
-        monkeypatch.setattr("aspara.run._remote_run.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.__init__", mock_tracker_client_init)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.create_run", mock_create_run)
+        monkeypatch.setattr("aspara.run._tracker_client.TrackerClient.finish_run", lambda self, *args, **kwargs: None)
 
         _run = init(
             project="test_project",

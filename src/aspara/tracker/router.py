@@ -137,9 +137,8 @@ async def health_check() -> HealthResponse:
 async def create_run(project_name: str, request: RunCreateRequest, http_request: Request) -> RunCreateResponse:
     """Create a new run and initialize metadata.
 
-    This endpoint is used by RemoteRun to create run-level metadata and
-    update project-level metadata tags. It mirrors LocalRun behaviour
-    for metadata semantics.
+    This endpoint stores a Tracker copy of run metadata and
+    updates project-level metadata tags.
 
     Args:
         project_name: Target project name

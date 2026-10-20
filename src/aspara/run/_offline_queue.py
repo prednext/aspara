@@ -1,4 +1,4 @@
-"""Offline queue for RemoteRun metrics when tracker is unavailable.
+"""Offline queue for a Tracker copy when the Tracker is unavailable.
 
 This module provides offline queueing capability for metrics when the tracker
 server is temporarily unavailable. Metrics are persisted to disk and retried
@@ -24,7 +24,7 @@ from aspara.utils.file import atomic_write_json, atomic_write_text, datasync
 from aspara.utils.validators import validate_project_name, validate_run_name
 
 if TYPE_CHECKING:
-    from aspara.run._remote_run import TrackerClient
+    from aspara.run._tracker_client import TrackerClient
 
 
 _KIND_RANK = {

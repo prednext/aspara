@@ -11,7 +11,7 @@ class BaseRun:
 
     This class is intentionally minimal and focuses on common runtime
     behaviour such as step tracking and finished-state management.
-    Concrete run implementations (e.g., LocalRun, RemoteRun) are
+    Concrete run implementations (e.g., LocalRun) are
     responsible for I/O specifics.
     """
 
@@ -99,8 +99,7 @@ class BaseRun:
     def _ensure_not_finished(self) -> None:
         """Raise if the run has already been finished.
 
-        Both LocalRun and RemoteRun currently use the same error message,
-        so we centralize it here.
+        LocalRun uses this error message, so we centralize it here.
         """
 
         if self._finished:
@@ -187,8 +186,7 @@ class BaseRun:
     def _validate_metrics(self, data: dict[str, Any]) -> dict[str, float | int]:
         """Validate and normalize metric data.
 
-        This helper enforces a consistent contract for metrics across
-        LocalRun and RemoteRun:
+        This helper enforces a consistent contract for metrics:
 
         - Metric names must be non-empty strings
         - Values must be int or float
@@ -225,8 +223,7 @@ class BaseRun:
     ) -> tuple[str, str]:
         """Validate artifact input parameters.
 
-        This helper enforces a consistent contract for artifact logging
-        across LocalRun and RemoteRun:
+        This helper enforces a consistent contract for artifact logging:
 
         - File path must be non-empty and point to an existing file
         - Category must be one of the allowed values if provided

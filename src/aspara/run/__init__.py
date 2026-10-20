@@ -16,7 +16,7 @@ from aspara.run._config import Config
 from aspara.run._summary import Summary
 from aspara.run.run import Run
 
-# LocalRun/RemoteRun are internal implementation details
+# LocalRun is an internal implementation detail
 # Users should use the Run class
 
 __all__ = [

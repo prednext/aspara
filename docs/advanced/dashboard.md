@@ -35,7 +35,6 @@ aspara tracker                # Tracker only
 **Features of integrated mode (`together` or `--with-tracker`):**
 - Full functionality with a single command
 - Dashboard + tracker integration
-- Supports both LocalRun and RemoteRun
 
 **Use cases:**
 - When you want full features easily
