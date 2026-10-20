@@ -4,7 +4,7 @@ This page introduces the fundamental concepts and overall architecture of Aspara
 
 ## Overview of Aspara
 
-Aspara is a lightweight experiment tracking tool that saves machine learning experiment results locally or remotely and allows you to visualize and compare them in a dashboard.
+Aspara is a lightweight experiment tracking tool that saves machine learning experiment results to local files and lets you visualize and compare them in a dashboard.
 
 - Experiments are recorded as **Runs**.
 - Multiple runs are organized into **Projects**.
@@ -95,4 +95,4 @@ For details, see [Configuration (Advanced)](../advanced/configuration.md) and [S
     - Useful when several machines should show up in one Tracker.
     - A loopback Tracker that already stores this directory does not keep a second copy.
 
-See [Local files and a Tracker copy](../advanced/local-vs-remote.md) and [Tracker API](../advanced/tracker-api.md).
+See [Local files and a Tracker copy](../advanced/local-files-and-tracker-copy.md) and [Tracker API](../advanced/tracker-api.md).

@@ -40,7 +40,7 @@ If "log files exist but runs don't appear in the dashboard," check the following
 
 ## Tracker copy not arriving
 
-Local files are still written when `tracker_uri` is set. These checks are for the copy:
+These checks are for the Tracker copy:
 
 - **Is the Tracker server running?**
     - Execute `aspara tracker --host ... --port ...` and verify the process is running.

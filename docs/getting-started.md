@@ -3,7 +3,7 @@
 This guide explains how to start tracking machine learning experiments with aspara.
 It covers installation, a minimal code example, and how to launch the dashboard.
 
-If you want to understand the overall structure and terminology of Aspara (such as Tracker, local vs remote tracking modes), please also refer to [Core Concepts](user-guide/concepts.md).
+If you want to understand the overall structure and terminology of Aspara (such as runs, projects, and Tracker), please also refer to [Core Concepts](user-guide/concepts.md).
 
 ## Installation
 
@@ -123,10 +123,9 @@ aspara serve --data-dir /path/to/data
 
 For details on dashboard features and screen layout, see [Advanced: Dashboard](./advanced/dashboard.md).
 
-## Using Tracker (Remote Recording)
+## Using a Tracker
 
-Tracker is a feature for sending metrics and artifacts to a remote server via HTTP instead of writing to local disk.
-It's useful when you want to aggregate results from multiple machines or clusters in one place.
+A Tracker is an HTTP server that stores a copy of a run, so several machines can show up in one place. `aspara.init()` writes local files, and `tracker_uri` sends that copy in the background.
 
 To enable Tracker, install with the `[tracker]` extras:
 

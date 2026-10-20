@@ -123,7 +123,7 @@ print(response.json())
 
 ### Logging with aspara.init
 
-`tracker_uri` does not turn off local files. `log()` returns after the local write, and the Tracker copy is sent in the background.
+`log()` returns after the local write. The Tracker copy is sent in the background.
 
 ```python
 import aspara
