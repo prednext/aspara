@@ -2,6 +2,7 @@
 Tests for Aspara tracker storage backend
 """
 
+import datetime
 import json
 import shutil
 
@@ -72,6 +73,34 @@ def test_file_storage_save(temp_storage_dir):
         assert saved_data["metrics"]["loss"] == 0.95
 
 
+def test_save_keeps_an_identical_row(temp_storage_dir):
+    """The same step, timestamp, and metrics dict is stored again.
+
+    JsonlMetricsStorage.save used to read up to 64KB at the end of the file
+    and skip a row that repeated the last step, timestamp, and metrics.
+    That covered a Tracker retry after a crash, but the read made each log()
+    about twice as slow (4.97s vs 10.78s for 100 runs of 1,000 steps).
+    Identical rows are kept. The same note is on PolarsMetricsStorage.save.
+    """
+    storage = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="test_run_1")
+    first = {"timestamp": 1718447400123, "step": 1, "metrics": {"loss": 0.5}}
+    storage.save(first)
+    storage.save(dict(first))
+    storage.save({"timestamp": 1718447400123, "step": 1, "metrics": {"val/loss": 0.6}})
+    storage.save({"timestamp": 1718447400124, "step": 1, "metrics": {"loss": 0.4}})
+    storage.save({"timestamp": 1718447400123, "step": 2, "metrics": {"loss": 0.3}})
+
+    lines = [json.loads(line) for line in (temp_storage_dir / "test_project" / "test_run_1.jsonl").read_text().splitlines()]
+    assert [line["metrics"] for line in lines] == [
+        {"loss": 0.5},
+        {"loss": 0.5},
+        {"val/loss": 0.6},
+        {"loss": 0.4},
+        {"loss": 0.3},
+    ]
+    assert [line["step"] for line in lines] == [1, 1, 1, 1, 2]
+
+
 def test_file_storage_load(temp_storage_dir):
     """Test that JsonlMetricsStorage's load method works correctly"""
 
@@ -135,6 +164,26 @@ def test_file_storage_load(temp_storage_dir):
     storage_non_existent = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="non_existent_run")
     with pytest.raises(RunNotFoundError):
         storage_non_existent.load()
+
+
+def test_file_storage_load_mixed_timestamp_forms(temp_storage_dir):
+    """ISO strings and UNIX milliseconds in one file both load."""
+    storage = JsonlMetricsStorage(base_dir=str(temp_storage_dir), project_name="test_project", run_name="mixed_ts")
+    project_dir = temp_storage_dir / "test_project"
+    project_dir.mkdir(parents=True)
+    run_file = project_dir / "mixed_ts.jsonl"
+    rows = [
+        {"timestamp": "2024-06-15T10:30:00", "step": 0, "metrics": {"loss": 0.4}},
+        {"timestamp": 1718447400123, "step": 1, "metrics": {"loss": 0.5}},
+    ]
+    run_file.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    result = storage.load()
+
+    assert len(result) == 2
+    stamps = result.sort("step").select("timestamp").to_series().to_list()
+    assert stamps[0] == datetime.datetime(2024, 6, 15, 10, 30, 0)
+    assert stamps[1] == datetime.datetime(2024, 6, 15, 10, 30, 0, 123000)
 
 
 def test_file_storage_load_drops_envelope_fields(temp_storage_dir):

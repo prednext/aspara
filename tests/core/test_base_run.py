@@ -20,12 +20,12 @@ class DummyRun(BaseRun):
     def log_step(self, step: int | None, commit: bool) -> int:
         """Helper to exercise step management API and return current step."""
 
-        # Public wrappers in LocalRun/RemoteRun call these helpers in this order
+        # LocalRun.log calls these helpers in this order
         self._ensure_not_finished()
         prepared_step = self._prepare_step(step, commit)
         self._after_log(commit)
         # Return the step value used for logging (before auto-increment),
-        # mirroring LocalRun/RemoteRun semantics.
+        # mirroring LocalRun semantics.
         return prepared_step
 
 

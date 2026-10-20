@@ -1,6 +1,6 @@
 # Tracker API
 
-This page documents the Tracker REST API used by RemoteRun to record metrics and manage runs on a remote server.
+This page documents the Tracker REST API. `aspara.init(tracker_uri=...)` writes local files and sends a copy through this API.
 
 ## Overview
 
@@ -67,8 +67,10 @@ response = requests.post(
     }
 )
 print(response.json())
-# {"project": "my_project", "name": "experiment_001", "run_id": "experiment_001"}
+# {"project": "my_project", "name": "experiment_001", "run_id": "<server-generated>"}
 ```
+
+`run_id` is optional. When the client sends it, the Tracker stores that id and returns it. A repeat with the same id returns 200. `resume: true` with the same id also returns 200 and clears the finished state. A different id for the same name returns 409, including a run created earlier without a client id. Omitting `run_id` keeps the previous behavior: 409 when the name exists, unless `resume` is true.
 
 ### Logging Metrics
 
@@ -119,22 +121,20 @@ print(response.json())
 # {"artifact_name": "trained_model.pt", "file_size": 12345}
 ```
 
-### Using RemoteRun
+### Logging with aspara.init
 
-Instead of calling the API directly, you can use the `RemoteRun` client:
+`log()` returns after the local write. The Tracker copy is sent in the background.
 
 ```python
 import aspara
 
-# Connect to a remote tracker
 run = aspara.init(
     project="my_project",
     name="experiment_001",
-    tracker_uri="http://localhost:3142",
+    tracker_uri="http://localhost:3142/tracker",
     config={"learning_rate": 0.001}
 )
 
-# Log metrics (automatically sent to the tracker)
 for step in range(100):
     run.log({"loss": 0.5 - step * 0.005, "accuracy": 0.5 + step * 0.005})
 

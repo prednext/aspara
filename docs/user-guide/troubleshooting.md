@@ -38,9 +38,9 @@ If "log files exist but runs don't appear in the dashboard," check the following
     - When searching on the Projects page (`/`), `manual` mode won't update results until you press the Search button or Enter key.
     - For mode and behavior details, see [Dashboard (Advanced)](../advanced/dashboard.md).
 
-## Tracker (Remote Recording) Not Working
+## Tracker copy not arriving
 
-Troubleshooting points when using RemoteRun or Tracker API and metrics aren't being sent or errors occur:
+These checks are for the Tracker copy:
 
 - **Is the Tracker server running?**
     - Execute `aspara tracker --host ... --port ...` and verify the process is running.

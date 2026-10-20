@@ -30,7 +30,7 @@ run = aspara.init(
     notes="First experiment",       # Notes
     dir="./data",                   # Data storage location (default: XDG compliant)
     storage_backend="polars",       # Storage backend ("jsonl" or "polars")
-    tracker_uri="http://localhost:3142",  # Tracker server URI (for RemoteRun)
+    tracker_uri="http://localhost:3142/tracker",  # With a Tracker
 )
 ```
 
@@ -46,7 +46,7 @@ run = aspara.init(
     - `"jsonl"` (default): JSONL file format
     - `"polars"`: Efficient storage with Polars (experimental)
     - Can be overridden with `ASPARA_STORAGE_BACKEND` environment variable
-- **`tracker_uri`**: Tracker server URI (enables remote tracking mode when specified)
+- **`tracker_uri`**: URI of a Tracker, an HTTP server that stores a copy of the run. Include `/tracker`; the client appends `/api/v1`. The copy is sent in the background. If omitted, `ASPARA_TRACKER_URI` is used when set.
 
 **Returns:** `Run` object
 

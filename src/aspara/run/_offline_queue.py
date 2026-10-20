@@ -1,4 +1,4 @@
-"""Offline queue for RemoteRun metrics when tracker is unavailable.
+"""Offline queue for a Tracker copy when the Tracker is unavailable.
 
 This module provides offline queueing capability for metrics when the tracker
 server is temporarily unavailable. Metrics are persisted to disk and retried
@@ -24,16 +24,33 @@ from aspara.utils.file import atomic_write_json, atomic_write_text, datasync
 from aspara.utils.validators import validate_project_name, validate_run_name
 
 if TYPE_CHECKING:
-    from aspara.run._remote_run import TrackerClient
+    from aspara.run._tracker_client import TrackerClient
+
+
+_KIND_RANK = {
+    "create": 0,
+    "metrics": 1,
+    "config": 1,
+    "tags": 1,
+    "summary": 1,
+    "artifact": 1,
+    "finish": 2,
+}
+
+# create is the only copy of config and source. finish is the only
+# copy of the exit code. A full queue drops older steps instead of these.
+_PROTECTED_QUEUE_KINDS = frozenset({"create", "finish"})
 
 
 class MetricsQueueItem(BaseModel):
-    """A single queued metrics item awaiting delivery to the tracker."""
+    """A single queued item awaiting delivery to the tracker."""
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:16])
-    step: int
-    metrics: dict[str, Any]
-    timestamp: str | None = None
+    step: int = 0
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    timestamp: int | str | None = None
+    kind: str = "metrics"
+    payload: dict[str, Any] = Field(default_factory=dict)
     created_at: int = Field(default_factory=lambda: int(time.time() * 1000))
     retry_count: int = 0
     next_retry_at: int = 0
@@ -118,6 +135,8 @@ class OfflineQueueStorage:
 
         self._lock = threading.Lock()
         self._item_count = 0
+        self._shipping_blocked = False
+        self._rejected_unsent = 0
 
         # Validate names to prevent path traversal attacks
         # Using the same validators as the rest of the codebase for consistency
@@ -198,18 +217,25 @@ class OfflineQueueStorage:
             True if item was added, False if queue is full
         """
         with self._lock:
-            # Check resource limits
+            if self._shipping_blocked:
+                return False
+            # Check resource limits. create and finish stay; older steps are dropped.
             if self._item_count >= _MAX_QUEUE_ITEMS:
                 logger.warning(f"Offline queue full ({_MAX_QUEUE_ITEMS} items). Dropping oldest metrics.")
-                self._drop_oldest_items(count=100)
+                if self._drop_oldest_items(count=100) == 0:
+                    logger.warning("Offline queue is full. Keeping the create request and not queueing this item.")
+                    return False
 
             if self._queue_file.exists():
                 file_size = self._queue_file.stat().st_size
                 if file_size >= _MAX_QUEUE_FILE_SIZE:
                     logger.warning(f"Offline queue file too large ({file_size / 1024 / 1024:.1f}MB). Dropping oldest metrics.")
-                    self._drop_oldest_items(count=100)
+                    if self._drop_oldest_items(count=100) == 0:
+                        logger.warning("Offline queue file is full. Keeping the create request and not queueing this item.")
+                        return False
 
             try:
+                self._queue_dir.mkdir(parents=True, exist_ok=True)
                 with self._queue_file.open("a") as f:
                     f.write(item.to_jsonl() + "\n")
                     f.flush()
@@ -220,27 +246,50 @@ class OfflineQueueStorage:
                 logger.warning(f"Failed to write to offline queue: {e}")
                 return False
 
-    def _drop_oldest_items(self, count: int) -> None:
-        """Drop the oldest items from the queue.
+    def _drop_oldest_items(self, count: int) -> int:
+        """Drop the oldest queued steps.
 
+        ``create`` and ``finish`` stay, even when they are the oldest lines.
         Must be called with lock held.
 
         Args:
-            count: Number of items to drop
+            count: Maximum number of items to drop
+
+        Returns:
+            Number of items dropped
         """
-        if not self._queue_file.exists():
-            return
+        if not self._queue_file.exists() or count <= 0:
+            return 0
 
         try:
             with self._queue_file.open("r") as f:
                 lines = f.readlines()
 
-            remaining = lines[count:]
-            atomic_write_text(self._queue_file, lambda f: f.writelines(remaining), suffix=".jsonl")
+            remaining: list[str] = []
+            dropped = 0
+            for line in lines:
+                if not line.strip():
+                    continue
+                if dropped < count and not self._is_protected_queue_item(line):
+                    dropped += 1
+                    continue
+                remaining.append(line if line.endswith("\n") else line + "\n")
 
+            if dropped == 0:
+                return 0
+
+            atomic_write_text(self._queue_file, lambda f: f.writelines(remaining), suffix=".jsonl")
             self._item_count = len(remaining)
+            return dropped
         except OSError as e:
             logger.warning(f"Failed to drop oldest items from queue: {e}")
+            return 0
+
+    def _is_protected_queue_item(self, line: str) -> bool:
+        item = self._parse_queue_item(line.strip())
+        if item is None:
+            return False
+        return (item.kind or "metrics") in _PROTECTED_QUEUE_KINDS
 
     @staticmethod
     def _parse_queue_item(line: str) -> MetricsQueueItem | None:
@@ -261,13 +310,16 @@ class OfflineQueueStorage:
             limit: Maximum number of items to return
 
         Returns:
-            List of items ready for retry
+            List of items ready for retry. ``finish`` is left out while any
+            other item is still waiting out its retry delay, so a completed
+            state cannot land before that item.
         """
         now_ms = int(time.time() * 1000)
         # Min-heap of (sort_key, item) — we push negative sort keys to use
         # heapq as a max-heap of size ``limit``, then pop all and reverse.
         # This keeps memory usage bounded to ``limit`` items.
-        heap: list[tuple[tuple[int, int], MetricsQueueItem]] = []
+        heap: list[tuple[tuple[int, int, int], str, MetricsQueueItem]] = []
+        waiting_on_backoff = False
 
         with self._lock:
             if not self._queue_file.exists():
@@ -284,24 +336,81 @@ class OfflineQueueStorage:
                             continue
 
                         if item.next_retry_at > now_ms:
+                            if item.kind != "finish":
+                                waiting_on_backoff = True
                             continue
 
-                        sort_key = (item.step, item.created_at)
+                        rank = _KIND_RANK.get(item.kind, 1)
+                        sort_key = (rank, item.step, item.created_at)
                         # Use negative key for max-heap behavior: heap[0]
                         # holds the item with the LARGEST original key, so
                         # it gets evicted first when a smaller item arrives.
-                        neg_key = (-sort_key[0], -sort_key[1])
+                        neg_key = (-sort_key[0], -sort_key[1], -sort_key[2])
                         if len(heap) < limit:
-                            heapq.heappush(heap, (neg_key, item))
+                            heapq.heappush(heap, (neg_key, item.id, item))
                         elif neg_key > heap[0][0]:
-                            heapq.heapreplace(heap, (neg_key, item))
+                            heapq.heapreplace(heap, (neg_key, item.id, item))
             except OSError as e:
                 logger.warning(f"Failed to read queue file {self._queue_file}: {e}")
 
-        # Extract items from heap in sorted order (ascending by step, then created_at).
-        result = [heapq.heappop(heap)[1] for _ in range(len(heap))]
+        if waiting_on_backoff:
+            heap = [entry for entry in heap if entry[2].kind != "finish"]
+            heapq.heapify(heap)
+
+        # Extract items in sorted order (kind rank, then step, then created_at).
+        result = [heapq.heappop(heap)[2] for _ in range(len(heap))]
         result.reverse()
         return result
+
+    def has_kind(self, kind: str) -> bool:
+        """Return True if the queue still holds an item of ``kind``."""
+        with self._lock:
+            if not self._queue_file.exists():
+                return False
+            try:
+                with self._queue_file.open("r") as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        item = self._parse_queue_item(stripped)
+                        if item is not None and item.kind == kind:
+                            return True
+            except OSError:
+                return False
+        return False
+
+    def drop_kind(self, kind: str) -> int:
+        """Remove every queued item of ``kind``.
+
+        Resume drops a finish left by the previous session. That session
+        already ended, and this one enqueues its own finish when it ends.
+        """
+        with self._lock:
+            if not self._queue_file.exists():
+                return 0
+            try:
+                with self._queue_file.open("r") as f:
+                    lines = f.readlines()
+
+                remaining_lines: list[str] = []
+                removed = 0
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    item = self._parse_queue_item(line.strip())
+                    if item is not None and item.kind == kind:
+                        removed += 1
+                        continue
+                    remaining_lines.append(line if line.endswith("\n") else line + "\n")
+
+                if removed:
+                    atomic_write_text(self._queue_file, lambda f: f.writelines(remaining_lines), suffix=".jsonl")
+                    self._item_count = len(remaining_lines)
+                return removed
+            except OSError as e:
+                logger.warning(f"Failed to drop queued {kind} items: {e}")
+                return 0
 
     def dequeue(self, item_ids: list[str]) -> int:
         """Remove items from the queue by ID.
@@ -390,6 +499,42 @@ class OfflineQueueStorage:
         """Return the queue directory path."""
         return self._queue_dir
 
+    def reject_shipping(self, *, count_as_unsent: bool = True) -> int:
+        """Drop queued items and refuse later enqueues.
+
+        A create conflict (HTTP 409) is permanent: the items are not retried.
+        Returns how many items count as unsent. An empty queue still counts
+        as one, because the refused create never entered it.
+        ``count_as_unsent=False`` is the same-store response: nothing failed,
+        and nothing more is sent.
+        """
+        with self._lock:
+            if self._shipping_blocked:
+                return self._rejected_unsent
+            self._shipping_blocked = True
+            # A 409 on create can happen before that create is queued. Count it
+            # as one unsent item so flush() does not look like a clean send.
+            self._rejected_unsent = max(self._item_count, 1) if count_as_unsent else 0
+            self._item_count = 0
+            try:
+                if self._queue_file.exists():
+                    self._queue_file.unlink()
+            except OSError as e:
+                logger.warning(f"Failed to drop queue file {self._queue_file}: {e}")
+            return self._rejected_unsent
+
+    @property
+    def shipping_blocked(self) -> bool:
+        """True after a create conflict. Further items are not sent."""
+        with self._lock:
+            return self._shipping_blocked
+
+    @property
+    def rejected_unsent(self) -> int:
+        """Items dropped because create was rejected."""
+        with self._lock:
+            return self._rejected_unsent
+
     def is_empty(self) -> bool:
         """Check if the queue is empty."""
         with self._lock:
@@ -430,7 +575,7 @@ class MetricsRetryWorker:
         client: TrackerClient,
         project: str,
         run_name: str,
-        send_callback: Callable[[int, dict[str, Any], str | None], bool] | None = None,
+        send_callback: Callable[[int, dict[str, Any], int | str | None], bool] | None = None,
     ) -> None:
         """Initialize the retry worker.
 
@@ -450,6 +595,7 @@ class MetricsRetryWorker:
         self._send_callback = send_callback
 
         self._stop_event = threading.Event()
+        self._send_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._poll_interval = 5.0  # seconds
 
@@ -527,60 +673,133 @@ class MetricsRetryWorker:
 
     def _process_queue(self) -> None:
         """Process ready items from the queue."""
-        if self.storage.is_empty():
+        if self.storage.shipping_blocked or self.storage.is_empty():
             return
 
         if not self._check_tracker_health():
             return
 
-        items = self.storage.get_ready_items(limit=50)
-        if not items:
+        # finish() waits on this lock, so a stop request ends the batch after
+        # the current item instead of sending the same queue in parallel.
+        if not self._send_lock.acquire(blocking=False):
             return
+        try:
+            while not self._stop_event.is_set():
+                if self.storage.shipping_blocked or self.storage.is_empty():
+                    return
+                items = self.storage.get_ready_items(limit=50)
+                if self.storage.has_kind("create"):
+                    items = [item for item in items if item.kind == "create"]
+                if not items:
+                    return
+                if not self._send_one(items[0]):
+                    return
+        finally:
+            self._send_lock.release()
 
-        sent_ids: list[str] = []
-        for item in items:
-            success = self._send_item(item)
-            if success:
-                sent_ids.append(item.id)
-                logger.info(f"Queued metrics sent successfully (step={item.step})")
-            else:
-                # Update retry info with backoff
-                new_retry_count = item.retry_count + 1
-                delay_ms = int(_calculate_backoff_delay(new_retry_count) * 1000)
-                next_retry = int(time.time() * 1000) + delay_ms
-                self.storage.update_retry_info(item.id, new_retry_count, next_retry)
-                logger.debug(f"Retry failed for queued metrics (step={item.step}, retry={new_retry_count}, next_retry_in={delay_ms / 1000:.1f}s)")
-                self._mark_unavailable()
-                break  # Stop processing on first failure
+    def _send_one(self, item: MetricsQueueItem) -> bool:
+        """Send one item and remove it from the queue when the send succeeds.
 
-        if sent_ids:
-            self.storage.dequeue(sent_ids)
+        Returns False when the caller should stop this batch.
+        """
+        result = self._send_item(item)
+        if result == "conflict":
+            self.storage.reject_shipping()
+            return False
+        if result == "same_store":
+            self.storage.reject_shipping(count_as_unsent=False)
+            return False
+        if result == "ok":
+            self.storage.dequeue([item.id])
+            logger.info(f"Queued metrics sent successfully (step={item.step})")
+            return True
+        new_retry_count = item.retry_count + 1
+        delay_ms = int(_calculate_backoff_delay(new_retry_count) * 1000)
+        next_retry = int(time.time() * 1000) + delay_ms
+        self.storage.update_retry_info(item.id, new_retry_count, next_retry)
+        logger.debug(f"Retry failed for queued metrics (step={item.step}, retry={new_retry_count}, next_retry_in={delay_ms / 1000:.1f}s)")
+        self._mark_unavailable()
+        return False
 
-    def _send_item(self, item: MetricsQueueItem) -> bool:
+    def _send_item(self, item: MetricsQueueItem) -> str:
         """Attempt to send a single item.
 
         Args:
             item: Queue item to send
 
         Returns:
-            True if sent successfully
+            ``ok`` when the item was sent, ``retry`` when it should be tried
+            again, ``conflict`` when create was rejected with HTTP 409,
+            ``same_store`` when the Tracker is already this directory.
         """
         try:
-            if self._send_callback is not None:
-                return self._send_callback(item.step, item.metrics, item.timestamp)
-            else:
-                self.client.save_metrics(
-                    project=self.project,
-                    run_name=self.run_name,
-                    step=item.step,
-                    metrics=item.metrics,
-                    timestamp=item.timestamp,
-                )
-                self._mark_available()
-                return True
+            if self._send_callback is not None and item.kind in {"metrics", ""}:
+                return "ok" if self._send_callback(item.step, item.metrics, item.timestamp) else "retry"
+            result = self._dispatch_item(item)
+            if (item.kind or "metrics") == "create" and isinstance(result, dict) and result.get("same_store"):
+                logger.info(f"Tracker create for {self.project}/{self.run_name} is the local directory. Not shipping a second copy.")
+                return "same_store"
+            self._mark_available()
+            return "ok"
         except Exception as e:
-            logger.debug(f"Failed to send queued metrics: {e}")
-            return False
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            kind = item.kind or "metrics"
+            if status == 409 and kind == "create":
+                print(f"aspara: Tracker already has '{self.run_name}' with a different id; not sending a copy")
+                logger.warning(f"Tracker create returned 409 for {self.project}/{self.run_name}. Not retrying and not shipping further items.")
+                return "conflict"
+            if status == 409:
+                self._mark_available()
+                return "ok"
+            logger.debug(f"Failed to send queued item kind={item.kind}: {e}")
+            return "retry"
+
+    def _dispatch_item(self, item: MetricsQueueItem) -> Any:
+        """Send one queued item through TrackerClient."""
+        payload = item.payload or {}
+        kind = item.kind or "metrics"
+        if kind == "create":
+            return self.client.create_run(
+                name=payload.get("name") or self.run_name,
+                project=payload.get("project") or self.project,
+                config=payload.get("config"),
+                tags=payload.get("tags"),
+                notes=payload.get("notes"),
+                project_tags=payload.get("project_tags"),
+                resume=bool(payload.get("resume")),
+                source=payload.get("source"),
+                run_id=payload.get("run_id"),
+                client_data_dir=payload.get("client_data_dir"),
+            )
+        if kind == "finish":
+            self.client.finish_run(self.project, self.run_name, int(payload.get("exit_code", 0)))
+            return
+        if kind == "config":
+            self.client.log_config(self.project, self.run_name, payload.get("config") or {})
+            return
+        if kind == "tags":
+            self.client.update_tags(self.project, self.run_name, list(payload.get("tags") or []))
+            return
+        if kind == "summary":
+            self.client.log_summary(self.project, self.run_name, payload.get("summary") or {})
+            return
+        if kind == "artifact":
+            self.client.log_artifact(
+                project=self.project,
+                run_name=self.run_name,
+                file_path=str(payload.get("file_path") or ""),
+                name=payload.get("name"),
+                description=payload.get("description"),
+                category=payload.get("category"),
+            )
+            return
+        self.client.save_metrics(
+            project=self.project,
+            run_name=self.run_name,
+            step=item.step,
+            metrics=item.metrics,
+            timestamp=item.timestamp,
+        )
 
     def flush_sync(self, timeout: float = 30.0) -> int:
         """Synchronously flush all items in the queue.
@@ -599,24 +818,39 @@ class MetricsRetryWorker:
 
         logger.info("Flushing offline queue...")
 
+        if self.storage.shipping_blocked:
+            return self.storage.rejected_unsent
+
+        with self._send_lock:
+            failed_count = self._flush_holding_lock(start_time, timeout)
+        return failed_count
+
+    def _flush_holding_lock(self, start_time: float, timeout: float) -> int:
+        """Send queued items. Caller holds ``_send_lock``."""
         while time.time() - start_time < timeout:
             if self.storage.is_empty():
                 break
 
             items = self.storage.get_ready_items(limit=100)
+            if self.storage.has_kind("create"):
+                items = [item for item in items if item.kind == "create"]
             if not items:
                 # All items have future retry times, wait a bit
                 time.sleep(0.5)
                 continue
 
-            sent_ids: list[str] = []
             for item in items:
                 if time.time() - start_time >= timeout:
                     break
 
-                success = self._send_item(item)
-                if success:
-                    sent_ids.append(item.id)
+                result = self._send_item(item)
+                if result == "conflict":
+                    return self.storage.reject_shipping()
+                if result == "same_store":
+                    self.storage.reject_shipping(count_as_unsent=False)
+                    return 0
+                if result == "ok":
+                    self.storage.dequeue([item.id])
                 else:
                     # On failure, update retry info but continue trying
                     new_retry_count = item.retry_count + 1
@@ -627,9 +861,6 @@ class MetricsRetryWorker:
                     # If health check fails, stop trying
                     if not self._check_tracker_health(force=True):
                         break
-
-            if sent_ids:
-                self.storage.dequeue(sent_ids)
 
         # Count remaining items as failed
         failed_count = self.storage.count()

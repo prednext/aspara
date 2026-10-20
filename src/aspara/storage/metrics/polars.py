@@ -430,6 +430,8 @@ class PolarsMetricsStorage(MetricsStorage):
         if needs_archive:
             self._try_archive()
 
+        # Append every row. Do not read the file here to drop a duplicate.
+        # That read made each log() about twice as slow. Identical rows are kept.
         try:
             self._write_to_wal(wal_path, metrics_data)
         except OSError as e:  # pragma: no cover - error path

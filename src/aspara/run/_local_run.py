@@ -33,6 +33,7 @@ class LocalRun(BaseRun):
         storage_backend: str | None = None,
         project_tags: list[str] | None = None,
         resume: bool = False,
+        tracker_uri: str | None = None,
     ) -> None:
         """Initialize a new local run.
 
@@ -48,8 +49,12 @@ class LocalRun(BaseRun):
             resume: If True and a run with the same name already exists, resume
                 it (reuse run_id, reset finish state, continue step numbering).
                 If no existing run is found, a new run is created.
+            tracker_uri: With a Tracker, set this URI. The copy is sent after
+                the local write. A tracker failure does not fail log().
         """
         super().__init__(name=name, project=project, tags=tags, notes=notes)
+        self._shipper = None
+        self._source: dict[str, Any] = {"code": {}}
 
         # Determine data directory
         data_dir = dir or str(get_data_dir())
@@ -136,6 +141,15 @@ class LocalRun(BaseRun):
 
         self._ensure_output_dir()
         self._write_init_record()
+        self._record_experiment_unit(resume=is_resuming)
+        if tracker_uri:
+            print(f"aspara: With a Tracker: {tracker_uri}")
+            self._start_shipper(
+                tracker_uri,
+                config=config,
+                project_tags=project_tags,
+                resume=is_resuming,
+            )
 
     def _recover_last_step(self, data_dir: str) -> int:
         """Recover the next step number from existing metrics.
@@ -175,15 +189,66 @@ class LocalRun(BaseRun):
         if self.config._data:
             self._metadata_storage.update_config(self.config.to_dict())
 
+    def _record_experiment_unit(self, *, resume: bool = False) -> None:
+        from aspara.run._source import capture_code_state
+
+        existing = self._metadata_storage.get_metadata() if resume else {}
+        existing_source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
+        existing_code = existing_source.get("code") if isinstance(existing_source, dict) else {}
+        if not isinstance(existing_code, dict):
+            existing_code = {}
+        if resume and existing_code:
+            code = existing_code
+        else:
+            source_dir = Path(self._data_dir) / self.project / self.name / "source"
+            try:
+                code = capture_code_state(dest_dir=source_dir, base_dir=Path(self._data_dir))
+            except Exception as exc:
+                code = {"kind": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
+        source = {"code": code}
+        self._source = source
+        self._metadata_storage.set_source(source)
+
+    def _start_shipper(
+        self,
+        tracker_uri: str,
+        *,
+        config: dict[str, Any] | None,
+        project_tags: list[str] | None,
+        resume: bool,
+    ) -> None:
+        from aspara.run._shipper import TrackerShipper
+
+        self._shipper = TrackerShipper(
+            tracker_uri,
+            project=self.project,
+            run_name=self.name,
+            run_id=self.id,
+            name=self.name,
+            config=config,
+            tags=self.tags,
+            notes=self.notes,
+            project_tags=project_tags,
+            resume=resume,
+            source=getattr(self, "_source", {"code": {}}),
+            data_dir=self._data_dir,
+        )
+
     def _on_config_change(self) -> None:
         """Callback when config changes."""
         if not self._finished:
-            self._metadata_storage.update_config(self.config.to_dict())
+            data = self.config.to_dict()
+            self._metadata_storage.update_config(data)
+            if self._shipper is not None:
+                self._shipper.offer_config(data)
 
     def _on_summary_change(self) -> None:
         """Callback when summary changes."""
         if not self._finished:
-            self._metadata_storage.update_summary(self.summary.to_dict())
+            data = self.summary.to_dict()
+            self._metadata_storage.update_summary(data)
+            if self._shipper is not None:
+                self._shipper.offer_summary(data)
 
     def log(
         self,
@@ -229,6 +294,12 @@ class LocalRun(BaseRun):
             }
             if self._metrics_storage is not None:
                 self._metrics_storage.save(metrics_data)
+            if self._shipper is not None:
+                self._shipper.offer_metrics(
+                    step=self._current_step,
+                    metrics=metrics,
+                    timestamp=timestamp_ms,
+                )
 
         self._after_log(commit)
 
@@ -297,6 +368,13 @@ class LocalRun(BaseRun):
             artifact_data["category"] = category
 
         self._metadata_storage.add_artifact(artifact_data)
+        if self._shipper is not None:
+            self._shipper.offer_artifact(
+                dest_path,
+                name=artifact_name,
+                description=description,
+                category=category,
+            )
 
     def finish(self, exit_code: int = 0, quiet: bool = False, flush_timeout: float = 30.0) -> None:
         """Finish the run and write final record.
@@ -304,9 +382,7 @@ class LocalRun(BaseRun):
         Args:
             exit_code: Exit code for the run (0 = success)
             quiet: If True, suppress output messages
-            flush_timeout: Unused — LocalRun writes synchronously so there is
-                no queue to flush. Accepted for signature compatibility with
-                RemoteRun.finish().
+            flush_timeout: Time to wait for queued tracker shipping.
         """
         if not self._mark_finished():
             return
@@ -323,6 +399,8 @@ class LocalRun(BaseRun):
             self._metrics_storage.close()
         if self._metadata_storage is not None:
             self._metadata_storage.close()
+        if self._shipper is not None:
+            self._shipper.finish(exit_code=exit_code, flush_timeout=flush_timeout)
 
         if not quiet:
             print(f"aspara: Run '{self.name}' finished with exit code {exit_code}")
@@ -331,19 +409,17 @@ class LocalRun(BaseRun):
     def flush(self, timeout: float = 30.0) -> int:
         """Ensure all metrics are written to disk.
 
-        LocalRun writes directly to disk on every ``log()`` call, so there
-        is never any buffered data to flush. This method always returns 0
-        (no failures) for API compatibility with ``RemoteRun.flush()``.
+        Local files are already written on ``log()``. Waits for queued
+        tracker shipping when ``tracker_uri`` is set.
 
         Args:
-            timeout: Ignored. Accepted for API compatibility with
-                ``RemoteRun.flush()``.
+            timeout: Maximum time to wait for shipping.
 
         Returns:
-            Number of metrics that failed to persist (always 0 for local runs).
+            Number of metrics that failed to ship (0 when there is no shipper).
         """
-        # Currently a no-op as we're writing directly to file
-        # This method exists for API compatibility and future buffering support
+        if self._shipper is not None:
+            return self._shipper.flush(timeout)
         return 0
 
     def _ensure_output_dir(self) -> None:
@@ -369,3 +445,5 @@ class LocalRun(BaseRun):
 
         self.tags = tags
         self._metadata_storage.set_tags(tags)
+        if self._shipper is not None:
+            self._shipper.offer_tags(tags)

@@ -70,7 +70,7 @@ nav:
     - Troubleshooting: user-guide/troubleshooting.md
   - Advanced:
     - Configuration: advanced/configuration.md
-    - LocalRun vs RemoteRun: advanced/local-vs-remote.md
+    - Local files and a Tracker copy: advanced/local-files-and-tracker-copy.md
     - Storage: advanced/storage.md
     - Dashboard: advanced/dashboard.md
     - Tracker API: advanced/tracker-api.md

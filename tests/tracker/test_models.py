@@ -44,6 +44,15 @@ def test_metrics_data_model():
     assert json_data["metrics"]["loss"] == 0.5
 
 
+def test_metrics_data_keeps_client_unix_ms():
+    """A client-supplied millisecond timestamp is stored as that integer."""
+    raw_ms = 1718447400123
+    data = MetricRecord(metrics={"loss": 0.5}, step=1, timestamp=raw_ms)
+
+    assert isinstance(data.timestamp, datetime)
+    assert data.timestamp_ms() == raw_ms
+
+
 def test_metrics_data_validation():
     """Test that MetricRecord model validation works correctly"""
 
@@ -113,6 +122,8 @@ class TestRunCreateRequest:
         assert req.tags == []
         assert req.notes == ""
         assert req.project_tags is None
+        assert req.run_id is None
+        assert req.client_data_dir is None
 
     def test_full_request(self):
         """Test that all fields can be explicitly specified"""
@@ -160,6 +171,7 @@ class TestRunCreateResponse:
         assert resp.project == "my_project"
         assert resp.name == "run-1"
         assert resp.run_id == "abc123"
+        assert resp.same_store is False
 
     def test_missing_project_raises(self):
         """Test that omitting project raises a validation error"""

@@ -46,6 +46,9 @@ class RunCreateRequest(BaseModel):
     notes: str = ""
     project_tags: list[str] | None = None
     resume: bool = False
+    source: dict[str, Any] | None = None
+    run_id: str | None = None
+    client_data_dir: str | None = None
 
 
 class RunCreateResponse(BaseModel):
@@ -55,6 +58,7 @@ class RunCreateResponse(BaseModel):
     project: str
     name: str
     run_id: str
+    same_store: bool = False
 
 
 class ArtifactUploadResponse(BaseModel):
